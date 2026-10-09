@@ -37,6 +37,7 @@ import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.content.DialogInterface;
 import android.content.Intent;
+import io.github.abdurazaaqmohammed.ui.EditorMinimizer;
 import android.content.SharedPreferences;
 import android.content.res.ColorStateList;
 import android.content.res.Configuration;
@@ -88,6 +89,7 @@ import androidx.viewpager2.widget.ViewPager2;
 
 import com.android.tools.smali.smali2.Smali;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
+import com.google.android.material.color.MaterialColors;
 import com.google.android.material.floatingactionbutton.FloatingActionButton;
 import com.google.android.material.tabs.TabLayout;
 import com.google.android.material.tabs.TabLayoutMediator;
@@ -110,6 +112,7 @@ import io.github.rosemoe.sora.text.Cursor;
 import io.github.rosemoe.sora.widget.CodeEditor;
 import io.github.rosemoe.sora.widget.component.EditorTextActionWindow;
 import io.github.abdurazaaqmohammed.MPManager.R;
+import io.github.abdurazaaqmohammed.core.ui.base.BaseActivity;
 import modder.hub.dexeditor.adapter.HeaderAdapter;
 import modder.hub.dexeditor.adapter.StringAdapter;
 import modder.hub.dexeditor.adapter.TreeAdapter;
@@ -143,7 +146,7 @@ import com.android.tools.smali.dexlib2.iface.ClassDef;
  * Re-sequenced and refactored for better clarity and utility.
  * Author: @developer-krushna
  */
-public class DexEditorActivity extends AppCompatActivity {
+public class DexEditorActivity extends BaseActivity {
 
     // --- Constants and Static State ---
     private static final long DOUBLE_PRESS_INTERVAL = 2000;
@@ -208,6 +211,12 @@ public class DexEditorActivity extends AppCompatActivity {
     }
 
     @Override
+    protected void onResume() {
+        super.onResume();
+        EditorMinimizer.onEditorResumed(this);
+    }
+
+    @Override
     protected void onDestroy() {
         super.onDestroy();
         UnifiedEditorFragment.clearCache();
@@ -268,6 +277,10 @@ public class DexEditorActivity extends AppCompatActivity {
 
     private void initialize(Bundle ignoredSavedInstanceState) {
         drawerLayout = findViewById(R.id.drawer_layout);
+        findViewById(R.id.action_minimize).setOnClickListener(v -> {
+            drawerLayout.closeDrawer(GravityCompat.START);
+            EditorMinimizer.minimize(this);
+        });
         classListContainer = findViewById(R.id.class_list_container);
         viewPager = findViewById(R.id.view_pager);
         tabsRecyclerView = findViewById(R.id.tabs_recycler_view);
@@ -277,7 +290,7 @@ public class DexEditorActivity extends AppCompatActivity {
         drawerToolbar = findViewById(R.id.drawer_toolbar);
         drawerToolbar.setOverflowIcon(ContextCompat.getDrawable(this, R.drawable.ic_more_mt));
         if (drawerToolbar.getOverflowIcon() != null) {
-            DrawableCompat.setTint(drawerToolbar.getOverflowIcon(), Color.WHITE);
+            DrawableCompat.setTint(drawerToolbar.getOverflowIcon(), MaterialColors.getColor(drawerToolbar, com.google.android.material.R.attr.colorOnSurface));
         }
         setupDrawerToolbar();
 
@@ -540,12 +553,14 @@ public class DexEditorActivity extends AppCompatActivity {
             getSupportActionBar().setTitle(R.string.dex_editor_plus);
             setToolbarSubtitle(null);
         }
-        int btnVis = editorVisible ? View.VISIBLE : View.GONE;
-        findViewById(R.id.btn_undo).setVisibility(btnVis);
-        findViewById(R.id.btn_redo).setVisibility(btnVis);
-        findViewById(R.id.btn_save).setVisibility(btnVis);
-        findViewById(R.id.btn_edit).setVisibility(btnVis);
-        findViewById(R.id.btn_file).setVisibility(btnVis);
+        boolean smaliVisible = editorVisible && tabs.get(currentTabIndex).type == 0;
+        int editVisibility = smaliVisible ? View.VISIBLE : View.GONE;
+        findViewById(R.id.btn_undo).setVisibility(editVisibility);
+        findViewById(R.id.btn_redo).setVisibility(editVisibility);
+        findViewById(R.id.btn_save).setVisibility(editVisibility);
+        findViewById(R.id.btn_edit).setVisibility(editVisibility);
+        findViewById(R.id.btn_file).setVisibility(editorVisible && tabs.get(currentTabIndex).type != 2
+                ? View.VISIBLE : View.GONE);
 
         drawerToggle.setDrawerIndicatorEnabled(true);
         getSupportActionBar().setDisplayHomeAsUpEnabled(true);
@@ -615,7 +630,14 @@ public class DexEditorActivity extends AppCompatActivity {
                 wrapItem.setChecked(getSharedPreferences("editor_prefs", MODE_PRIVATE).getBoolean("wrap_text", false));
             }
             handleUndoRedo();
+            if (!isGraph) {
+                // The shared toolbar already supplies these actions. Keeping the
+                // legacy action menu visible adds a second row of icons.
+                for (int i = 0; i < menu.size(); i++) menu.getItem(i).setVisible(false);
+            }
         }
+        UIHelper.tintMenuIcons(menu, MaterialColors.getColor(findViewById(R.id._toolbar),
+                com.google.android.material.R.attr.colorOnSurface));
         return super.onPrepareOptionsMenu(menu);
     }
 
@@ -628,7 +650,10 @@ public class DexEditorActivity extends AppCompatActivity {
 
         int id = item.getItemId();
 
-        if (id == R.id.action_compile) {
+        if (id == R.id.action_minimize) {
+            EditorMinimizer.minimize(this);
+            return true;
+        } else if (id == R.id.action_compile) {
             new SaveAndExitClickListener().onClick(null, 0);
             return true;
         } else if (id == R.id.action_preferences) {
@@ -671,14 +696,7 @@ public class DexEditorActivity extends AppCompatActivity {
                 saveCurrentTab();
                 return true;
             } else if (id == R.id.search) {
-                // testing , i willl add a search bar like my modder hub app have.
-                // but I have plan to replace the sora editor with my custom MH-Texteditor
-                try {
-                    Method method = editor.getSearcher().getClass().getMethod("showSearchPanel");
-                    method.invoke(editor.getSearcher());
-                } catch (Exception ignored) {
-                    // ignored
-                }
+                editorFragment.showSearchPanel();
                 return true;
             } else if (id == R.id.navigation) {
                 editorFragment.showMethodFieldList();
@@ -775,6 +793,10 @@ public class DexEditorActivity extends AppCompatActivity {
     }
 
     // when closing the editor fragment tab if the class is edited then there will be a prompt for
+    public void closeCurrentTab() {
+        closeTabWithPrompt(currentTabIndex);
+    }
+
     private void closeTabWithPrompt(int index) {
         if (index < 0 || index >= tabs.size()) return;
         final EditorTab tab = tabs.get(index);
@@ -824,18 +846,21 @@ public class DexEditorActivity extends AppCompatActivity {
         }
 
         AlertCircularProgress pd = new AlertCircularProgress(this);
-        pd.setMessage(getString(R.string.decompiling));
+        pd.setTitle(getString(R.string.smali_to_java));
+        pd.setMessage(title + "\n" + getString(R.string.hexora_conversion_message));
         pd.show();
         new Thread(() -> {
             try {
                 final String java = Smali2Java.translate(code, dexVersion);
                 runOnUiThread(() -> {
                     pd.dismiss();
+                    if (isFinishing() || isDestroyed()) return;
                     addTab(className, title, java, 1); // adding the java item in the recent opened classes list
                 });
             } catch (final Exception e) {
                 runOnUiThread(() -> {
                     pd.dismiss();
+                    if (isFinishing() || isDestroyed()) return;
                     Notify_MT.Notify(DexEditorActivity.this, getString(R.string.error), e.toString(), getString(R.string.close));
                 });
             }
@@ -912,14 +937,14 @@ public class DexEditorActivity extends AppCompatActivity {
             if (undo != null) {
                 undo.setEnabled(fragment.getEditor().canUndo());
                 if (undo.getIcon() != null) {
-                    DrawableCompat.setTint(undo.getIcon(), Color.WHITE);
+                    DrawableCompat.setTint(undo.getIcon(), MaterialColors.getColor(findViewById(R.id._toolbar), com.google.android.material.R.attr.colorOnSurface));
                     undo.getIcon().setAlpha(undo.isEnabled() ? 255 : 100);
                 }
             }
             if (redo != null) {
                 redo.setEnabled(fragment.getEditor().canRedo());
                 if (redo.getIcon() != null) {
-                    DrawableCompat.setTint(redo.getIcon(), Color.WHITE);
+                    DrawableCompat.setTint(redo.getIcon(), MaterialColors.getColor(findViewById(R.id._toolbar), com.google.android.material.R.attr.colorOnSurface));
                     redo.getIcon().setAlpha(redo.isEnabled() ? 255 : 100);
                 }
             }
@@ -1720,6 +1745,8 @@ public class DexEditorActivity extends AppCompatActivity {
 
     private void updateDrawerMenuState() {
         Menu menu = drawerToolbar.getMenu();
+        int foreground = MaterialColors.getColor(drawerToolbar, com.google.android.material.R.attr.colorOnSurface);
+        int muted = androidx.core.graphics.ColorUtils.setAlphaComponent(foreground, 97);
         int index = currentTabIndex;
         int count = tabs.size();
 
@@ -1729,16 +1756,16 @@ public class DexEditorActivity extends AppCompatActivity {
 
         MenuItem closeAbove = menu.findItem(3);
         closeAbove.setEnabled(index > 0);
-        UIHelper.setMenuItemColor(closeAbove, closeAbove.isEnabled() ? Color.BLACK : Color.GRAY);
+        UIHelper.setMenuItemColor(closeAbove, closeAbove.isEnabled() ? foreground : muted);
 
         MenuItem closeBelow = menu.findItem(4);
         closeBelow.setEnabled(index != -1 && index < count - 1);
-        UIHelper.setMenuItemColor(closeBelow, closeBelow.isEnabled() ? Color.BLACK : Color.GRAY);
+        UIHelper.setMenuItemColor(closeBelow, closeBelow.isEnabled() ? foreground : muted);
 
         // Also update other items color if needed
-        UIHelper.setMenuItemColor(menu.findItem(0), menu.findItem(0).isEnabled() ? Color.BLACK : Color.GRAY);
-        UIHelper.setMenuItemColor(menu.findItem(1), menu.findItem(1).isEnabled() ? Color.BLACK : Color.GRAY);
-        UIHelper.setMenuItemColor(menu.findItem(2), menu.findItem(2).isEnabled() ? Color.BLACK : Color.GRAY);
+        UIHelper.setMenuItemColor(menu.findItem(0), menu.findItem(0).isEnabled() ? foreground : muted);
+        UIHelper.setMenuItemColor(menu.findItem(1), menu.findItem(1).isEnabled() ? foreground : muted);
+        UIHelper.setMenuItemColor(menu.findItem(2), menu.findItem(2).isEnabled() ? foreground : muted);
     }
 
     public static class EditorTab {
@@ -2678,7 +2705,8 @@ public class DexEditorActivity extends AppCompatActivity {
         @Override
         public void onBindViewHolder(@NonNull ViewHolder holder, @SuppressLint("RecyclerView") int position) {
             boolean isSelected;
-            int skyColor = Color.parseColor("#00B0FF");
+            int skyColor = MaterialColors.getColor(holder.mainView, com.google.android.material.R.attr.colorPrimary);
+            int foreground = MaterialColors.getColor(holder.mainView, com.google.android.material.R.attr.colorOnSurface);
             float swipeWidth = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 120, getResources().getDisplayMetrics());
 
             // Reset sticky state
@@ -2690,12 +2718,12 @@ public class DexEditorActivity extends AppCompatActivity {
                 holder.title.setText(R.string.dex_editor_plus);
                 boolean dark = (getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
                 int theme = getIntent().getIntExtra("theme", dark ? R.style.Theme_MyApp_Dark : R.style.Theme_MyApp_Light);
-                holder.title.setTextColor(isSelected ? skyColor : theme == R.style.Theme_MyApp_Light ? Color.BLACK : Color.WHITE);
+                holder.title.setTextColor(isSelected ? skyColor : foreground);
                 holder.path.setVisibility(View.GONE);
                 holder.icon.setImageResource(R.drawable.ic_home);
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                    holder.icon.setImageTintList(ColorStateList.valueOf(isSelected ? skyColor : Color.BLACK));
-                } else holder.icon.setColorFilter(new LightingColorFilter(Color.BLACK, isSelected ? skyColor : Color.BLACK));
+                    holder.icon.setImageTintList(ColorStateList.valueOf(isSelected ? skyColor : foreground));
+                } else holder.icon.setColorFilter(new LightingColorFilter(Color.BLACK, isSelected ? skyColor : foreground));
                 holder.mainView.setOnClickListener(v -> {
                     drawerLayout.closeDrawer(GravityCompat.START);
                     v.postDelayed(this::hideEditor, 250);
@@ -2709,7 +2737,7 @@ public class DexEditorActivity extends AppCompatActivity {
                 holder.title.setText((tab.isModified ? "*" : "") + tab.title); // highlight the spcific edited classes with star
                 boolean dark = (getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
                 int theme = getIntent().getIntExtra("theme", dark ? R.style.Theme_MyApp_Dark : R.style.Theme_MyApp_Light);
-                holder.title.setTextColor(isSelected ? skyColor : theme == R.style.Theme_MyApp_Light ? Color.BLACK : Color.WHITE);
+                holder.title.setTextColor(isSelected ? skyColor : foreground);
 
                 holder.path.setVisibility(View.VISIBLE);
                 holder.path.setText(tab.className);
@@ -2721,8 +2749,8 @@ public class DexEditorActivity extends AppCompatActivity {
                     holder.icon.setImageResource(R.drawable.ic_edit_mt);
                 }
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                    holder.icon.setImageTintList(ColorStateList.valueOf(isSelected ? skyColor : Color.BLACK));
-                } else holder.icon.setColorFilter(new LightingColorFilter(Color.BLACK, isSelected ? skyColor : Color.BLACK));
+                    holder.icon.setImageTintList(ColorStateList.valueOf(isSelected ? skyColor : foreground));
+                } else holder.icon.setColorFilter(new LightingColorFilter(Color.BLACK, isSelected ? skyColor : foreground));
 
                 holder.mainView.setOnClickListener(v -> {
                     int currentPos = holder.getBindingAdapterPosition();

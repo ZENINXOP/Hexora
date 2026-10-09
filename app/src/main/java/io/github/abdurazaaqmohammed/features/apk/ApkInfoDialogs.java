@@ -86,6 +86,10 @@ import io.github.abdurazaaqmohammed.ui.UiFields;
 import io.github.abdurazaaqmohammed.ui.dialogs.FilePickerDialog;
 import io.github.abdurazaaqmohammed.utils.AccessManager;
 import io.github.abdurazaaqmohammed.utils.ApkInfoUtil;
+import io.github.abdurazaaqmohammed.utils.ApkMetadata;
+import android.util.LruCache;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import io.github.abdurazaaqmohammed.utils.ApkOptimizer;
 import io.github.abdurazaaqmohammed.utils.CertUtil;
 import io.github.abdurazaaqmohammed.utils.CopyUtil;
@@ -104,6 +108,20 @@ import mt.modder.hub.apkCloner.util.ApkCloner;
  * APK info + decompile option dialogs extracted from ApkToolsHandler.
  */
 public class ApkInfoDialogs {
+    private static final ExecutorService INFO_WORKERS = Executors.newFixedThreadPool(2);
+    private static final ExecutorService INSPECTION_WORKER = Executors.newSingleThreadExecutor();
+    private static final LruCache<String, ApkInspection> INSPECTIONS = new LruCache<>(16);
+
+    private static class ApkInspection {
+        final String signatures, certificate, protection;
+        final int entries;
+        ApkInspection(String signatures, String certificate, String protection, int entries) {
+            this.signatures = signatures;
+            this.certificate = certificate;
+            this.protection = protection;
+            this.entries = entries;
+        }
+    }
 
     private final MainActivity context;
     private final DialogUtil dialogUtil;
@@ -960,15 +978,27 @@ public class ApkInfoDialogs {
             ad.dismiss();
             manifestEditor.showEditManifestDialog(file);
         });
+        final java.util.concurrent.atomic.AtomicBoolean dismissed = new java.util.concurrent.atomic.AtomicBoolean();
+        ad.setOnDismissListener(dialog -> dismissed.set(true));
         ad.show();
 
-        new Thread(() -> {
+        View.OnLongClickListener copyValue = v -> {
+            if (v instanceof TextView) CopyUtil.copyToClipboard(ad, ((TextView) v).getText());
+            return true;
+        };
+        for (TextView value : new TextView[] {signaturesInApk, protectedDisplay, pkgName, apkTitle,
+                apkVersionName, verCode, fileSize, apkTargetSdk, apkMinSdk, apkCert, apkInstalled, apkPermissions}) {
+            value.setOnLongClickListener(copyValue);
+        }
+        fileSize.setText(Formatter.formatFileSize(context, file.length()));
+        apkCert.setText(R.string.loading);
+        INFO_WORKERS.execute(() -> {
+            if (dismissed.get() || context.isDestroyed()) return;
             try {
-                PackageManager pm = context.getPackageManager();
-                PackageInfo packageInfo = pm.getPackageArchiveInfo(filePath, PackageManager.GET_ACTIVITIES);
-                final ApplicationInfo appInfo;
-                if (packageInfo == null || (appInfo = packageInfo.applicationInfo) == null) {
+                ApkMetadata metadata = ApkMetadata.load(context.getApplicationContext(), file);
+                if (metadata == null) {
                     context.handler.post(() -> {
+                        if (!ad.isShowing() || context.isDestroyed()) return;
                         ad.dismiss();
                         Uri uri = FileProvider.getUriForFile(context, io.github.abdurazaaqmohammed.MPManager.BuildConfig.APPLICATION_ID + ".provider", file);
                         context.startActivity(Intent.createChooser(new Intent(Intent.ACTION_VIEW)
@@ -977,99 +1007,96 @@ public class ApkInfoDialogs {
                     });
                     return;
                 }
-                if (TextUtils.isEmpty(appInfo.sourceDir) || TextUtils.isEmpty(appInfo.publicSourceDir)) {
-                    appInfo.sourceDir = filePath;
-                    appInfo.publicSourceDir = filePath;
+                PackageInfo packageInfo = metadata.packageInfo;
+                String installed = ApkInfoUtil.getInstalledVersion(context, packageInfo.packageName);
+                String installedText = installed == null ? context.getString(R.string.not_installed) : installed;
+                if (installed != null && ApkInfoUtil.isDowngrade(context, packageInfo)) {
+                    installedText += " (" + context.getString(R.string.downgrade) + ")";
                 }
-                Drawable icon = appInfo.loadIcon(pm);
-                String label = appInfo.loadLabel(pm).toString();
-                String verName = packageInfo.versionName;
-                int vCode = packageInfo.versionCode;
-                String pkg = packageInfo.packageName;
-
-                StringBuilder sigs = new StringBuilder();
-                final String[] certFp = {""};
-                try {
-                    ApkVerifier.Result result = new ApkVerifier.Builder(file).build().verify();
-                    try {
-                        List<X509Certificate> certs = result.getSignerCertificates();
-                        if (certs != null && !certs.isEmpty()) certFp[0] = CertUtil.getSha256(certs.get(0));
-                    } catch (Exception ignored) {}
-                    boolean verified = result.isVerified();
-                    boolean v1 = result.isVerifiedUsingV1Scheme();
-                    boolean v2 = result.isVerifiedUsingV2Scheme();
-                    boolean v3 = result.isVerifiedUsingV3Scheme();
-                    boolean v31 = result.isVerifiedUsingV31Scheme();
-                    boolean v4 = result.isVerifiedUsingV4Scheme();
-                    if (v1) sigs.append("V1");
-                    if (v2) { if (v1) sigs.append(" + "); sigs.append("V2"); }
-                    if (v3 || v31) { if (v1 || v2) sigs.append(" + "); sigs.append("V3"); }
-                    if (v4) { if (v1 || v2 || v3 || v31) sigs.append(" + "); sigs.append("V4"); }
-                    if (verified && !TextUtils.isEmpty(sigs)) { /* use sigs */ }
-                    else {
-                        sigs.setLength(0);
-                        try (ArchiveFile af = new ArchiveFile(file)) {
-                            sigs.append(af.getEntrySource("META-INF/MANIFEST.MF") == null ? "Not signed" : "Verification failed");
-                        }
-                    }
-                } catch (Exception e) {
-                    sigs.append(context.rss.getString(android.R.string.unknownName));
-                }
-                String signatureStr = sigs.toString();
-
-                String protectedStr;
-                try (ArchiveFile af = new ArchiveFile(file); ApkModule am = new ApkModule(af.createZipEntryMap())) {
-                    String aProtected = Util.isProtected(am);
-                    protectedStr = TextUtils.isEmpty(aProtected) ? "Not found" : aProtected;
-                } catch (Exception e) {
-                    protectedStr = context.rss.getString(android.R.string.unknownName);
-                }
-
-                String finalProtectedStr = protectedStr;
+                final String installedLabel = installedText;
+                // Publish the useful metadata before hashing or scanning the archive.
                 context.handler.post(() -> {
-                    apkIcon.setImageDrawable(icon);
-                    apkTitle.setText(label);
-                    apkVersionName.setText(verName);
-                    verCode.setText(Integer.toString(vCode));
-                    pkgName.setText(pkg);
+                    if (!ad.isShowing() || context.isDestroyed()) return;
+                    if (metadata.icon != null) apkIcon.setImageDrawable(metadata.newIcon(context.getResources()));
+                    apkTitle.setText(metadata.label);
+                    apkVersionName.setText(packageInfo.versionName);
+                    verCode.setText(Long.toString(ApkInfoUtil.getVersionCode(packageInfo)));
+                    pkgName.setText(packageInfo.packageName);
                     uiHelper.scrollTextView(pkgName);
-                    signaturesInApk.setText(signatureStr);
-                    protectedDisplay.setText(finalProtectedStr);
-                    fileSize.setText(context.getString(R.string.fs_entries, Formatter.formatFileSize(context, file.length()), ApkInfoUtil.getEntryCount(file)));
                     apkTargetSdk.setText(String.valueOf(packageInfo.applicationInfo.targetSdkVersion));
                     int min = ApkInfoUtil.getMinSdk(packageInfo);
                     apkMinSdk.setText(min < 0 ? context.getString(R.string.unknown_sdk) : String.valueOf(min));
-                    apkCert.setText(TextUtils.isEmpty(certFp[0]) ? context.getString(R.string.no_signature_found) : certFp[0]);
-                    String installedVer = ApkInfoUtil.getInstalledVersion(context, pkg);
-                    if (installedVer == null) apkInstalled.setText(context.getString(R.string.not_installed));
-                    else {
-                        String installedText = installedVer;
-                        if (ApkInfoUtil.isDowngrade(context, packageInfo)) installedText += " (" + context.getString(R.string.downgrade) + ")";
-                        apkInstalled.setText(installedText);
-                    }
+                    apkInstalled.setText(installedLabel);
+                });
+                // A large signature check must not hold up the next app's metadata.
+                INSPECTION_WORKER.execute(() -> {
+                    if (dismissed.get() || context.isDestroyed()) return;
+                    ApkInspection inspection = inspectApk(file);
+                    context.handler.post(() -> {
+                        if (!ad.isShowing() || context.isDestroyed()) return;
+                        signaturesInApk.setText(inspection.signatures);
+                        protectedDisplay.setText(inspection.protection);
+                        apkCert.setText(TextUtils.isEmpty(inspection.certificate)
+                                ? context.getString(R.string.no_signature_found) : inspection.certificate);
+                        fileSize.setText(context.getString(R.string.fs_entries,
+                                Formatter.formatFileSize(context, file.length()), inspection.entries));
+                    });
                 });
             } catch (Exception e) {
-                new ErrorUtil(context).showError(e);
+                context.handler.post(() -> {
+                    if (ad.isShowing() && !context.isDestroyed()) new ErrorUtil(context).showError(e);
+                });
             }
-            View.OnLongClickListener lcl = v -> {
-                if(v instanceof TextView tv) CopyUtil.copyToClipboard(ad, tv.getText());
-                return false;
-            };
-            context.handler.post(() -> {
-                signaturesInApk.setOnLongClickListener(lcl);
-                protectedDisplay.setOnLongClickListener(lcl);
-                pkgName.setOnLongClickListener(lcl);
-                apkTitle.setOnLongClickListener(lcl);
-                apkVersionName.setOnLongClickListener(lcl);
-                verCode.setOnLongClickListener(lcl);
-                fileSize.setOnLongClickListener(lcl);
-                apkTargetSdk.setOnLongClickListener(lcl);
-                apkMinSdk.setOnLongClickListener(lcl);
-                apkCert.setOnLongClickListener(lcl);
-                apkInstalled.setOnLongClickListener(lcl);
-                apkPermissions.setOnLongClickListener(lcl);
-            });
-        }).start();
+        });
+    }
+
+    /** Signature verification and protection detection never run on the UI thread. */
+    private ApkInspection inspectApk(File file) {
+        String key = ApkMetadata.key(file);
+        ApkInspection cached = INSPECTIONS.get(key);
+        if (cached != null) return cached;
+        StringBuilder sigs = new StringBuilder();
+        final String[] certFp = {""};
+        try {
+            ApkVerifier.Result result = new ApkVerifier.Builder(file).build().verify();
+            try {
+                List<X509Certificate> certs = result.getSignerCertificates();
+                if (certs != null && !certs.isEmpty()) certFp[0] = CertUtil.getSha256(certs.get(0));
+            } catch (Exception ignored) {}
+            boolean verified = result.isVerified();
+            boolean v1 = result.isVerifiedUsingV1Scheme();
+            boolean v2 = result.isVerifiedUsingV2Scheme();
+            boolean v3 = result.isVerifiedUsingV3Scheme();
+            boolean v31 = result.isVerifiedUsingV31Scheme();
+            boolean v4 = result.isVerifiedUsingV4Scheme();
+            if (v1) sigs.append("V1");
+            if (v2) { if (v1) sigs.append(" + "); sigs.append("V2"); }
+            if (v3 || v31) { if (v1 || v2) sigs.append(" + "); sigs.append("V3"); }
+            if (v4) { if (v1 || v2 || v3 || v31) sigs.append(" + "); sigs.append("V4"); }
+            if (verified && !TextUtils.isEmpty(sigs)) { /* use sigs */ }
+            else {
+                sigs.setLength(0);
+                try (ArchiveFile af = new ArchiveFile(file)) {
+                    sigs.append(af.getEntrySource("META-INF/MANIFEST.MF") == null ? "Not signed" : "Verification failed");
+                }
+            }
+        } catch (Exception e) {
+            sigs.append(context.rss.getString(android.R.string.unknownName));
+        }
+        String signatureStr = sigs.toString();
+
+        String protectedStr;
+        try (ArchiveFile af = new ArchiveFile(file); ApkModule am = new ApkModule(af.createZipEntryMap())) {
+            String aProtected = Util.isProtected(am);
+            protectedStr = TextUtils.isEmpty(aProtected) ? "Not found" : aProtected;
+        } catch (Exception e) {
+            protectedStr = context.rss.getString(android.R.string.unknownName);
+        }
+
+        ApkInspection result = new ApkInspection(signatureStr, certFp[0], protectedStr,
+                ApkInfoUtil.getEntryCount(file));
+        INSPECTIONS.put(key, result);
+        return result;
     }
 
     private void openZipFile(File file) {

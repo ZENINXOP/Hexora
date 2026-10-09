@@ -8,6 +8,9 @@ import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.LinearLayout;
+import android.view.LayoutInflater;
+import android.view.View;
+import android.widget.TextView;
 
 import androidx.appcompat.app.AlertDialog;
 
@@ -41,6 +44,9 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicBoolean;
+
+import io.github.abdurazaaqmohammed.utils.ZipArchiveCache;
 
 import io.github.abdurazaaqmohammed.MPManager.MainActivity;
 import io.github.abdurazaaqmohammed.MPManager.R;
@@ -80,6 +86,7 @@ public class DexTools {
     private final DialogUtil dialogUtil;
     private final boolean pane1;
     private final OpenWith openWith;
+    private final AtomicBoolean openingZipEntry = new AtomicBoolean();
 
     public DexTools(MainActivity context,
                     DialogUtil dialogUtil, boolean pane1, OpenWith openWith) {
@@ -167,6 +174,8 @@ public class DexTools {
     private static class DexPreExtract {
         final File zipFile;
         final File outputDir;
+        final long archiveSize;
+        final long archiveModified;
         final List<String> dexNames = new ArrayList<>();
         final CountDownLatch done = new CountDownLatch(1);
         volatile String error;
@@ -176,45 +185,41 @@ public class DexTools {
         DexPreExtract(File zipFile, File outputDir) {
             this.zipFile = zipFile;
             this.outputDir = outputDir;
+            archiveSize = zipFile.length();
+            archiveModified = zipFile.lastModified();
         }
     }
 
     private static synchronized DexPreExtract preExtractAllDex(Context ctx, File zipFile, boolean force) {
         String key = zipFile.getAbsolutePath();
         DexPreExtract existing = dexPreExtracts.get(key);
-        if (!force && existing != null && existing.error == null) return existing;
+        if (!force && existing != null && existing.error == null
+                && existing.archiveSize == zipFile.length()
+                && existing.archiveModified == zipFile.lastModified()) return existing;
         if (existing != null) {
             dexPreExtracts.remove(key);
-            deleteQuietly(existing.outputDir);
+            // A worker may still be writing this directory. Let it finish before cleanup.
+            new Thread(() -> {
+                try {
+                    existing.done.await();
+                    deleteQuietly(existing.outputDir);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }, "hexora-dex-cleanup").start();
         }
         DexPreExtract session = new DexPreExtract(zipFile, new File(ctx.getFilesDir(), "dexwork_" + UUID.randomUUID()));
         //noinspection ResultOfMethodCallIgnored
         session.outputDir.mkdirs();
         dexPreExtracts.put(key, session);
         new Thread(() -> {
-            try (ZipFile zf = new ZipFile(zipFile)) {
-                FileHeader fh = zf.getFileHeader("classes.dex");
-                int i = 2;
-                while (fh != null) {
-                    session.dexNames.add(fh.getFileName());
-                    fh = zf.getFileHeader("classes" + i + ".dex");
-                    i++;
-                }
+            try {
+                ZipArchiveCache.Archive archive = ZipArchiveCache.get(zipFile);
+                session.dexNames.addAll(listAllDexNames(zipFile));
                 session.total = session.dexNames.size();
                 for (int j = 0; j < session.dexNames.size(); j++) {
                     String name = session.dexNames.get(j);
-                    FileHeader header = zf.getFileHeader(name);
-                    if (header == null) throw new IOException("Entry vanished: " + name);
-                    zf.extractFile(header, session.outputDir.getAbsolutePath());
-                    File out = new File(session.outputDir, name);
-                    long expected = -1;
-                    try {
-                        expected = header.getUncompressedSize();
-                    } catch (Exception ignored) {
-                    }
-                    if (!out.isFile() || (expected > 0 && out.length() != expected)) {
-                        throw new IOException("Extract failed: " + out.getAbsolutePath());
-                    }
+                    archive.copyEntry(name, new File(session.outputDir, name));
                     session.extracted = j + 1;
                 }
             } catch (Exception e) {
@@ -241,27 +246,35 @@ public class DexTools {
 
     private static List<String> listAllDexNames(File zipFile) throws IOException {
         List<String> dexNames = new ArrayList<>();
-        try (ZipFile zf = new ZipFile(zipFile)) {
-            FileHeader fh = zf.getFileHeader("classes.dex");
-            int i = 2;
-            while (fh != null) {
-                dexNames.add(fh.getFileName());
-                fh = zf.getFileHeader("classes" + i + ".dex");
-                i++;
-            }
+        ZipArchiveCache.Archive archive = ZipArchiveCache.get(zipFile);
+        String name = "classes.dex";
+        int i = 2;
+        while (archive.contains(name)) {
+            dexNames.add(name);
+            name = "classes" + i++ + ".dex";
         }
         return dexNames;
     }
 
     private void openDexPlusInZip(File zipFile, String preselected) {
         DexPreExtract session = preExtractAllDex(context, zipFile, false);
-        List<String> dexFiles;
-        try {
-            dexFiles = listAllDexNames(zipFile);
-        } catch (Exception e) {
-            new ErrorUtil(context).showError(e);
-            return;
-        }
+        new Thread(() -> {
+            try {
+                List<String> dexFiles = listAllDexNames(zipFile);
+                context.handler.post(() -> {
+                    if (!context.isFinishing() && !context.isDestroyed()) {
+                        showDexSelection(session, zipFile, preselected, dexFiles);
+                    }
+                });
+            } catch (Exception e) {
+                context.handler.post(() -> {
+                    if (!context.isFinishing() && !context.isDestroyed()) new ErrorUtil(context).showError(e);
+                });
+            }
+        }, "hexora-dex-list").start();
+    }
+
+    private void showDexSelection(DexPreExtract session, File zipFile, String preselected, List<String> dexFiles) {
         if (dexFiles.isEmpty()) {
             Extensions.showMessage(context, R.string.no_files_found);
             return;
@@ -287,7 +300,7 @@ public class DexTools {
             if (selectedNames.isEmpty()) return;
             DexPreExtract useSession = session;
             boolean allThere = useSession.error == null;
-            if (allThere) {
+            if (allThere && useSession.done.getCount() == 0) {
                 for (String n : selectedNames) {
                     if (!new File(useSession.outputDir, n).isFile()) {
                         allThere = false;
@@ -483,57 +496,88 @@ public class DexTools {
         }).start();
     }
 
-    public void handleZipEntryClick(ZipEntryInfo zipEntry) {        File zipFile = zipEntry.getZipFile();
+    public void handleZipEntryClick(ZipEntryInfo zipEntry) {
+        File zipFile = zipEntry.getZipFile();
         String fullPath = zipEntry.getFullPath();
-        if(zipEntry.isDirectory()) context.loadZipFolderInPane(zipFile, fullPath, pane1, false);
-        else new Thread(() -> {
-            try (ZipFile zf = new ZipFile(zipFile);
-             InputStream is = zf.getInputStream(zf.getFileHeader(fullPath))) {
-            final String name = zipEntry.getName();
-            String outputDir = context.getCacheDir() + File.separator + UUID.randomUUID();
-            File tempFolder = new File(outputDir);
-            tempFolder.mkdir();
-            File tempFile = new File(tempFolder, name);
-            tempFile.createNewFile();
-            if(name.endsWith(".dex")) {
-                FileUtils.copyFile(is, tempFile);
-                preExtractAllDex(context, zipFile, false);
-                context.handler.post(() -> showDexOptionsDialog(tempFile, zipFile, fullPath, name));
-            } else if (name.endsWith(".xml")) {
-                boolean isAxml = FileUtils.isAxml(is);
-                if(isAxml) try(InputStream rssStream = zf.getInputStream(zf.getFileHeader("resources.arsc")); InputStream is2 = zf.getInputStream(zf.getFileHeader(fullPath))) {
-                    //ResourceTableParser rtp = new ResourceTableParser(rssStream);
-                    //List<ResEntry> resEntries = rtp.parse();
-                    File tmpRss = new File(context.getCacheDir(), System.currentTimeMillis() + name);
-                    FileUtils.copyFile(rssStream, tmpRss);
-                    FileUtils.copyFile(is2, tempFile);
-
-                    context.startActivityForResult(new Intent(context, TextEditorActivity.class)
-                        .putExtra("rssPath", tmpRss.getPath())
-                        //.putExtra(Intent.EXTRA_TEXT, new aXMLDecoder(is2, resEntries).decodeAsString())
-                        //.putExtra("resEntries", (Serializable) resEntries)
-                        .putExtra("zf", zipFile.getPath())
-                        .putExtra("zipEntryPath", fullPath)
-                        .putExtra("axml", true)
-                        .putExtra("path", tempFile.getPath()), 757);
-                } else try (InputStream plainIn = zf.getInputStream(zf.getFileHeader(fullPath))) {
-                    FileUtils.copyFile(plainIn, tempFile);
-                    context.startActivityForResult(new Intent(context, TextEditorActivity.class)
-                        .putExtra("zf", zipFile.getPath())
-                        .putExtra("zipEntryPath", fullPath)
-                        .putExtra("path", tempFile.getPath()), 757);
-                }
-            } else if (name.equals("resources.arsc")) {
-                FileUtils.copyFile(is, tempFile);
-                context.handler.post(() -> showArscOpenWith(tempFile, zipFile, fullPath));
-            } else {
-                FileUtils.copyFile(is, tempFile);
-                context.handler.post(() -> openWith.open(tempFile, name, zipFile, fullPath));
-            }
-        } catch (Exception e) {
-            new ErrorUtil(context).showError(e);
+        if (zipEntry.isDirectory()) {
+            context.loadZipFolderInPane(zipFile, fullPath, pane1, true);
+            return;
         }
-        }).start();
+        if (!openingZipEntry.compareAndSet(false, true)) return;
+        AtomicBoolean cancelled = new AtomicBoolean();
+        View progressView = LayoutInflater.from(context).inflate(R.layout.circular_progress, null, false);
+        TextView title = progressView.findViewById(R.id.progress_title);
+        title.setText(zipEntry.getName());
+        title.setVisibility(View.VISIBLE);
+        AlertDialog progress = new MaterialAlertDialogBuilder(context)
+                .setView(progressView)
+                .create();
+        Runnable showProgress = () -> {
+            if (!context.isFinishing() && !context.isDestroyed() && !cancelled.get()) progress.show();
+        };
+        Thread worker = new Thread(() -> {
+            File tempFolder = new File(context.getCacheDir(), UUID.randomUUID().toString());
+            try {
+                if (!tempFolder.mkdirs()) throw new IOException("Cannot create temporary folder");
+                String name = zipEntry.getName();
+                File tempFile = new File(tempFolder, name);
+                ZipArchiveCache.Archive archive = ZipArchiveCache.get(zipFile);
+                archive.copyEntry(fullPath, tempFile);
+                boolean binaryXml = name.endsWith(".xml") && FileUtils.isAxml(tempFile);
+                File resources = new File(tempFolder, "resources.arsc");
+                if (binaryXml && archive.contains("resources.arsc")) {
+                    archive.copyEntry("resources.arsc", resources);
+                }
+                context.handler.post(() -> {
+                    context.handler.removeCallbacks(showProgress);
+                    progress.dismiss();
+                    openingZipEntry.set(false);
+                    if (cancelled.get() || context.isFinishing() || context.isDestroyed()) {
+                        new Thread(() -> deleteQuietly(tempFolder)).start();
+                        return;
+                    }
+                    if (name.endsWith(".dex")) {
+                        // Other dex files are extracted only if the chosen tool needs them.
+                        showDexOptionsDialog(tempFile, zipFile, fullPath, name);
+                    } else if (name.endsWith(".xml")) {
+                        Intent intent = new Intent(context, TextEditorActivity.class)
+                                .putExtra("zf", zipFile.getPath())
+                                .putExtra("zipEntryPath", fullPath)
+                                .putExtra("path", tempFile.getPath());
+                        if (binaryXml) {
+                            intent.putExtra("axml", true);
+                            if (resources.isFile()) intent.putExtra("rssPath", resources.getPath());
+                        }
+                        context.startActivityForResult(intent, 757);
+                    } else if (name.equals("resources.arsc")) {
+                        showArscOpenWith(tempFile, zipFile, fullPath);
+                    } else {
+                        openWith.open(tempFile, name, zipFile, fullPath);
+                    }
+                });
+            } catch (Exception e) {
+                deleteQuietly(tempFolder);
+                context.handler.post(() -> {
+                    context.handler.removeCallbacks(showProgress);
+                    progress.dismiss();
+                    openingZipEntry.set(false);
+                    if (!cancelled.get() && !context.isFinishing() && !context.isDestroyed()) {
+                        new ErrorUtil(context).showError(e);
+                    }
+                });
+            }
+        }, "hexora-zip-open");
+        progress.setOnCancelListener(d -> {
+            cancelled.set(true);
+            worker.interrupt();
+        });
+        progress.setButton(AlertDialog.BUTTON_NEGATIVE, context.getString(android.R.string.cancel),
+                (d, w) -> {
+                    cancelled.set(true);
+                    worker.interrupt();
+                });
+        context.handler.postDelayed(showProgress, 200);
+        worker.start();
     }
 
     private void showDexStringReplaceDialog(File dexFile, File zipFileOrNull) {

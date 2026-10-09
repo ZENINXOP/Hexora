@@ -28,11 +28,7 @@ import android.provider.Settings;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.StringRes;
-import androidx.appcompat.app.AppCompatActivity;
 import androidx.coordinatorlayout.widget.CoordinatorLayout;
-import androidx.core.graphics.Insets;
-import androidx.core.view.ViewCompat;
-import androidx.core.view.WindowInsetsCompat;
 
 import com.google.android.material.appbar.MaterialToolbar;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
@@ -40,6 +36,7 @@ import com.google.android.material.floatingactionbutton.FloatingActionButton;
 
 import io.github.ratul.topactivity.App;
 import io.github.abdurazaaqmohammed.MPManager.R;
+import io.github.abdurazaaqmohammed.core.ui.base.BaseActivity;
 import io.github.ratul.topactivity.extensions.ActivityExtensions;
 import io.github.ratul.topactivity.extensions.GenericExtensions;
 import io.github.ratul.topactivity.manager.ServiceManager;
@@ -51,7 +48,7 @@ import io.github.ratul.topactivity.utils.DatabaseUtil;
 import java.util.ArrayList;
 import java.util.List;
 
-public class SettingsActivity extends AppCompatActivity {
+public class SettingsActivity extends BaseActivity {
 
     public CoordinatorLayout baseView;
     public FloatingActionButton fabStart;
@@ -114,12 +111,6 @@ public class SettingsActivity extends AppCompatActivity {
         baseView = findViewById(R.id.main);
         fragment = (SettingsFragment) getSupportFragmentManager()
                 .findFragmentById(R.id.preferences_container);
-
-        ViewCompat.setOnApplyWindowInsetsListener(baseView, (v, insets) -> {
-            Insets systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
-            v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom);
-            return insets;
-        });
     }
 
     private void setupToolbar() {

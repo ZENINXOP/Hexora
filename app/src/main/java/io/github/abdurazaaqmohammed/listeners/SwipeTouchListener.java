@@ -1,174 +1,107 @@
 package io.github.abdurazaaqmohammed.listeners;
 
-import android.view.GestureDetector;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewConfiguration;
 import android.view.animation.DecelerateInterpolator;
-import androidx.annotation.NonNull;
-import androidx.core.view.GestureDetectorCompat;
 
 import io.github.abdurazaaqmohammed.MPManager.MainActivity;
 import io.github.abdurazaaqmohammed.adapters.main.MainFilesArrayAdapter;
 
-
+/** Native tap/long-press handling with horizontal swipe selection. */
 public class SwipeTouchListener implements View.OnTouchListener {
-
-    private static final float SWIPE_SLOP_DP = 16f;
-    private static final float SWIPE_CONFIRM_DP = 60f;
-
-    private final GestureDetectorCompat gestureDetector;
-    private final View.OnClickListener originalClickListener;
-    private final View.OnLongClickListener originalLongClickListener;
-    private final Object arrayAdapter;
-    private final int position;
-
-    private final float swipeSlopPx;
-    private final float swipeConfirmPx;
-
-    private float initialX;
-    private float initialY;
-    private boolean isSwiping;
-    private boolean gestureHandled;
-
-    private boolean swipeDecided;
-    private final int pane;
     private final MainActivity context;
+    private final View.OnClickListener clickListener;
+    private final View.OnLongClickListener longClickListener;
+    private final Object adapter;
+    private final int position, pane;
+    private final float swipeSlop, swipeConfirm;
+    private float initialX, initialY;
+    private boolean swiping, directionDecided;
 
-    public SwipeTouchListener(MainActivity context,
-                              View.OnClickListener clickListener,
-                              View.OnLongClickListener longClickListener,
-                              int position,
-                              Object arrayAdapter, int pane) {
-        this.originalClickListener = clickListener;
-        this.originalLongClickListener = longClickListener;
-        this.position = position;
+    public SwipeTouchListener(MainActivity context, View.OnClickListener clickListener,
+                              View.OnLongClickListener longClickListener, int position,
+                              Object adapter, int pane) {
         this.context = context;
-        this.arrayAdapter = arrayAdapter;
+        this.clickListener = clickListener;
+        this.longClickListener = longClickListener;
+        this.position = position;
+        this.adapter = adapter;
         this.pane = pane;
-
         float density = context.getResources().getDisplayMetrics().density;
-        swipeSlopPx = SWIPE_SLOP_DP * density;
-        swipeConfirmPx = SWIPE_CONFIRM_DP * density;
+        swipeSlop = Math.max(ViewConfiguration.get(context).getScaledTouchSlop(), 12 * density);
+        swipeConfirm = 60 * density;
+    }
 
-        gestureDetector = new GestureDetectorCompat(context,
-                new GestureDetector.SimpleOnGestureListener() {
-
-                    @Override
-                    public boolean onSingleTapUp(@NonNull MotionEvent e) {
-                        context.setCurrentPane(pane);
-                        if (!isSwiping) {
-                            if (arrayAdapter instanceof MainFilesArrayAdapter && ((MainFilesArrayAdapter) arrayAdapter).isMultiSelectMode()) {
-                                ((MainFilesArrayAdapter) arrayAdapter).handleMultiSelect(position);
-                            } else {
-                                originalClickListener.onClick(null);
-                            }
-                            gestureHandled = true;
-                            return true;
-                        }
-                        return false;
-                    }
-
-                    @Override
-                    public void onLongPress(@NonNull MotionEvent e) {
-                        context.setCurrentPane(pane);
-                        if (!isSwiping) {
-                            originalLongClickListener.onLongClick(null);
-                        }
-                    }
-                });
+    public void attachTo(View view) {
+        view.setOnClickListener(v -> {
+            context.setCurrentPane(pane);
+            if (adapter instanceof MainFilesArrayAdapter && ((MainFilesArrayAdapter) adapter).isMultiSelectMode()) {
+                ((MainFilesArrayAdapter) adapter).handleMultiSelect(position);
+            } else {
+                clickListener.onClick(v);
+            }
+        });
+        view.setOnLongClickListener(v -> {
+            context.setCurrentPane(pane);
+            return longClickListener.onLongClick(v);
+        });
+        view.setOnTouchListener(this);
     }
 
     @Override
-    public boolean onTouch(View v, MotionEvent event) {
-        context.setCurrentPane(pane);
-        gestureDetector.onTouchEvent(event);
-
+    public boolean onTouch(View view, MotionEvent event) {
         switch (event.getActionMasked()) {
-
             case MotionEvent.ACTION_DOWN:
-                context.onPaneTouched(pane);
+                view.animate().cancel();
+                view.setTranslationX(0);
+                swiping = false;
+                directionDecided = false;
                 initialX = event.getRawX();
                 initialY = event.getRawY();
-                isSwiping = false;
-                swipeDecided = false;
-                gestureHandled = false;
-                v.getParent().requestDisallowInterceptTouchEvent(false);
-                v.onTouchEvent(event);
-                return true;
-
-            case MotionEvent.ACTION_MOVE: {
+                context.setSelectedPane(pane);
+                context.onPaneTouched(pane);
+                // Let View dispatch its normal pressed state, click and long press.
+                return false;
+            case MotionEvent.ACTION_MOVE:
                 float dx = event.getRawX() - initialX;
                 float dy = event.getRawY() - initialY;
-
-                if (!swipeDecided) {
-                    if (Math.abs(dx) > swipeSlopPx || Math.abs(dy) > swipeSlopPx) {
-                        swipeDecided = true;
-                        if (Math.abs(dx) > Math.abs(dy)) {
-                            isSwiping = true;
-                            v.getParent().requestDisallowInterceptTouchEvent(true);
-                            MotionEvent cancel = MotionEvent.obtain(event);
-                            cancel.setAction(MotionEvent.ACTION_CANCEL);
-                            v.onTouchEvent(cancel);
-                            cancel.recycle();
-                        } else {
-                            isSwiping = false;
-                            v.getParent().requestDisallowInterceptTouchEvent(false);
-                            return false;
-                        }
+                if (!directionDecided && (Math.abs(dx) > swipeSlop || Math.abs(dy) > swipeSlop)) {
+                    directionDecided = true;
+                    swiping = Math.abs(dx) > Math.abs(dy);
+                    if (swiping) {
+                        view.getParent().requestDisallowInterceptTouchEvent(true);
+                        MotionEvent cancel = MotionEvent.obtain(event);
+                        cancel.setAction(MotionEvent.ACTION_CANCEL);
+                        view.onTouchEvent(cancel);
+                        cancel.recycle();
                     }
                 }
-
-                if (isSwiping) {
-                    float clamped = rubberBand(dx, swipeConfirmPx);
-                    v.setTranslationX(clamped);
+                if (swiping) {
+                    float distance = Math.abs(dx);
+                    float translated = distance <= swipeConfirm ? distance
+                            : swipeConfirm + (float) Math.sqrt((distance - swipeConfirm) * swipeConfirm * 0.5f);
+                    view.setTranslationX(Math.copySign(translated, dx));
                     return true;
                 }
                 return false;
-            }
-
             case MotionEvent.ACTION_UP:
-            case MotionEvent.ACTION_CANCEL: {
-                if (isSwiping) {
-                    v.onTouchEvent(event);
-                    float translation = Math.abs(v.getTranslationX());
-                    boolean confirmed = translation >= swipeConfirmPx * 0.75f;
-
-                    if (confirmed && event.getActionMasked() == MotionEvent.ACTION_UP) {
-                        float direction = v.getTranslationX() > 0 ? 1f : -1f;
-                        v.animate()
-                                .translationX(direction * swipeConfirmPx * 1.15f)
-                                .setDuration(80)
-                                .withEndAction(() -> v.animate()
-                                        .translationX(0)
-                                        .setDuration(220)
-                                        .setInterpolator(new DecelerateInterpolator(1.8f))
-                                        .start())
-                                .start();
-
-                        if (arrayAdapter instanceof MainFilesArrayAdapter ma)
-                            ma.handleSwipe(position);
-                    } else {
-                        v.animate().translationX(0).setDuration(180).setInterpolator(new DecelerateInterpolator(1.5f)).start();
-                    }
-                    isSwiping = false;
-                    return true;
-                } else if (!gestureHandled) {
-                    v.onTouchEvent(event);
+            case MotionEvent.ACTION_CANCEL:
+                if (!swiping) return false;
+                boolean confirmed = event.getActionMasked() == MotionEvent.ACTION_UP
+                        && Math.abs(view.getTranslationX()) >= swipeConfirm * 0.75f;
+                view.getParent().requestDisallowInterceptTouchEvent(false);
+                view.setPressed(false);
+                view.animate().translationX(0).setDuration(140)
+                        .setInterpolator(new DecelerateInterpolator()).start();
+                swiping = false;
+                if (confirmed && adapter instanceof MainFilesArrayAdapter) {
+                    context.setCurrentPane(pane);
+                    ((MainFilesArrayAdapter) adapter).handleSwipe(position);
                 }
                 return true;
-            }
+            default:
+                return false;
         }
-        return false;
-    }
-
-    private float rubberBand(float dx, float threshold) {
-        float abs = Math.abs(dx);
-        float sign = dx >= 0 ? 1f : -1f;
-        if (abs <= threshold) {
-            return dx;
-        }
-        float excess = abs - threshold;
-        float damped = threshold + (float) Math.sqrt(excess * threshold * 0.5f);
-        return sign * damped;
     }
 }

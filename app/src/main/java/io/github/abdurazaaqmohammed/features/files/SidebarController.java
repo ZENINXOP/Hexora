@@ -334,6 +334,9 @@ public class SidebarController {
 
     private void openSidebarTool(String id) {
         switch (id) {
+            case "resume_editor":
+                io.github.abdurazaaqmohammed.ui.EditorMinimizer.resume(activity);
+                break;
             case "extract":
                 activity.startActivityForResult(new Intent(activity, APKExtractorActivity.class), 11);
                 break;

@@ -1,5 +1,7 @@
 package io.github.abdurazaaqmohammed.features.files;
 
+import io.github.abdurazaaqmohammed.utils.ZipArchiveCache;
+
 import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.SharedPreferences;
@@ -149,6 +151,7 @@ public class EntryDialogs {
                                 }
                                 if (!map.isEmpty()) zf.renameFiles(map);
                             } else zf.renameFile((entryName), s);
+                            ZipArchiveCache.invalidate(zipFile);
                             context.loadZipFolderInPane(zipFile, state.currentZipPath(), pane1, false);
                         } catch (Exception e) {
                             new ErrorUtil(context).showError(e);

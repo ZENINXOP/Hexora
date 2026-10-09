@@ -25,7 +25,6 @@ import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
 import androidx.core.content.FileProvider;
-import androidx.core.view.WindowCompat;
 import androidx.preference.PreferenceManager;
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 
@@ -195,7 +194,6 @@ public class APKExtractorActivity extends BaseActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        WindowCompat.setDecorFitsSystemWindows(getWindow(), true);
         handler = new Handler(Looper.getMainLooper());
         setContentView(R.layout.activity_extractor);
         MaterialToolbar toolbar = findViewById(R.id.toolbar);
@@ -432,7 +430,7 @@ public class APKExtractorActivity extends BaseActivity {
             List<PackageInfo> apps = pm.getInstalledPackages(0);
 
             ExecutorService executor = Executors
-                    .newFixedThreadPool(Runtime.getRuntime().availableProcessors());
+                    .newFixedThreadPool(Math.min(2, Math.max(1, Runtime.getRuntime().availableProcessors())));
             for (PackageInfo app : apps) {
                 if (app.applicationInfo == null) continue;
                 executor.execute(() -> {
@@ -1137,13 +1135,17 @@ public class APKExtractorActivity extends BaseActivity {
 
     private void loadAdditionalDetails(List<AppInfo> apps, AppRecyclerViewAdapter adapter) {
         PackageManager pm = getPackageManager();
-        for (int i = 0; i < apps.size(); i++) {
-            AppInfo app = apps.get(i);
+        for (AppInfo app : new ArrayList<>(apps)) {
+            if (isDestroyed() || isFinishing()) return;
             if (showIcon && app.appInfo != null) {
-                app.icon = app.appInfo.loadIcon(pm);
-            }
-            if (i < 10 || i % 10 == 0 || i == apps.size() - 1) {
-                handler.post(adapter::notifyDataSetChanged);
+                Drawable icon;
+                try { icon = app.appInfo.loadIcon(pm); } catch (Exception ignored) { continue; }
+                handler.post(() -> {
+                    if (isDestroyed()) return;
+                    app.icon = icon;
+                    int position = adapter.filteredAppInfoList.indexOf(app);
+                    if (position >= 0) adapter.notifyItemChanged(position);
+                });
             }
         }
     }

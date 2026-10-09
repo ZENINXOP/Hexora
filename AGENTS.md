@@ -1,5 +1,7 @@
 # Hexora working preferences
 
+- Keep changes local. Do not push to GitHub unless the user explicitly asks
+  to push; repository connection and edit requests do not authorize a push.
 - Do not run builds, compilation, or APK packaging unless the user explicitly
   asks to resume building. Continue source, icon, and UI edits without building.
 - Support both light and dark themes.

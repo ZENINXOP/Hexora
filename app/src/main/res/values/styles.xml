@@ -2,6 +2,9 @@
 <resources>
 
     <style name="Theme.Hexora" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="popupMenuStyle">@style/Widget.Hexora.PopupMenu</item>
+        <item name="android:popupMenuStyle">@style/Widget.Hexora.PopupMenu</item>
+        <item name="materialAlertDialogTheme">@style/ThemeOverlay.Hexora.Dialog</item>
         <item name="colorPrimary">@color/hexora_accent</item>
         <item name="colorOnPrimary">@android:color/white</item>
         <item name="colorSecondary">@color/hexora_accent</item>
@@ -26,6 +29,9 @@
         <item name="android:windowLightNavigationBar">false</item>
     </style>
     <style name="Theme.MyApp.Dark" parent="Theme.Material3.Dark.NoActionBar">
+        <item name="popupMenuStyle">@style/Widget.Hexora.PopupMenu</item>
+        <item name="android:popupMenuStyle">@style/Widget.Hexora.PopupMenu</item>
+        <item name="materialAlertDialogTheme">@style/ThemeOverlay.Hexora.Dialog</item>
         <item name="colorPrimary">@color/hexora_accent_dark</item>
         <item name="colorOnPrimary">@android:color/white</item>
         <item name="colorSecondary">@color/hexora_accent_dark</item>
@@ -43,6 +49,9 @@
     </style>
 
     <style name="Theme.MyApp.Light" parent="Theme.Material3.Light.NoActionBar">
+        <item name="popupMenuStyle">@style/Widget.Hexora.PopupMenu</item>
+        <item name="android:popupMenuStyle">@style/Widget.Hexora.PopupMenu</item>
+        <item name="materialAlertDialogTheme">@style/ThemeOverlay.Hexora.Dialog</item>
         <item name="colorPrimary">@color/hexora_accent_light</item>
         <item name="colorOnPrimary">@android:color/white</item>
         <item name="colorSecondary">@color/hexora_accent_light</item>
@@ -111,5 +120,16 @@
         <item name="android:textSize">18sp</item>
         <item name="android:insetTop">0dp</item>
         <item name="android:insetBottom">0dp</item>
+    </style>
+    <style name="Widget.Hexora.PopupMenu" parent="Widget.AppCompat.PopupMenu">
+        <item name="android:popupBackground">@drawable/bg_hexora_popup</item>
+        <item name="android:popupElevation">8dp</item>
+    </style>
+    <style name="ThemeOverlay.Hexora.Dialog" parent="ThemeOverlay.Material3.MaterialAlertDialog">
+        <item name="colorSurfaceContainerHigh">?attr/colorSurface</item>
+        <item name="shapeAppearanceCornerExtraLarge">@style/ShapeAppearance.Hexora.Dialog</item>
+    </style>
+    <style name="ShapeAppearance.Hexora.Dialog" parent="ShapeAppearance.Material3.Corner.Medium">
+        <item name="cornerSize">12dp</item>
     </style>
 </resources>

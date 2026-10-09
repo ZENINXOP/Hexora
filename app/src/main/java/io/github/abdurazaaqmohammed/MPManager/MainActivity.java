@@ -68,8 +68,6 @@ import io.github.abdurazaaqmohammed.features.files.SortFilterController;
 import androidx.appcompat.widget.Toolbar;
 import androidx.core.view.GestureDetectorCompat;
 import androidx.core.view.GravityCompat;
-import androidx.core.view.WindowCompat;
-import androidx.core.view.WindowInsetsControllerCompat;
 import androidx.drawerlayout.widget.DrawerLayout;
 import androidx.preference.PreferenceManager;
 import androidx.recyclerview.widget.LinearLayoutManager;
@@ -87,8 +85,6 @@ import com.reandroid.apkeditor.compile.Builder;
 import com.reandroid.utils.StringsUtil;
 import com.reandroid.utils.io.FileUtil;
 
-import net.lingala.zip4j.ZipFile;
-import net.lingala.zip4j.model.FileHeader;
 
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
 
@@ -104,6 +100,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Consumer;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicIntegerArray;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import io.github.abdurazaaqmohammed.utils.ZipArchiveCache;
 
 import io.github.abdurazaaqmohammed.MPManager.ftp.FTPFileWrapper;
 import io.github.abdurazaaqmohammed.MPManager.shizuku.ShizukuFile;
@@ -171,6 +174,10 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
     private boolean checkForUpdates;
     private File[] currentPane1Files;
     private File[] currentPane2Files;
+    private final ExecutorService archiveWorkers = Executors.newFixedThreadPool(2);
+    private final AtomicIntegerArray archiveRequests = new AtomicIntegerArray(2);
+    private final AtomicInteger folderStatusRequests = new AtomicInteger();
+    private final Future<?>[] archiveLoads = new Future<?>[2];
     private List<ZipEntryInfo> currentPane1ZipEntries;
     private List<ZipEntryInfo> currentPane2ZipEntries;
     private final SortFilterController sortFilter = new SortFilterController(this);
@@ -635,34 +642,6 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
             Extensions.showMessage(this, rss.getString(R.string.screen_capture_permission_needed_for_color_picker));
         }});
 
-    private void setupSystemBars() {
-        // Global insets are applied in BaseActivity.
-
-
-        boolean lightBars;
-        String pluginId = ThemeRegistry.getCurrentId(this);
-        if (pluginId == null || BuiltInThemes.SYSTEM_DEFAULT_ID.equals(pluginId)) {
-            lightBars = (getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK)
-                    == Configuration.UI_MODE_NIGHT_NO;
-        } else {
-            lightBars = BuiltInThemes.LIGHT_ID.equals(pluginId) || theme == R.style.Theme_MyApp_Light;
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            int surfaceColor = BuiltInThemes.BLACK_ID.equals(pluginId) ? Color.BLACK : MaterialColors.getColor(this, com.google.android.material.R.attr.colorSurface, Color.TRANSPARENT);
-            getWindow().setStatusBarColor(surfaceColor);
-            getWindow().setNavigationBarColor(surfaceColor);
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M && lightBars) {
-                // Old devices can't render dark status bar icons; use a dark bar so icons stay visible
-                int darkBar = MaterialColors.getColor(this, com.google.android.material.R.attr.colorPrimary, surfaceColor);
-                getWindow().setStatusBarColor(darkBar);
-                getWindow().setNavigationBarColor(darkBar);
-            }
-        }
-        WindowInsetsControllerCompat controller = WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView());
-        controller.setAppearanceLightStatusBars(lightBars);
-        controller.setAppearanceLightNavigationBars(lightBars);
-    }
-
     /**
      * One-time upgrade from legacy theme storage (boolean "systemTheme" +
      * int style-res "theme") to ThemeRegistry's string id. Runs before
@@ -697,10 +676,8 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
         SharedPreferences settings = PreferenceManager.getDefaultSharedPreferences(this);
         ShizukuFileOps.init(this);
         ShizukuShell.warmUp(this);
-        //WindowCompat.setDecorFitsSystemWindows(getWindow(), true);
 
         setContentView(R.layout.activity_main);
-        setupSystemBars();
         paneHighlight.attach();
         checkStoragePerm();
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) mediaProjectionManager = (MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE);
@@ -1340,6 +1317,7 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
             loadZipFolderInPane(folder, "", pane1, addToHistory);
             return;
         }
+        cancelArchiveLoad(pane1);
         boolean shizukuDir = ShizukuFile.isAndroidDataPath(folder);
         File[] files = null;
         String folderPath = folder.getAbsolutePath();
@@ -1500,78 +1478,73 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
     }
 
     public void loadZipFolderInPane(File zipFile, String path, boolean pane1, boolean addToHistory) {
-        try {
-            List<ZipEntryInfo> entries = new ArrayList<>();
-            ZipEntryInfo parent = null;
-            HashSet<String> seenDirs = new HashSet<>() {
-            };
-            try (ZipFile zf = new ZipFile(zipFile)) {
-                String parentPath = TextUtils.isEmpty(path) ? "" : path;
-                if (!TextUtils.isEmpty(parentPath) && !parentPath.endsWith("/")) parentPath += "/";
-                if (TextUtils.isEmpty(path)) {
-                    entries.add(new ZipEntryInfo("..", null, true, 0L, 0L, zipFile));
-                } else {
-                    String parentDir = new File(path).getParent();
-                    if (parentDir == null) parentDir = "";
-                    String parentFull = parentDir.isEmpty() ? "" : parentDir.replaceAll("/+$","") + "/";
-                    parent = new ZipEntryInfo("..", parentFull, true, 0L, 0L, zipFile);
-                    entries.add(parent);
-                }
-
-                List<FileHeader> fhs = zf.getFileHeaders();
-                String prefix = parentPath; // already normalized with trailing slash if non-empty
-                for (FileHeader fh : fhs) {
-                    String entryPath = fh.getFileName().replace('\\','/');
-                    if (!entryPath.startsWith(prefix) || entryPath.equals(prefix)) continue;
-                    String rest = entryPath.substring(prefix.length()); // e.g., "subdir/file" or "file.txt" or "subdir/"
-                    // direct child if rest has no further '/'
-                    int nextSlash = rest.indexOf('/');
-                    if (nextSlash == -1) {
-                        // file directly inside current folder
-                        ZipEntryInfo info = new ZipEntryInfo(fh, zipFile, path);
-                        if (isNotHidden(info)) entries.add(info);
-                    } else {
-                        // it's inside a subdirectory; we should add a single synthetic directory entry for that subdir
-                        String childDirName = rest.substring(0, nextSlash + 1); // include trailing slash
-                        String childFullPath = prefix + childDirName; // full path of the child dir
-                        // add only once: track seen dirs with a Set<String>
-                        if (seenDirs.add(childFullPath)) {
-                            FileHeader syntheticDir = new FileHeader();
-                            syntheticDir.setFileName(childFullPath);
-                            ZipEntryInfo info = new ZipEntryInfo(syntheticDir, zipFile, path); // or use new ctor
-                            if (isNotHidden(info)) entries.add(info);
-                        }
-                    }
-                }
-            }
-            sortZipEntries(entries, zipFile.getPath() + "!" + path);
-            if (pane1) {
-                currentPane1ZipEntries = entries;
-                pane1Folder = zipFile;
-                if (addToHistory) {
-                    pushNavigationHistory(true, new NavigationHistoryEntry(zipFile, true, path));
-                }
-            } else {
-                currentPane2ZipEntries = entries;
-                pane2Folder = zipFile;
-                if (addToHistory) {
-                    pushNavigationHistory(false, new NavigationHistoryEntry(zipFile, true, path));
-                }
-            }
-
-            setCurrentFolder(zipFile.getPath() + "!" + path, entries);
-            RecyclerView pane = findViewById(pane1 ? R.id.listViewPane1 : R.id.listViewPane2);
-            ZipEntryInfo finalParent = parent;
-            boolean isCurrentPane = pane1 ? lastPaneSelected == 1 : lastPaneSelected == 2;
-            handler.post(() -> {
-                pane.setAdapter(new MainFilesArrayAdapter(this, entries.toArray(new ZipEntryInfo[0]), finalParent, pane1, true, path));
-                // Fresh listing = no selection in this pane; sync the bottom bar if it's current.
-                if (isCurrentPane) setMultiSelectModeUI(false);
-                updateNavigationButtons();
-            });
-        } catch (IOException e) {
-            new ErrorUtil(this).showError(e);
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            handler.post(() -> loadZipFolderInPane(zipFile, path, pane1, addToHistory));
+            return;
         }
+        if (isFinishing() || isDestroyed()) return;
+        cancelArchiveLoad(pane1);
+        int paneIndex = pane1 ? 0 : 1;
+        int request = archiveRequests.get(paneIndex);
+        String folderPath = ZipArchiveCache.folderPath(path);
+        SwipeRefreshLayout refresh = findViewById(pane1 ? R.id.swipeRefreshPane1 : R.id.swipeRefreshPane2);
+        refresh.setRefreshing(true);
+        archiveLoads[paneIndex] = archiveWorkers.submit(() -> {
+            try {
+                if (archiveRequests.get(paneIndex) != request) return;
+                List<ZipEntryInfo> entries = new ArrayList<>();
+                String parentPath = null;
+                if (!folderPath.isEmpty()) {
+                    String withoutSlash = folderPath.substring(0, folderPath.length() - 1);
+                    int slash = withoutSlash.lastIndexOf('/');
+                    parentPath = slash < 0 ? "" : withoutSlash.substring(0, slash + 1);
+                }
+                ZipEntryInfo parent = new ZipEntryInfo("..", parentPath, true, 0L, 0L, zipFile);
+                entries.add(parent);
+                for (ZipEntryInfo entry : ZipArchiveCache.get(zipFile).children(folderPath)) {
+                    if (isNotHidden(entry)) entries.add(entry);
+                }
+                sortZipEntries(entries, zipFile.getPath() + "!" + folderPath);
+                ZipEntryInfo[] values = entries.toArray(new ZipEntryInfo[0]);
+                handler.post(() -> {
+                    if (isFinishing() || isDestroyed() || archiveRequests.get(paneIndex) != request) return;
+                    refresh.setRefreshing(false);
+                    if (pane1) {
+                        currentPane1ZipEntries = entries;
+                        pane1Folder = zipFile;
+                    } else {
+                        currentPane2ZipEntries = entries;
+                        pane2Folder = zipFile;
+                    }
+                    if (addToHistory) {
+                        pushNavigationHistory(pane1, new NavigationHistoryEntry(zipFile, true, folderPath));
+                    }
+                    RecyclerView pane = findViewById(pane1 ? R.id.listViewPane1 : R.id.listViewPane2);
+                    pane.setAdapter(new MainFilesArrayAdapter(this, values,
+                            folderPath.isEmpty() ? null : parent, pane1, true, folderPath));
+                    if (pane1 ? lastPaneSelected == 1 : lastPaneSelected == 2) {
+                        setCurrentFolder(zipFile.getPath() + "!" + folderPath, entries);
+                        setMultiSelectModeUI(false);
+                        findViewById(R.id.build).setVisibility(View.GONE);
+                    }
+                    updateNavigationButtons();
+                });
+            } catch (Exception e) {
+                handler.post(() -> {
+                    if (isFinishing() || isDestroyed() || archiveRequests.get(paneIndex) != request) return;
+                    refresh.setRefreshing(false);
+                    new ErrorUtil(this).showError(e);
+                });
+            }
+        });
+    }
+
+    private void cancelArchiveLoad(boolean pane1) {
+        int index = pane1 ? 0 : 1;
+        archiveRequests.incrementAndGet(index);
+        if (archiveLoads[index] != null) archiveLoads[index].cancel(false);
+        SwipeRefreshLayout refresh = findViewById(pane1 ? R.id.swipeRefreshPane1 : R.id.swipeRefreshPane2);
+        if (refresh != null) refresh.setRefreshing(false);
     }
 
     public void loadFolderInPane(File folder, boolean pane1) {
@@ -1668,7 +1641,13 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
             return;
         }
         boolean isPane1 = lastPaneSelected == 1;
-        loadFolderInPane(isPane1 ? pane1Folder : pane2Folder, isPane1);
+        RecyclerView.Adapter<?> adapter = getCurrentPane().getAdapter();
+        if (adapter instanceof MainFilesArrayAdapter && ((MainFilesArrayAdapter) adapter).isInZip) {
+            loadZipFolderInPane(isPane1 ? pane1Folder : pane2Folder,
+                    ((MainFilesArrayAdapter) adapter).currentZipPath, isPane1, false);
+        } else {
+            loadFolderInPane(isPane1 ? pane1Folder : pane2Folder, isPane1);
+        }
     }
 
     private void setupPullToRefresh() {
@@ -1677,18 +1656,28 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
     }
 
     public void refreshPane(boolean pane1) {
+        refreshPane(pane1, true);
+    }
+
+    private void refreshPane(boolean pane1, boolean invalidateArchive) {
         try {
             RecyclerView pane = findViewById(pane1 ? R.id.listViewPane1 : R.id.listViewPane2);
             RecyclerView.Adapter<?> adapter = pane.getAdapter();
             if (adapter instanceof MainFilesArrayAdapter filesAdapter) {
-                if (filesAdapter.isInZip) loadZipFolderInPane(pane1 ? pane1Folder : pane2Folder, filesAdapter.currentZipPath, pane1, false);
+                if (filesAdapter.isInZip) {
+                    if (invalidateArchive) ZipArchiveCache.invalidate(pane1 ? pane1Folder : pane2Folder);
+                    loadZipFolderInPane(pane1 ? pane1Folder : pane2Folder, filesAdapter.currentZipPath, pane1, false);
+                }
                 else loadFolderInPane(pane1 ? pane1Folder : pane2Folder, pane1, false);
             } else if (adapter instanceof FtpFilesArrayAdapter ftpAdapter && ftpAdapter.getItemCount() > 0)
                 fetchFtpDirAndLoad(ftpAdapter.getItem(0).getParent(), pane1);
         } catch (Exception e) {
             new ErrorUtil(this).showError(e);
         }
-        ((SwipeRefreshLayout) findViewById(pane1 ? R.id.swipeRefreshPane1 : R.id.swipeRefreshPane2)).setRefreshing(false);
+        Future<?> loading = archiveLoads[pane1 ? 0 : 1];
+        if (loading == null || loading.isCancelled() || loading.isDone()) {
+            ((SwipeRefreshLayout) findViewById(pane1 ? R.id.swipeRefreshPane1 : R.id.swipeRefreshPane2)).setRefreshing(false);
+        }
     }
 
     public void refreshAllPanes() {
@@ -1696,11 +1685,14 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
             handler.post(this::refreshAllPanes);
             return;
         }
-        try { refreshPane(true); } catch (Exception ignored) { }
-        try { refreshPane(false); } catch (Exception ignored) { }
+        ZipArchiveCache.invalidate(pane1Folder);
+        ZipArchiveCache.invalidate(pane2Folder);
+        try { refreshPane(true, false); } catch (Exception ignored) { }
+        try { refreshPane(false, false); } catch (Exception ignored) { }
     }
 
     public void setCurrentFolder(File curr, File[] files) {
+        int request = folderStatusRequests.incrementAndGet();
         int foldersCount = 0;
         int totalCount;
         if (files != null) {
@@ -1718,6 +1710,7 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
         TextView currentFolderPath = findViewById(R.id.currentFolderPath);
         int finalFoldersCount = foldersCount;
         handler.post(() -> {
+            if (isFinishing() || isDestroyed() || folderStatusRequests.get() != request) return;
             currentFolderPath.setText(curr.getPath());
             uiHelper.scrollTextView(currentFolderPath);
             this.<TextView>findViewById(R.id.folderCount).setText(rss.getString(R.string.folders_files_x, finalFoldersCount, totalCount));
@@ -1733,7 +1726,8 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
         if (b) {
             MainFilesArrayAdapter adapter = (MainFilesArrayAdapter) a;
             if (adapter.isInZip) {
-                setCurrentFolder(adapter.currentZipPath, Arrays.asList(adapter.values));
+                File archive = pane == 1 ? pane1Folder : pane2Folder;
+                setCurrentFolder(archive.getPath() + "!" + adapter.currentZipPath, Arrays.asList(adapter.values));
             } else {
                 File curr = pane == 1 ? pane1Folder : pane2Folder;
                 // ShizukuFile.listFiles() can't list; reuse the entries the adapter already shows.
@@ -1752,6 +1746,7 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
     }
 
     public void setCurrentFolder(String path, List<?> files) {
+        int request = folderStatusRequests.incrementAndGet();
         new Thread(() -> {
 
             //CollectionsUtils.removeIf(files, (Predicate<Object>) o -> o instanceof ZipEntryInfo && ((ZipEntryInfo) o).isDirectory());
@@ -1762,6 +1757,7 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
             }
             int finalFoldersCount = foldersCount;
             handler.post(() -> {
+                if (isFinishing() || isDestroyed() || folderStatusRequests.get() != request) return;
                 TextView currentFolderPath = findViewById(R.id.currentFolderPath);
                 currentFolderPath.setText(path);
                 uiHelper.scrollTextView(currentFolderPath);
@@ -1773,6 +1769,7 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
     }
 
     public void setCurrentFolderFromSelected(File curr, Set<File> files) {
+        folderStatusRequests.incrementAndGet();
         TextView currentFolderPath = findViewById(R.id.currentFolderPath);
         currentFolderPath.setText(curr.getPath());
         uiHelper.scrollTextView(currentFolderPath);
@@ -1841,6 +1838,9 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
 
     @Override
     protected void onDestroy() {
+        archiveRequests.incrementAndGet(0);
+        archiveRequests.incrementAndGet(1);
+        archiveWorkers.shutdownNow();
         try {
             File cache = getCacheDir();
             File[] kids = cache.listFiles();
@@ -1925,11 +1925,12 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
     }
 
     public void fetchFtpDirAndLoad(String path, boolean pane1) {
+        cancelArchiveLoad(pane1);
         ftp.fetchFtpDirAndLoad(path, pane1);
     }
 
     private void loadFtpFolderInPane(FTPFileWrapper folder, boolean pane1) {
+        cancelArchiveLoad(pane1);
         ftp.loadFtpFolderInPane(folder, pane1);
     }
 }
-

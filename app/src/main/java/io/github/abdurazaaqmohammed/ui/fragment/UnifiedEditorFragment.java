@@ -11,6 +11,7 @@ import android.content.pm.ResolveInfo;
 import android.content.res.Configuration;
 import android.graphics.Typeface;
 import android.os.Bundle;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.text.InputType;
@@ -23,7 +24,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.EditText;
 import android.widget.LinearLayout;
-import android.widget.PopupMenu;
+import androidx.appcompat.widget.PopupMenu;
 import android.widget.ProgressBar;
 import android.widget.TextView;
 
@@ -35,9 +36,6 @@ import io.github.codehasan.colorpicker.extensions.Extensions;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
-import androidx.core.graphics.Insets;
-import androidx.core.view.ViewCompat;
-import androidx.core.view.WindowInsetsCompat;
 import androidx.fragment.app.Fragment;
 import androidx.preference.PreferenceManager;
 
@@ -53,7 +51,6 @@ import java.io.BufferedWriter;
 import java.io.FileWriter;
 import java.io.InputStreamReader;
 import java.lang.ref.WeakReference;
-import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
@@ -276,12 +273,8 @@ public class UnifiedEditorFragment extends Fragment implements SmaliMethodFieldL
         preferencesEditor = sharedPreferences.edit();
         packageManager = requireContext().getPackageManager();
 
-        ViewCompat.setOnApplyWindowInsetsListener(bottomBarScroll, (v, insets) -> {
-            Insets ime = insets.getInsets(WindowInsetsCompat.Type.ime());
-            v.setTranslationY(-ime.bottom);
-            return insets;
-        });
-        ViewCompat.requestApplyInsets(bottomBarScroll);
+        // BaseActivity sizes the content above the keyboard. Translating this
+        // bar again would move it twice and cover the editor's upper controls.
 
         if (textviewLeft != null) textviewLeft.setText(!TextUtils.isEmpty(title) ? title : getString(R.string.ellipsis));
 
@@ -327,7 +320,7 @@ public class UnifiedEditorFragment extends Fragment implements SmaliMethodFieldL
                     }
                     return true;
                 });
-                popupMenu.show();
+                showPopup(popupMenu);
                 return true;
             });
         }
@@ -368,7 +361,7 @@ public class UnifiedEditorFragment extends Fragment implements SmaliMethodFieldL
                 }
                 return true;
             });
-            popupMenu.show();
+            showPopup(popupMenu);
         });
         btnStopSearch.setOnClickListener(v -> {
             editor.getSearcher().stopSearch();
@@ -596,7 +589,8 @@ public class UnifiedEditorFragment extends Fragment implements SmaliMethodFieldL
         } else if (type == TYPE_JAVA) {
             editor.setEditorLanguage(new JavaLanguage());
             //if (symbolInputContainer != null) symbolInputContainer.setVisibility(View.GONE);
-            if (linearHeader != null) linearHeader.setVisibility(View.GONE);
+            if (linearHeader != null) linearHeader.setVisibility(View.VISIBLE);
+            if (textviewLeft != null) textviewLeft.setText(R.string.hexora_java_preview);
             editor.setEditable(false);
         } else {
             //if (symbolInputContainer != null) symbolInputContainer.setVisibility(View.GONE);
@@ -788,22 +782,14 @@ public class UnifiedEditorFragment extends Fragment implements SmaliMethodFieldL
         }
     }
 
-        public void loadBottomBarFunctions() {
+    public void loadBottomBarFunctions() {
         if (bottomBarLayout == null) return;
         bottomBarLayout.removeAllViews();
         SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(requireContext());
         String json = prefs.getString("pref_bottom_bar_buttons", "[]");
-        if (json.equals("[]") || json.equals("Search,Copy,Cut,Paste")) {
-            try {
-                JSONArray array = new JSONArray();
-                array.put(new JSONObject().put("action", "Search").put("label", "Search"));
-                array.put(new JSONObject().put("action", "Copy selection").put("label", "Copy"));
-                array.put(new JSONObject().put("action", "Cut selection").put("label", "Cut"));
-                array.put(new JSONObject().put("action", "Paste selection").put("label", "Paste"));
-                json = array.toString();
-                prefs.edit().putString("pref_bottom_bar_buttons", json).apply();
-            } catch (Exception ignored) {}
-        }
+        // Legacy installs may still have the four default shortcuts saved.
+        // Keep custom tools, but leave search/clipboard actions in the menus.
+        if (json.equals("Search,Copy,Cut,Paste")) json = "[]";
         try {
             LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
@@ -813,6 +799,10 @@ public class UnifiedEditorFragment extends Fragment implements SmaliMethodFieldL
             for (int i = 0; i < array.length(); i++) {
                 JSONObject obj = array.getJSONObject(i);
                 String action = obj.getString("action");
+                if (action.equalsIgnoreCase("Search") || action.equalsIgnoreCase("Copy selection")
+                        || action.equalsIgnoreCase("Cut selection") || action.equalsIgnoreCase("Paste selection")
+                        || action.equalsIgnoreCase("Copy") || action.equalsIgnoreCase("Cut")
+                        || action.equalsIgnoreCase("Paste")) continue;
                 String label = obj.optString("label", action);
                 MaterialButton btn = new MaterialButton(requireContext());
                 btn.setText(resolveBottomBarLabel(label));
@@ -827,6 +817,7 @@ public class UnifiedEditorFragment extends Fragment implements SmaliMethodFieldL
         } catch (Exception e) {
             if (getContext() != null) new ErrorUtil(getActivity()).showError(e);
         }
+        bottomBarScroll.setVisibility(bottomBarLayout.getChildCount() == 0 ? View.GONE : View.VISIBLE);
     }
 
     private String resolveBottomBarLabel(String label) {
@@ -937,16 +928,18 @@ public class UnifiedEditorFragment extends Fragment implements SmaliMethodFieldL
                 R.drawable.match_case_24px, R.drawable.match_case_off_24px,
                 R.drawable.horizontal_align_right_24px, R.drawable.horizontal_align_left_24px };
         for (int i = 0; i < baseOptions.length; i++) {
-            popupMenu.getMenu().add(0, i, 0, baseOptions[i]).setIcon(baseIcons[i]);
+            popupMenu.getMenu().add(0, i, 0, baseOptions[i]).setIcon(baseIcons[i])
+                    .setEnabled(i == 0 || editor.isEditable());
         }
         if (isSmali) {
-            popupMenu.getMenu().add(0, 12, 0, R.string.toggle_comment).setIcon(R.drawable.ic_hash_mt);
+            popupMenu.getMenu().add(0, 12, 0, R.string.toggle_comment).setIcon(R.drawable.ic_hash_mt)
+                    .setEnabled(editor.isEditable());
         }
         popupMenu.setOnMenuItemClickListener(item -> {
             executeEditAction(item.getItemId());
             return true;
         });
-        popupMenu.show();
+        showPopup(popupMenu);
     }
 
     private void executeEditAction(int which) {
@@ -1066,9 +1059,16 @@ public class UnifiedEditorFragment extends Fragment implements SmaliMethodFieldL
         int smaliOffset = isSmali ? 3 : 0;
         int prefIndex = 10 + smaliOffset;
         int closeIndex = 11 + smaliOffset;
+        popupMenu.getMenu().add(0, R.id.action_minimize, 100, R.string.hexora_minimize)
+                .setIcon(R.drawable.ic_minimize);
+        // A decompiled Java preview must remain read-only.
+        popupMenu.getMenu().findItem(9).setEnabled(type != TYPE_JAVA);
+        if (isSmali) popupMenu.getMenu().findItem(10).setEnabled(Build.VERSION.SDK_INT > 23);
         popupMenu.setOnMenuItemClickListener(item -> {
             int id = item.getItemId();
-            if (id == 0) { showSubFileMenu(anchor); }
+            if (id == R.id.action_minimize) {
+                io.github.abdurazaaqmohammed.ui.EditorMinimizer.minimize(requireActivity());
+            } else if (id == 0) { showSubFileMenu(anchor); }
             else if (id == 1) { searchPanel.setVisibility(View.VISIBLE); }
             else if (id == 2) { showSyntaxDialog(); }
             else if (id == 3) { navigateHistory(false); }
@@ -1106,10 +1106,13 @@ public class UnifiedEditorFragment extends Fragment implements SmaliMethodFieldL
                 }
             } else if (id == closeIndex) {
                 if (callback != null) callback.onCloseRequested();
+                else if (getActivity() instanceof DexEditorActivity) {
+                    ((DexEditorActivity) requireActivity()).closeCurrentTab();
+                }
             }
             return true;
         });
-        popupMenu.show();
+        showPopup(popupMenu);
     }
 
     private void showSubFileMenu(View anchor) {
@@ -1142,7 +1145,7 @@ public class UnifiedEditorFragment extends Fragment implements SmaliMethodFieldL
             }
             return true;
         });
-        popupMenu.show();
+        showPopup(popupMenu);
     }
 
     public void showSyntaxDialog() {
@@ -1602,16 +1605,14 @@ public class UnifiedEditorFragment extends Fragment implements SmaliMethodFieldL
         }
     }
 
+    private void showPopup(PopupMenu popupMenu) {
+        int color = com.google.android.material.color.MaterialColors.getColor(requireContext(),
+                com.google.android.material.R.attr.colorOnSurfaceVariant, android.graphics.Color.GRAY);
+        modder.hub.dexeditor.utils.UIHelper.tintMenuIcons(popupMenu.getMenu(), color);
+        popupMenu.show();
+    }
+
     private void forceShowIcons(PopupMenu popupMenu) {
-        try {
-            Field field = popupMenu.getClass().getDeclaredField("mPopup");
-            field.setAccessible(true);
-            Object menuPopupHelper = field.get(popupMenu);
-            Method setForceIcons = menuPopupHelper.getClass().getDeclaredMethod("setForceShowIcon",
-                    boolean.class);
-            setForceIcons.invoke(menuPopupHelper, true);
-        } catch (Exception e) {
-            new ErrorUtil(getActivity()).showError(e);
-        }
+        popupMenu.setForceShowIcon(true);
     }
 }

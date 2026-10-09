@@ -7,7 +7,6 @@ import android.view.ViewGroup;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
-import androidx.core.content.res.ResourcesCompat;
 import androidx.core.graphics.drawable.DrawableCompat;
 import androidx.recyclerview.widget.RecyclerView;
 
@@ -54,20 +53,26 @@ public class DialogAdapter extends RecyclerView.Adapter<DialogAdapter.ViewHolder
     public void onBindViewHolder(@NonNull ViewHolder holder, int position) {
         FileMenuOrder.MenuItem item = items.get(position);
         holder.label.setText(item.label());
-        Drawable drawable = ResourcesCompat.getDrawable(context.getResources(), FileMenuOrder.iconFor(context, item.id(), false, false), null);
+        int iconRes = FileMenuOrder.iconFor(context, item.id(), false, false);
+        Drawable drawable = androidx.appcompat.content.res.AppCompatResources.getDrawable(context,
+                iconRes == 0 ? R.drawable.tools_24px : iconRes);
         if (drawable != null) {
-            int i = Extensions.dp2px(context, 24);
+            drawable = DrawableCompat.wrap(drawable).mutate();
+            int i = Extensions.dp2px(context, grid ? 20 : 24);
             drawable.setBounds(0, 0, i, i);
-            DrawableCompat.setTint(drawable, MaterialColors.getColor(holder.label, com.google.android.material.R.attr.colorPrimary));
+            DrawableCompat.setTint(drawable, MaterialColors.getColor(holder.label,
+                    FileMenuOrder.DELETE.equals(item.id()) ? com.google.android.material.R.attr.colorError
+                            : com.google.android.material.R.attr.colorPrimary));
         }
         holder.label.setCompoundDrawablesRelative(drawable, null, null, null);
         holder.label.setCompoundDrawablePadding(Extensions.dp2px(context, 8));
 
-        boolean disabled = (FileMenuOrder.MOVE.equals(item.id()) && context.pane1Folder == context.pane2Folder)
+        boolean disabled = (FileMenuOrder.MOVE.equals(item.id()) && java.util.Objects.equals(context.pane1Folder, context.pane2Folder))
                 || ((FileMenuOrder.COMPRESS.equals(item.id()) || FileMenuOrder.BOOKMARK.equals(item.id()) || FileMenuOrder.CMD.equals(item.id())) && isInZip);
         holder.itemView.setAlpha(disabled ? 0.38f : 1f);
+        holder.itemView.setEnabled(!disabled);
         holder.itemView.setOnClickListener(v -> {
-            if (listener == null) return;
+            if (disabled || listener == null) return;
             int pos = holder.getBindingAdapterPosition();
             if (pos != RecyclerView.NO_POSITION) listener.onItemClick(pos);
         });

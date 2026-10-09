@@ -1,5 +1,7 @@
 package io.github.abdurazaaqmohammed.features.apk;
 
+import io.github.abdurazaaqmohammed.utils.ZipArchiveCache;
+
 import android.content.SharedPreferences;
 import android.net.Uri;
 import android.view.LayoutInflater;
@@ -123,6 +125,7 @@ public class ApkResultHandler {
                                                 RecyclerView.Adapter a = activity.getCurrentPane().getAdapter();
                                                 String zipPath = a instanceof MainFilesArrayAdapter
                                                         ? ((MainFilesArrayAdapter) a).currentZipPath : "";
+                                                ZipArchiveCache.invalidate(zipFile);
                                                 activity.loadZipFolderInPane(zipFile, zipPath, pane1, false);
                                             } catch (Exception ex) {
                                                 new ErrorUtil(activity).showError(ex);

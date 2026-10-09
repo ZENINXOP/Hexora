@@ -177,15 +177,15 @@ public final class FileMenuOrder {
             case MOVE -> R.drawable.baseline_content_cut_24;
             case RENAME -> R.drawable.baseline_drive_file_rename_outline_24;
             case DELETE -> R.drawable.baseline_delete_24;
-            case COMPRESS -> R.drawable.baseline_compress_24;
+            case COMPRESS -> R.drawable.archive_24px;
             case PROPERTIES -> R.drawable.baseline_info_24;
             case SHARE -> R.drawable.baseline_share_24;
             case OPEN_WITH -> R.drawable.baseline_open_in_new_24;
-            case BOOKMARK -> android.R.drawable.ic_input_get;
+            case BOOKMARK -> R.drawable.baseline_bookmark_24;
             case CMD -> R.drawable.terminal_24px;
             case CHECK -> R.drawable.tag_24px;
             case BATCH_SIGN, BATCH_OPT, BATCH_INSTALL -> R.drawable.apk_document_24px;
-            case EXTRACT -> R.drawable.baseline_compress_24;
+            case EXTRACT -> R.drawable.inventory_2_24px;
             case CMP_ZIP, CMP_ARSC -> R.drawable.baseline_swap_horiz_24;
             case CMP_TEXT, CMP_HASH, CMP_APK, CMP_DEX -> R.drawable.baseline_swap_horiz_24;
             case BATCH_CROP -> R.drawable.edit_24px;

@@ -36,7 +36,7 @@ public class ArchiveUtil {
     public static boolean isSupportedArchive(String fileName) {
         if (fileName == null) return false;
         String lower = fileName.toLowerCase(Locale.ROOT);
-        return lower.endsWith(".7z") || lower.endsWith(".rar") || lower.endsWith(".tar")
+        return lower.endsWith(".zip") || lower.endsWith(".7z") || lower.endsWith(".rar") || lower.endsWith(".tar")
                 || lower.endsWith(".tar.gz") || lower.endsWith(".tgz")
                 || lower.endsWith(".tar.bz2") || lower.endsWith(".tbz2")
                 || lower.endsWith(".tar.xz") || lower.endsWith(".txz")
@@ -54,7 +54,8 @@ public class ArchiveUtil {
     public static void extract(File archive, File destDir, boolean preserveTime) throws IOException {
         if (!destDir.exists()) destDir.mkdirs();
         String lower = archive.getName().toLowerCase(Locale.ROOT);
-        if (lower.endsWith(".7z")) extract7z(archive, destDir, preserveTime);
+        if (lower.endsWith(".zip")) extractZip(archive, destDir, preserveTime);
+        else if (lower.endsWith(".7z")) extract7z(archive, destDir, preserveTime);
         else if (lower.endsWith(".rar")) extractRar(archive, destDir, preserveTime);
         else if (lower.endsWith(".tar")) extractTar(new FileInputStream(archive), destDir, preserveTime);
         else if (lower.endsWith(".tgz")) extractTar(new GzipCompressorInputStream(new FileInputStream(archive), true), destDir, preserveTime);
@@ -83,6 +84,21 @@ public class ArchiveUtil {
         else if (lower.endsWith(".bz2") && sources.size() == 1) compressSingle(new BZip2CompressorOutputStream(new FileOutputStream(output)), sources.get(0));
         else if (lower.endsWith(".xz") && sources.size() == 1) compressSingle(new XZCompressorOutputStream(new FileOutputStream(output)), sources.get(0));
         else throw new IOException("Unsupported archive format: " + output.getName());
+    }
+
+    private static void extractZip(File archive, File destDir, boolean preserveTime) throws IOException {
+        try (net.lingala.zip4j.ZipFile zip = new net.lingala.zip4j.ZipFile(archive)) {
+            // zip4j handles ZIP64, split archives and rejects paths outside destDir.
+            zip.extractAll(destDir.getAbsolutePath());
+            if (!preserveTime) {
+                long now = System.currentTimeMillis();
+                String root = destDir.getCanonicalPath() + File.separator;
+                for (net.lingala.zip4j.model.FileHeader header : zip.getFileHeaders()) {
+                    File output = new File(destDir, header.getFileName().replace('\\', '/'));
+                    if (output.getCanonicalPath().startsWith(root)) output.setLastModified(now);
+                }
+            }
+        }
     }
 
     private static void extract7z(File archive, File destDir, boolean preserveTime) throws IOException {

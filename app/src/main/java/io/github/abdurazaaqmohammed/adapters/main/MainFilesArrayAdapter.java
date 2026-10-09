@@ -61,6 +61,7 @@ import io.github.abdurazaaqmohammed.utils.UiPrefs;
 import io.github.codehasan.colorpicker.extensions.Extensions;
 
 public class MainFilesArrayAdapter extends RecyclerView.Adapter<MainFilesArrayAdapter.ViewHolder> {
+    private static final Object SELECTION_PAYLOAD = new Object();
 
     private final MainActivity context;
     public final Object[] values;
@@ -278,6 +279,21 @@ public class MainFilesArrayAdapter extends RecyclerView.Adapter<MainFilesArrayAd
     }
 
     @Override
+    public void onBindViewHolder(@NonNull ViewHolder holder, int position, @NonNull List<Object> payloads) {
+        if (payloads.contains(SELECTION_PAYLOAD)) {
+            bindSelection(holder.itemView, position);
+        } else {
+            onBindViewHolder(holder, position);
+        }
+    }
+
+    private void bindSelection(View view, int position) {
+        view.setBackgroundColor(selectedPositions.contains(position)
+                ? com.google.android.material.color.MaterialColors.getColor(context,
+                com.google.android.material.R.attr.colorSurfaceContainerHigh, Color.LTGRAY) : Color.TRANSPARENT);
+    }
+
+    @Override
     public void onBindViewHolder(@NonNull ViewHolder holder, int position) {
         final View convertView = holder.itemView;
         position = holder.getBindingAdapterPosition();
@@ -316,18 +332,14 @@ public class MainFilesArrayAdapter extends RecyclerView.Adapter<MainFilesArrayAd
             holder.fileNameView.setText(fileName = (position == 0 ? ".." : file.getName()));
         }
 
-        convertView.setBackgroundColor(selectedPositions.contains(position) ? com.google.android.material.color.MaterialColors.getColor(context,
-                com.google.android.material.R.attr.colorSurfaceContainerHigh, Color.LTGRAY) : Color.TRANSPARENT);
+        bindSelection(convertView, position);
         int finalPosition = position;
         // RecyclerView binds on the UI thread; attach handlers before recycling can occur.
         View.OnClickListener originalClickListener;
         if(isInZip && finalPosition == 0 && entry.getFullPath() == null) {
             originalClickListener = v -> context.loadFolderInPane(entry.getZipFile().getParentFile(), pane1);
         } else {
-            originalClickListener = isMultiSelectMode ? v -> {
-                context.setSelectedPane(pane1 ? 1 : 2);
-                handleMultiSelect(finalPosition);
-            } : !isInZip && file.isFile() ?
+            originalClickListener = !isInZip && file.isFile() ?
                 v -> {
                     context.setSelectedPane(pane1 ? 1 : 2);
                     context.setCurrentFolder(file.getParentFile(), getOldValues());
@@ -393,7 +405,10 @@ public class MainFilesArrayAdapter extends RecyclerView.Adapter<MainFilesArrayAd
             }
 
             if (!multi && !isInZip && !file.isDirectory() && ArchiveUtil.isSupportedArchive(fileName)) {
-                visibleMenu.add(new FileMenuOrder.MenuItem(FileMenuOrder.EXTRACT, FileMenuOrder.labelFor(context, FileMenuOrder.EXTRACT, direction)));
+                visibleMenu.add(new FileMenuOrder.MenuItem(FileMenuOrder.EXTRACT,
+                        fileName.toLowerCase(java.util.Locale.ROOT).endsWith(".zip")
+                                ? context.getString(R.string.hexora_extract_zip)
+                                : FileMenuOrder.labelFor(context, FileMenuOrder.EXTRACT, direction)));
             }
 
             RecyclerView.Adapter a = ((RecyclerView) context.findViewById(pane1 ? R.id.listViewPane2 : R.id.listViewPane1)).getAdapter();
@@ -499,19 +514,40 @@ public class MainFilesArrayAdapter extends RecyclerView.Adapter<MainFilesArrayAd
 
             final boolean twoColumnMenu = FileMenuOrder.isTwoColumn(context);
             View menuView = LayoutInflater.from(context).inflate(R.layout.dialog_file_menu, null);
-            ((TextView) menuView.findViewById(R.id.fileMenuTitle)).setText(fileName);
+            ((TextView) menuView.findViewById(R.id.fileMenuTitle)).setText(multi
+                    ? context.getResources().getQuantityString(R.plurals.hexora_selected_files,
+                    selectedPositions.size(), selectedPositions.size()) : fileName);
             RecyclerView menuList = menuView.findViewById(R.id.fileMenuList);
+            View safeContent = context.findViewById(android.R.id.content);
+            float menuDensity = context.getResources().getDisplayMetrics().density;
+            int availableHeight = safeContent.getHeight();
+            int availableWidth = safeContent.getWidth();
+            if (availableHeight <= 0) availableHeight = context.getResources().getDisplayMetrics().heightPixels;
+            if (availableWidth <= 0) availableWidth = context.getResources().getDisplayMetrics().widthPixels;
+            // A wide, centered menu gives every action a consistent cell width.
+            final int dialogWidth = Math.min(availableWidth - Math.round(24 * menuDensity), Math.round(680 * menuDensity));
+            int columns = twoColumnMenu ? (dialogWidth >= 580 * menuDensity ? 3
+                    : dialogWidth >= 280 * menuDensity ? 2 : 1) : 1;
+            int rows = (menuItems.size() + columns - 1) / columns;
+            int desiredHeight = Math.round((rows * (twoColumnMenu ? 62 : 50) + 12) * menuDensity);
+            menuList.getLayoutParams().height = Math.min(desiredHeight, Math.round(availableHeight * 0.60f));
+            menuList.setItemAnimator(null);
             final BottomSheetDialog menuSheet;
             final AlertDialog menuDialog;
             if (twoColumnMenu) {
-                View handle = menuView.findViewById(R.id.fileMenuHandle);
-                if (handle != null) handle.setVisibility(View.GONE);
-                menuList.setLayoutManager(new GridLayoutManager(context, 2));
-                float density = context.getResources().getDisplayMetrics().density;
-                int edge = (int) (12 * density + 0.5f);
+                menuView.findViewById(R.id.fileMenuHandle).setVisibility(View.GONE);
+                menuList.setLayoutManager(new GridLayoutManager(context, columns));
+                int edge = Math.round(12 * menuDensity);
                 menuList.setPadding(edge, menuList.getPaddingTop(), edge, menuList.getPaddingBottom());
                 menuSheet = null;
-                menuDialog = new MaterialAlertDialogBuilder(context).setView(menuView).create();
+                menuDialog = new MaterialAlertDialogBuilder(context)
+                        .setBackgroundInsetStart(0).setBackgroundInsetEnd(0)
+                        .setView(menuView).create();
+                menuDialog.setOnShowListener(dialog -> {
+                    if (menuDialog.getWindow() != null) {
+                        menuDialog.getWindow().setLayout(dialogWidth, ViewGroup.LayoutParams.WRAP_CONTENT);
+                    }
+                });
             } else {
                 menuList.setLayoutManager(new LinearLayoutManager(context));
                 menuSheet = new BottomSheetDialog(context);
@@ -691,13 +727,13 @@ public class MainFilesArrayAdapter extends RecyclerView.Adapter<MainFilesArrayAd
             }
             return true;
         };
-        convertView.setOnTouchListener(new SwipeTouchListener(
+        new SwipeTouchListener(
                 context,
                 originalClickListener,
                 originalLongClickListener,
                 finalPosition,
                 MainFilesArrayAdapter.this,
-                pane1 ? 1 : 2));
+                pane1 ? 1 : 2).attachTo(convertView);
     }
 
 
@@ -737,11 +773,15 @@ public class MainFilesArrayAdapter extends RecyclerView.Adapter<MainFilesArrayAd
     }
 
     public void handleSwipe(int position) {
-        context.setCurrentPane(pane1 ? 1 : 2);
+        context.setSelectedPane(pane1 ? 1 : 2);
+        int changedStart = position;
+        int changedEnd = position;
         if (isMultiSelectMode) {
             if (rangeStartPosition != null) {
                 int start = Math.min(rangeStartPosition, position);
                 int end = Math.max(rangeStartPosition, position);
+                changedStart = start;
+                changedEnd = end;
                 for (int i = start; i <= end; i++) {
                     selectedPositions.add(i);
                 }
@@ -759,7 +799,7 @@ public class MainFilesArrayAdapter extends RecyclerView.Adapter<MainFilesArrayAd
             updateFolderCountOnMainScreen(position);
             context.setMultiSelectModeUI(true);
         }
-        notifyDataSetChanged();
+        notifyItemRangeChanged(changedStart, changedEnd - changedStart + 1, SELECTION_PAYLOAD);
     }
 
     public void handleMultiSelect(int position) {
@@ -780,7 +820,7 @@ public class MainFilesArrayAdapter extends RecyclerView.Adapter<MainFilesArrayAd
             selectedPositions.add(position);
             updateFolderCountOnMainScreen(position);
         }
-        notifyDataSetChanged();
+        notifyItemChanged(position, SELECTION_PAYLOAD);
     }
 
     public List<Object> getSelectedFiles() {
@@ -792,11 +832,12 @@ public class MainFilesArrayAdapter extends RecyclerView.Adapter<MainFilesArrayAd
     }
 
     public void clearSelection() {
+        Set<Integer> cleared = new HashSet<>(selectedPositions);
         selectedPositions.clear();
         isMultiSelectMode = false;
         rangeStartPosition = null;
         context.setMultiSelectModeUI(false);
-        notifyDataSetChanged();
+        for (int position : cleared) notifyItemChanged(position, SELECTION_PAYLOAD);
     }
 
     public void exitMultiSelectMode() {

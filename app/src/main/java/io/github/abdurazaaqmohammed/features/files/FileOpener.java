@@ -38,6 +38,8 @@ import com.apk.axml.aXMLDecoder;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.google.android.material.switchmaterial.SwitchMaterial;
 
+import io.github.abdurazaaqmohammed.utils.ZipArchiveCache;
+
 import net.lingala.zip4j.ZipFile;
 import net.lingala.zip4j.model.FileHeader;
 
@@ -811,16 +813,7 @@ public class FileOpener {
     private File stageZipEntry(ZipEntryInfo zipEntry) throws IOException {
         if (zipEntry == null || zipEntry.isDirectory() || zipEntry.getFullPath() == null) throw new IOException(context.getString(R.string.cannot_open_item));
         File out = new File(context.getCacheDir(), "zip_entry_" + System.currentTimeMillis() + "_" + zipEntry.getName().replaceAll("[^a-zA-Z0-9._-]", "_"));
-        try (ZipFile zf = new ZipFile(zipEntry.getZipFile())) {
-            FileHeader fh = zf.getFileHeader(zipEntry.getFullPath());
-            if (fh == null || fh.isDirectory()) throw new IOException(context.getString(R.string.cannot_open_item));
-            try (InputStream is = zf.getInputStream(fh);
-                 FileOutputStream fos = new FileOutputStream(out)) {
-                byte[] buf = new byte[8192];
-                int n;
-                while ((n = is.read(buf)) != -1) fos.write(buf, 0, n);
-            }
-        }
+        ZipArchiveCache.get(zipEntry.getZipFile()).copyEntry(zipEntry.getFullPath(), out);
         return out;
     }
 

@@ -85,6 +85,8 @@
         android:layout_width="280dp"
         android:layout_height="match_parent"
         android:layout_gravity="start"
+        android:background="?attr/colorSurface"
+        android:elevation="16dp"
         android:orientation="vertical">
 
         <androidx.appcompat.widget.Toolbar
@@ -96,7 +98,29 @@
         <modder.hub.dexeditor.views.FastScrollerRecyclerView
             android:id="@+id/tabs_recycler_view"
             android:layout_width="match_parent"
-            android:layout_height="match_parent" />
+            android:layout_height="0dp"
+            android:layout_weight="1" />
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="?attr/colorOutlineVariant" />
+
+        <androidx.appcompat.widget.AppCompatTextView
+            android:id="@+id/action_minimize"
+            android:focusable="true"
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:gravity="center_vertical"
+            android:paddingStart="20dp"
+            android:paddingEnd="20dp"
+            android:drawablePadding="16dp"
+            android:background="?attr/selectableItemBackground"
+            android:text="@string/hexora_minimize"
+            android:textSize="14sp"
+            android:textColor="?attr/colorOnSurface"
+            app:drawableStartCompat="@drawable/ic_minimize"
+            app:drawableTint="?attr/colorOnSurfaceVariant" />
     </LinearLayout>
 
 </io.github.abdurazaaqmohammed.ui.MyDrawerLayout>

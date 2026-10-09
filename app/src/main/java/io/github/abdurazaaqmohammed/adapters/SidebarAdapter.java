@@ -235,6 +235,9 @@ public class SidebarAdapter extends ArrayAdapter<SidebarAdapter.SidebarEntry> {
     }
 
     private void addTools() {
+        if (io.github.abdurazaaqmohammed.ui.EditorMinimizer.hasMinimizedEditor()) {
+            addTool("resume_editor", R.string.hexora_resume_editor, R.drawable.ic_edit_mt);
+        }
         String[] defaults = {"extract", "ftp_server", "ftp_client", "color_picker", "layout", "wifi", "tools", "settings"};
         List<String> order = new ArrayList<>();
         for (String id : toolOrder) if (!order.contains(id)) order.add(id);

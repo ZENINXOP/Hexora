@@ -1,5 +1,7 @@
 package io.github.abdurazaaqmohammed.adapters.main;
 
+import io.github.abdurazaaqmohammed.utils.ZipArchiveCache;
+
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.text.TextUtils;
@@ -652,6 +654,7 @@ public class FileOperationsHelper {
     }
 
     private void openZipFile(File zipFile, String path) {
+        ZipArchiveCache.invalidate(zipFile);
         context.loadZipFolderInPane(zipFile, path != null ? path : "", !adapter.pane1, false);
     }
 
@@ -673,6 +676,7 @@ public class FileOperationsHelper {
             }
             zf.removeFiles(toDelete);
         }
+        ZipArchiveCache.invalidate(f);
         context.loadZipFolderInPane(f, adapter.currentZipPath, adapter.pane1, false);
     }
 
@@ -683,14 +687,19 @@ public class FileOperationsHelper {
         if (baseName.endsWith(".tar.gz")) folderName = baseName.substring(0, baseName.length() - ".tar.gz".length());
         else if (baseName.endsWith(".tar.bz2")) folderName = baseName.substring(0, baseName.length() - ".tar.bz2".length());
         else if (baseName.endsWith(".tar.xz")) folderName = baseName.substring(0, baseName.length() - ".tar.xz".length());
-        else folderName = baseName.substring(0, baseName.lastIndexOf('.'));
+        else {
+            int dot = baseName.lastIndexOf('.');
+            folderName = dot > 0 ? baseName.substring(0, dot) : baseName + "_extracted";
+        }
         File destDir = FileUtils.getUnusedFile(new File(parent, folderName));
-        destDir.mkdirs();
         ProgressManager pm = new ProgressManager(context, true);
         pm.setText(context.rss.getString(R.string.extracting_to_folder, destDir.getName()));
         pm.show();
         new Thread(() -> {
             try {
+                if (!destDir.mkdirs()) {
+                    throw new IOException("Cannot create extraction folder: " + destDir);
+                }
                 // Root-only archives are unreadable to zip4j/tar readers:
                 // stage a copy into cache first (binary-safe).
                 File readable = archive;

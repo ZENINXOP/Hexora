@@ -48,7 +48,6 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 
 import androidx.appcompat.app.AlertDialog;
-import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.widget.Toolbar;
 import androidx.coordinatorlayout.widget.CoordinatorLayout;
 
@@ -59,6 +58,7 @@ import com.google.android.material.textfield.TextInputLayout;
 import java.util.Objects;
 
 import io.github.abdurazaaqmohammed.MPManager.R;
+import io.github.abdurazaaqmohammed.core.ui.base.BaseActivity;
 import io.github.abdurazaaqmohammed.ui.UiFields;
 import io.github.codehasan.colorpicker.extensions.Extensions;
 import io.noties.markwon.Markwon;
@@ -70,7 +70,7 @@ Author @developer-krushna
 Code fixed comments by ChatGPT
 */
 
-public class AIOverViewActivity extends AppCompatActivity {
+public class AIOverViewActivity extends BaseActivity {
     private static final long DOUBLE_PRESS_INTERVAL = 2000;
     private AppBarLayout appBarLayout;
     private CoordinatorLayout coordinatorLayout;

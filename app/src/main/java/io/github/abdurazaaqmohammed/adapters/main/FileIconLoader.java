@@ -1,8 +1,5 @@
 package io.github.abdurazaaqmohammed.adapters.main;
 
-import android.content.pm.ApplicationInfo;
-import android.content.pm.PackageInfo;
-import android.content.pm.PackageManager;
 import android.content.res.Resources;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
@@ -14,7 +11,6 @@ import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.LayerDrawable;
 import android.media.ThumbnailUtils;
 import android.provider.MediaStore;
-import android.text.TextUtils;
 import android.util.LruCache;
 import android.view.View;
 import android.widget.ImageView;
@@ -28,7 +24,10 @@ import org.apache.commons.io.FilenameUtils;
 import java.io.File;
 import java.util.Locale;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.TimeUnit;
+import io.github.abdurazaaqmohammed.utils.ApkMetadata;
 
 import io.github.abdurazaaqmohammed.MPManager.MainActivity;
 import io.github.abdurazaaqmohammed.MPManager.R;
@@ -39,8 +38,17 @@ import io.github.abdurazaaqmohammed.utils.UiPrefs;
 
 public class FileIconLoader {
 
-    private static final ExecutorService iconLoaderService = Executors.newFixedThreadPool(4);
-    private static final LruCache<String, Drawable> iconCache = new LruCache<>(100);
+    private static final ExecutorService iconLoaderService = new ThreadPoolExecutor(2, 2, 0L, TimeUnit.MILLISECONDS,
+            new ArrayBlockingQueue<>(48), new ThreadPoolExecutor.DiscardOldestPolicy());
+    private static final LruCache<String, Drawable> iconCache = new LruCache<String, Drawable>(12 * 1024 * 1024) {
+        @Override
+        protected int sizeOf(String key, Drawable value) {
+            int bytes = value instanceof BitmapDrawable
+                    ? ((BitmapDrawable) value).getBitmap().getByteCount() : 0;
+            // Bound memory as well as entry count when previews vary in size.
+            return Math.max(128 * 1024, bytes);
+        }
+    };
 
     private static Drawable cachedFolderIcon, cachedApkIcon, cachedImageIcon, cachedVideoIcon,
             cachedDexIcon, cachedArscIcon,
@@ -88,9 +96,10 @@ public class FileIconLoader {
 
     private void setupNonFolderIconView(String path, ImageView fileIconView) {
         if (!isInZip) {
-            Drawable cached = iconCache.get(path);
+            Drawable cached = iconCache.get(ApkMetadata.key(new File(path)));
             if (cached != null) {
-                fileIconView.setImageDrawable(cached);
+                Drawable.ConstantState state = cached.getConstantState();
+                fileIconView.setImageDrawable(state == null ? cached : state.newDrawable(context.getResources()).mutate());
                 return;
             }
         }
@@ -126,42 +135,33 @@ public class FileIconLoader {
     }
 
     private void loadApkIconAsync(String path, ImageView fileIconView) {
-        fileIconView.setTag(path);
+        String cacheKey = ApkMetadata.key(new File(path));
+        fileIconView.setTag(cacheKey);
         iconLoaderService.execute(() -> {
-            if (!path.equals(fileIconView.getTag())) return;
+            if (!cacheKey.equals(fileIconView.getTag())) return;
             try {
-                PackageManager pm = context.getPackageManager();
-                PackageInfo packageInfo = pm.getPackageArchiveInfo(path, PackageManager.GET_ACTIVITIES);
-                if (packageInfo != null) {
-                    ApplicationInfo appInfo = packageInfo.applicationInfo;
-                    if (appInfo != null) {
-                        if (TextUtils.isEmpty(appInfo.sourceDir) || TextUtils.isEmpty(appInfo.publicSourceDir)) {
-                            appInfo.sourceDir = path;
-                            appInfo.publicSourceDir = path;
-                        }
-                        Drawable icon = appInfo.loadIcon(pm);
-                        if (icon != null) {
-                            iconCache.put(path, icon);
-                            context.runOnUiThread(() -> {
-                                if (path.equals(fileIconView.getTag())) fileIconView.setImageDrawable(icon);
-                            });
-                        }
-                    }
+                ApkMetadata metadata = ApkMetadata.load(context.getApplicationContext(), new File(path));
+                if (metadata != null && metadata.icon != null) {
+                    iconCache.put(cacheKey, metadata.icon);
+                    context.runOnUiThread(() -> {
+                        if (cacheKey.equals(fileIconView.getTag())) fileIconView.setImageDrawable(metadata.newIcon(context.getResources()));
+                    });
                 }
             } catch (Exception ignored) {}
         });
     }
 
     private void loadThumbnailAsync(String path, ImageView fileIconView, boolean isVideo) {
-        fileIconView.setTag(path);
+        String cacheKey = ApkMetadata.key(new File(path));
+        fileIconView.setTag(cacheKey);
         iconLoaderService.execute(() -> {
-            if (!path.equals(fileIconView.getTag())) return;
+            if (!cacheKey.equals(fileIconView.getTag())) return;
             Bitmap bitmap = isVideo ? loadVideoThumbnail(path) : loadImageThumbnail(path);
-            if (bitmap == null || !path.equals(fileIconView.getTag())) return;
+            if (bitmap == null || !cacheKey.equals(fileIconView.getTag())) return;
             Drawable icon = new BitmapDrawable(context.getResources(), bitmap);
-            iconCache.put(path, icon);
+            iconCache.put(cacheKey, icon);
             context.runOnUiThread(() -> {
-                if (path.equals(fileIconView.getTag())) fileIconView.setImageDrawable(icon);
+                if (cacheKey.equals(fileIconView.getTag())) fileIconView.setImageDrawable(icon);
             });
         });
     }
@@ -173,22 +173,22 @@ public class FileIconLoader {
         cachedIconTheme = theme;
         cachedIconBucket = bucket;
         cachedFolderIcon  = ResourcesCompat.getDrawable(res, R.drawable.ic_folder_mt, null);
-        cachedApkIcon     = badge(res, density, R.drawable.apk_document_24px, 0xFF2E7D32, true);
-        cachedImageIcon   = badge(res, density, R.drawable.image_24px, 0xFF6A1B9A, true);
-        cachedVideoIcon   = badge(res, density, R.drawable.video_24px, 0xFFC62828, true);
-        cachedMusicIcon   = badge(res, density, R.drawable.music_24px, 0xFF00897B, true);
-        cachedArscIcon    = badge(res, density, R.drawable.stacks_24px, 0xFF9A6A00, true);
-        cachedDexIcon     = badge(res, density, R.drawable.code_24px, 0xFF549395, true);
-        cachedArchiveIcon = badge(res, density, R.drawable.baseline_folder_zip_24, 0xFFE65100, true);
-        cachedPdfIcon     = badge(res, density, R.drawable.pdf_24px, 0xFFAD1457, true);
-        cachedTextIcon    = badge(res, density, R.drawable.baseline_text_snippet_24, 0xFF1565C0, true);
+        cachedApkIcon     = badge(res, density, R.drawable.apk_document_24px, 0xFF33866D, true);
+        cachedImageIcon   = badge(res, density, R.drawable.image_24px, 0xFF8665B8, true);
+        cachedVideoIcon   = badge(res, density, R.drawable.video_24px, 0xFFD26757, true);
+        cachedMusicIcon   = badge(res, density, R.drawable.music_24px, 0xFF438E9A, true);
+        cachedArscIcon    = badge(res, density, R.drawable.stacks_24px, 0xFFAE843C, true);
+        cachedDexIcon     = badge(res, density, R.drawable.code_24px, 0xFF5987AA, true);
+        cachedArchiveIcon = badge(res, density, R.drawable.baseline_folder_zip_24, 0xFFC48C43, true);
+        cachedPdfIcon     = badge(res, density, R.drawable.pdf_24px, 0xFFC15F72, true);
+        cachedTextIcon    = badge(res, density, R.drawable.baseline_text_snippet_24, 0xFF4D7CB8, true);
         cachedFileIcon    = badge(res, density, R.drawable.baseline_insert_drive_file_24,
                 theme == R.style.Theme_MyApp_Light ? 0xFF616161 : 0xFF424242, true);
     }
 
     private static Drawable badge(Resources res, float density, int glyphId, int bgColor, boolean whiteGlyph) {
         GradientDrawable bg = new GradientDrawable();
-        bg.setCornerRadius(6 * density);
+        bg.setCornerRadius(7 * density);
         bg.setColor(bgColor);
         Drawable glyph = ResourcesCompat.getDrawable(res, glyphId, null);
         if (glyph != null) {
@@ -199,7 +199,7 @@ public class FileIconLoader {
         }
         LayerDrawable layer = new LayerDrawable(
                 new Drawable[]{bg, glyph});
-        int inset = (int) (6 * density + 0.5f);
+        int inset = (int) (5 * density + 0.5f);
         layer.setLayerInset(1, inset, inset, inset, inset);
         return layer;
     }
@@ -213,7 +213,7 @@ public class FileIconLoader {
             int width = options.outWidth;
             int height = options.outHeight;
             int scale = 1;
-            while (width / 2 >= 128 && height / 2 >= 128) {
+            while (Math.max(width, height) / 2 >= 192) {
                 width /= 2;
                 height /= 2;
                 scale *= 2;
@@ -229,7 +229,16 @@ public class FileIconLoader {
 
     private static Bitmap loadVideoThumbnail(String path) {
         try {
-            return ThumbnailUtils.createVideoThumbnail(path, MediaStore.Video.Thumbnails.MINI_KIND);
+            Bitmap bitmap = ThumbnailUtils.createVideoThumbnail(path, MediaStore.Video.Thumbnails.MINI_KIND);
+            if (bitmap == null) return null;
+            int longest = Math.max(bitmap.getWidth(), bitmap.getHeight());
+            if (longest <= 192) return bitmap;
+            float scale = 192f / longest;
+            Bitmap preview = Bitmap.createScaledBitmap(bitmap,
+                    Math.max(1, Math.round(bitmap.getWidth() * scale)),
+                    Math.max(1, Math.round(bitmap.getHeight() * scale)), true);
+            if (preview != bitmap) bitmap.recycle();
+            return preview;
         } catch (Throwable t) {
             return null;
         }

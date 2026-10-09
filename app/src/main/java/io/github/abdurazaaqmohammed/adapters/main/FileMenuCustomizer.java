@@ -9,7 +9,6 @@ import android.widget.TextView;
 
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AlertDialog;
-import androidx.core.content.res.ResourcesCompat;
 import androidx.core.graphics.drawable.DrawableCompat;
 import androidx.recyclerview.widget.GridLayoutManager;
 import androidx.recyclerview.widget.ItemTouchHelper;
@@ -128,9 +127,12 @@ public final class FileMenuCustomizer {
         public void onBindViewHolder(@NonNull Holder holder, int position) {
             FileMenuOrder.MenuItem item = items.get(position);
             holder.label.setText(item.label());
-            Drawable drawable = ResourcesCompat.getDrawable(context.getResources(), FileMenuOrder.iconFor(context, item.id(), false, false), null);
+            int iconRes = FileMenuOrder.iconFor(context, item.id(), false, false);
+            Drawable drawable = androidx.appcompat.content.res.AppCompatResources.getDrawable(context,
+                    iconRes == 0 ? R.drawable.tools_24px : iconRes);
             if (drawable != null) {
-                int i = Extensions.dp2px(context, 24);
+                drawable = DrawableCompat.wrap(drawable).mutate();
+                int i = Extensions.dp2px(context, grid ? 20 : 24);
                 drawable.setBounds(0, 0, i, i);
                 DrawableCompat.setTint(drawable, MaterialColors.getColor(holder.label, com.google.android.material.R.attr.colorPrimary));
             }

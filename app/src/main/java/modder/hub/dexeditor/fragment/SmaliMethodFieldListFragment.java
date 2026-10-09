@@ -1249,7 +1249,8 @@ public class SmaliMethodFieldListFragment extends DialogFragment {
         public void run() {
             activity.runOnUiThread(() -> {
                 pd = new AlertCircularProgress(activity);
-                pd.setMessage(getString(R.string.decompiling));
+                pd.setTitle(getString(R.string.smali_to_java));
+                pd.setMessage(methodName + "\n" + getString(R.string.hexora_conversion_message));
                 pd.show();
             });
 
@@ -1275,7 +1276,7 @@ public class SmaliMethodFieldListFragment extends DialogFragment {
                         if (pd != null) pd.dismiss();
                     });
                     
-                    if (javaCode != null) {
+                    if (javaCode != null && !activity.isFinishing() && !activity.isDestroyed()) {
                         activity.runOnUiThread(() -> {
                             if (activity instanceof DexEditorActivity dexActivity) {
                                 String cleanedClassName = SmaliHelper.smali2OnlySlash(fullClassName);

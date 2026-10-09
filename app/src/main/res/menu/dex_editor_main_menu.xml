@@ -2,6 +2,11 @@
 <menu xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto">
     <item
+        android:id="@+id/action_minimize"
+        android:title="@string/hexora_minimize"
+        android:icon="@drawable/ic_minimize"
+        app:showAsAction="never" />
+    <item
         android:id="@+id/action_compile"
         android:icon="@drawable/ic_hammer"
         android:title="@string/compile"

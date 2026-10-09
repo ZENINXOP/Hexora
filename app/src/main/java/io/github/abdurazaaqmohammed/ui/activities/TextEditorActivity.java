@@ -1,6 +1,7 @@
 package io.github.abdurazaaqmohammed.ui.activities;
 
 import android.content.Intent;
+import io.github.abdurazaaqmohammed.ui.EditorMinimizer;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
@@ -62,6 +63,7 @@ public class TextEditorActivity extends BaseActivity implements UnifiedEditorFra
         String zipEntryPath;
         boolean axml;
         List<ResEntry> resEntries;
+        String resourceTablePath;
         String pendingDecoded;
         String content;
         boolean loaded;
@@ -104,12 +106,13 @@ public class TextEditorActivity extends BaseActivity implements UnifiedEditorFra
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
-        handleIntent(intent);
+        if (!EditorMinimizer.ACTION_RESUME.equals(intent.getAction())) handleIntent(intent);
     }
 
     @Override
     protected void onResume() {
         super.onResume();
+        EditorMinimizer.onEditorResumed(this);
         if (editorFragment != null) {
             editorFragment.loadBottomBarFunctions();
         }
@@ -232,6 +235,10 @@ public class TextEditorActivity extends BaseActivity implements UnifiedEditorFra
 
     private void initViews() {
         drawerLayout = findViewById(R.id.drawer_layout);
+        findViewById(R.id.action_minimize).setOnClickListener(v -> {
+            drawerLayout.closeDrawer(GravityCompat.START);
+            EditorMinimizer.minimize(this);
+        });
         btnUndo = findViewById(R.id.btn_undo);
         btnRedo = findViewById(R.id.btn_redo);
         btnSave = findViewById(R.id.btn_save);
@@ -417,12 +424,6 @@ public class TextEditorActivity extends BaseActivity implements UnifiedEditorFra
             if (intent.hasExtra("resEntries")) {
                 //noinspection unchecked
                 entries = (List<ResEntry>) intent.getSerializableExtra("resEntries");
-            } else if (intent.hasExtra("rssPath")) {
-                try(InputStream is = FileUtils.getInputStream(intent.getStringExtra("rssPath")); InputStream is2 = FileUtils.getInputStream(intent.getStringExtra("path"))) {
-                    ResourceTableParser rtp = new ResourceTableParser(is);
-                    entries = rtp.parse();
-                    extraText = new aXMLDecoder(is2, entries).decodeAsString();
-                } catch (Exception e) { new ErrorUtil(this).showError(e); }
             }
             file = new File(intent.getStringExtra("path"));
             uri = Uri.fromFile(file);
@@ -501,6 +502,7 @@ public class TextEditorActivity extends BaseActivity implements UnifiedEditorFra
         tab.fileUri = uri;
         tab.axml = isAxml;
         tab.resEntries = entries;
+        tab.resourceTablePath = intent.getStringExtra("rssPath");
         String zipFileExtra = intent.getStringExtra("zf");
         String zipEntryExtra = intent.getStringExtra("zipEntryPath");
         if (zipFileExtra != null && !zipFileExtra.isEmpty()) tab.zipFilePath = zipFileExtra;
@@ -558,6 +560,7 @@ public class TextEditorActivity extends BaseActivity implements UnifiedEditorFra
     }
 
     private void loadTabContent(EditorTab tab) {
+        if (tab.loading || tab.loaded) return;
         tab.loading = true;
         new Thread(() -> {
             if (tab.rootOriginalPath != null && (tab.file == null || !tab.file.exists())) {
@@ -600,6 +603,11 @@ public class TextEditorActivity extends BaseActivity implements UnifiedEditorFra
         if (tab.axml) {
             try (InputStream is = tab.file != null ? FileUtils.getInputStream(tab.file)
                     : getContentResolver().openInputStream(tab.fileUri)) {
+                if (tab.resEntries == null && tab.resourceTablePath != null) {
+                    try (InputStream resources = FileUtils.getInputStream(tab.resourceTablePath)) {
+                        tab.resEntries = new ResourceTableParser(resources).parse();
+                    }
+                }
                 tab.loadFailed = false;
                 return new aXMLDecoder(is, tab.resEntries).decodeAsString();
             } catch (Exception e) {
@@ -628,11 +636,13 @@ public class TextEditorActivity extends BaseActivity implements UnifiedEditorFra
     }
 
     private void applyLoadedText(EditorTab tab, String text) {
-        tab.loading = false;
         runOnUiThread(() -> {
+            tab.loading = false;
+            if (isFinishing() || isDestroyed() || !tabs.contains(tab)) return;
             tab.content = text == null ? "" : text;
             tab.loaded = true;
             if (getCurrentTab() == tab) {
+                resEntries = tab.resEntries;
                 UnifiedEditorFragment f = getFragment();
                 if (f != null) {
                     boolean wasModified = tab.modified;

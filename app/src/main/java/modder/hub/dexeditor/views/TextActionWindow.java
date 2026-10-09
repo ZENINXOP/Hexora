@@ -50,6 +50,8 @@ import android.graphics.drawable.*;
 
 import androidx.annotation.NonNull;
 import androidx.appcompat.widget.TooltipCompat;
+import androidx.core.widget.ImageViewCompat;
+import com.google.android.material.color.MaterialColors;
 import io.github.rosemoe.sora.event.*;
 import io.github.rosemoe.sora.text.Content;
 import io.github.rosemoe.sora.text.Cursor;
@@ -168,14 +170,11 @@ public class TextActionWindow extends EditorTextActionWindow implements View.OnL
 		// Initialize buttons
 		initializeButtons(rootContainer);
 		
-		// Set background
-		GradientDrawable backgroundDrawable = new GradientDrawable();
-		backgroundDrawable.setCornerRadius(codeEditor.getDpUnit() * 5.0f);
-		backgroundDrawable.setColor(-1);
-		rootContainer.setBackground(backgroundDrawable);
+		applyColorScheme();
 		
 		setContentView(rootContainer);
-		setSize(0, (int) (this.codeEditor.getDpUnit() * 48.0f));
+		setSize(0, (int) (this.codeEditor.getDpUnit() * 56.0f));
+		if (Build.VERSION.SDK_INT >= 21) getPopup().setElevation(codeEditor.getDpUnit() * 8);
 		
 		updateButtonStates();
 		
@@ -189,6 +188,40 @@ public class TextActionWindow extends EditorTextActionWindow implements View.OnL
 		codeEditor.subscribeEvent(LongPressEvent.class, (event, unsubscribe) -> onLongPressEvent(codeEditor, event, unsubscribe));
 		
 		getPopup().setAnimationStyle(R.style.text_action_popup_animation);
+	}
+
+	@Override
+	protected void applyColorScheme() {
+		// The superclass calls this before our custom container is initialized.
+		if (rootView == null || codeEditor == null) return;
+		Context context = codeEditor.getContext();
+		int foreground = MaterialColors.getColor(context, com.google.android.material.R.attr.colorOnSurface, Color.BLACK);
+		int surface = MaterialColors.getColor(context, com.google.android.material.R.attr.colorSurface, Color.WHITE);
+		int outline = MaterialColors.getColor(context, com.google.android.material.R.attr.colorOutlineVariant, Color.GRAY);
+		GradientDrawable background = new GradientDrawable();
+		background.setColor(surface);
+		background.setCornerRadius(codeEditor.getDpUnit() * 8);
+		background.setStroke(Math.max(1, (int) codeEditor.getDpUnit()), outline);
+		rootView.setBackground(background);
+		ColorStateList tint = new ColorStateList(new int[][] {
+				new int[] {-android.R.attr.state_enabled}, new int[] {} },
+				new int[] {androidx.core.graphics.ColorUtils.setAlphaComponent(foreground, 97), foreground});
+		for (ImageButton button : buttonMap.values()) ImageViewCompat.setImageTintList(button, tint);
+	}
+
+	@Override
+	public void show() {
+		if (rootView == null) return;
+		updateButtonStates();
+		applyColorScheme();
+		// Sora measures its original five-button panel. Measure our actual,
+		// scrollable panel instead, keeping every action reachable on narrow screens.
+		int maxWidth = Math.max(1, codeEditor.getWidth() - (int) (16 * codeEditor.getDpUnit()));
+		int height = (int) (56 * codeEditor.getDpUnit());
+		rootView.measure(View.MeasureSpec.makeMeasureSpec(maxWidth, View.MeasureSpec.AT_MOST),
+				View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY));
+		setSize(Math.min(maxWidth, rootView.getMeasuredWidth()), height);
+		super.show();
 	}
 	
 	private void loadMenuItemsFromJson() {
@@ -342,17 +375,22 @@ public class TextActionWindow extends EditorTextActionWindow implements View.OnL
 		Context context = codeEditor.getContext();
 		
 		HorizontalScrollView scrollView = new HorizontalScrollView(context);
+		scrollView.setHorizontalScrollBarEnabled(false);
+		scrollView.setOverScrollMode(View.OVER_SCROLL_NEVER);
+		scrollView.setFillViewport(true);
 		LinearLayout container = new LinearLayout(context);
 		container.setOrientation(LinearLayout.HORIZONTAL);
 		container.setGravity(Gravity.CENTER_VERTICAL);
 		scrollView.addView(container);
-		parent.addView(scrollView);
+		parent.addView(scrollView, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT));
+		int edge = (int) (4 * codeEditor.getDpUnit());
+		container.setPadding(edge, edge, edge, edge);
 		
 		// Get selectable background
 		TypedValue outValue = new TypedValue();
 		context.getTheme().resolveAttribute(android.R.attr.selectableItemBackground, outValue, true);
 		
-		int buttonSize = (int) (45 * codeEditor.getDpUnit());
+		int buttonSize = (int) (48 * codeEditor.getDpUnit());
 		LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(buttonSize, buttonSize);
 		
 		// Define all possible buttons with their resources
@@ -406,11 +444,13 @@ public class TextActionWindow extends EditorTextActionWindow implements View.OnL
 				}
 			}
 
-			ImageButton button = new ImageButton(context);
+			ImageButton button = new androidx.appcompat.widget.AppCompatImageButton(context);
 			button.setTag(buttonId);
 			button.setLayoutParams(params);
 			button.setBackgroundResource(outValue.resourceId);
 			button.setImageResource(config == null ? pluginIcon : config.iconRes);
+			int iconPadding = (int) (12 * codeEditor.getDpUnit());
+			button.setPadding(iconPadding, iconPadding, iconPadding, iconPadding);
 			button.setOnClickListener(this);
 
 			if ("translate_btn".equals(buttonId)) {
@@ -445,7 +485,8 @@ public class TextActionWindow extends EditorTextActionWindow implements View.OnL
 	
 	// Updated setTooltipText with null check
 	public void setTooltipText(View view, String tooltipText) {
-		if (view != null && Build.VERSION.SDK_INT >= 26) {
+		if (view != null) {
+			view.setContentDescription(tooltipText);
 			TooltipCompat.setTooltipText(view, tooltipText);
 		}
 	}
@@ -735,7 +776,7 @@ public class TextActionWindow extends EditorTextActionWindow implements View.OnL
 	}
 	
 	private void updatePasteButtonState() {
-		this.pasteButton.setEnabled(this.codeEditor.hasClip());
+		if (pasteButton != null) pasteButton.setEnabled(codeEditor.isEditable() && codeEditor.hasClip());
 	}
 	
 	private void updateCopyButtonVisibility() {
