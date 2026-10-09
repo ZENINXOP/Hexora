@@ -10,6 +10,9 @@ based on the open-source [MP-Manager](https://github.com/AbdurazaaqMohammed/MP-M
 [Releases](https://github.com/ZENINXOP/Hexora/releases) ·
 [Report an issue](https://github.com/ZENINXOP/Hexora/issues)
 
+**Latest release:** [Hexora 0.1.1](https://github.com/ZENINXOP/Hexora/releases/tag/v0.1.1) ·
+[Download APK](https://github.com/ZENINXOP/Hexora/releases/download/v0.1.1/Hexora.0.1.1.apk)
+
 ## Screenshots
 
 <p align="center">
@@ -40,7 +43,8 @@ exists, Hexora chooses an unused name rather than merging into it.
 The current source indexes archive folders once and reuses parsed headers for
 navigation and file opening. Archive reads and XML resource parsing run in the
 background. Cached metadata is refreshed when an archive changes or is manually
-refreshed. These latest changes still need validation in a new device build.
+refreshed. ZIP regression tests cover folder navigation, repeated reads,
+concurrent pane requests, and cache invalidation.
 
 ## Building
 

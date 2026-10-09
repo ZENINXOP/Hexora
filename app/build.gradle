@@ -12,8 +12,8 @@ android {
         minSdk 19
         targetSdk 37
         multiDexEnabled true
-        versionCode 11
-        versionName "0.1.0"
+        versionCode 12
+        versionName "0.1.1"
         // Set to the Hexora owner/repository once its releases are published.
         buildConfigField "String", "UPDATE_REPOSITORY", '""'
     }
