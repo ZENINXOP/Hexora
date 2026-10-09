@@ -713,7 +713,7 @@ public class SettingsController {
 
         TextView appPathTv = root.findViewById(R.id.appPathTv);
         appPathTv.setText(UiPrefs.appPathDir(activity,
-                new File(Environment.getExternalStorageDirectory(), "MP Manager").getPath()));
+                new File(Environment.getExternalStorageDirectory(), "Hexora").getPath()));
         root.findViewById(R.id.pickAppPathBtn).setOnClickListener(v ->
                 pickDirInto(appPathTv, chosen ->
                         settings.edit().putString("app_path_dir", chosen).apply()));

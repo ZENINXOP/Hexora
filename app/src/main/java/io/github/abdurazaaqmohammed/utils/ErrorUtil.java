@@ -42,7 +42,7 @@ public class ErrorUtil {
         for (StackTraceElement line : e.getStackTrace()) stackTrace.append(line).append('\n');
         stackTrace.append('\n')
                 .append("SDK ").append(Build.VERSION.SDK_INT).append('\n')
-                .append("MP Manager ").append('v');
+                .append("Hexora ").append('v');
         String currentVer;
         try {
             currentVer = context.getPackageManager().getPackageInfo(context.getPackageName(), 0).versionName;

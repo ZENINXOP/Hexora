@@ -1,3 +1,44 @@
+# Hexora
+
+[GitHub repository](https://github.com/ZENINXOP/Hexora)
+
+Hexora is an Android dual-pane file manager based on
+[MP-Manager](https://github.com/AbdurazaaqMohammed/MP-Manager).
+
+This first pass adds an original hexagon/H launcher icon, consistent light and
+dark themes (including system-following mode), compact file rows, a pane divider,
+larger toolbar touch targets, and UI-thread fixes for startup and file-row binding.
+The MT Manager visual reference is pending screenshots; exact parity is not yet
+claimed. No runtime performance benchmark has been completed yet.
+
+Application ID: `app.hexora.manager`. The original Java namespace and plugin
+action names are retained for source and extension compatibility. Hexora uses its
+own provider authorities and `Hexora` export/framework directory. It does not
+migrate MP-Manager preferences or files automatically.
+
+The app updater is inactive until `UPDATE_REPOSITORY` in `app/build.gradle` is
+set to Hexora's GitHub `owner/repository`. It will not offer MP-Manager APKs as
+Hexora updates. Release APK filenames must start with `Hexora.`.
+
+## Build
+
+Use JDK 17 and Android SDK platform 36. Set `sdk.dir` in an untracked
+`local.properties`, then run:
+
+```sh
+./gradlew :app:assembleDebug
+```
+
+## Credits
+
+See [CONTRIBUTORS.md](CONTRIBUTORS.md), the in-app About screen, and the upstream
+documentation below. OpenAI Codex is credited for AI-assisted development.
+The upstream GPL-3.0 license and notices are retained; see [LICENSE](LICENSE).
+
+---
+
+## Upstream documentation
+
 # <img src="./app/src/main/res/mipmap-xxxhdpi/ic_launcher.png" width="48"> MP Manager
 
 A free dual pane, Material Design file manager for Android with focus on APKs and the goal to be an open source alternative to MT Manager

@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name" translatable="false">MP Manager</string>
+    <string name="app_name" translatable="false">Hexora</string>
     <string name="success_saved">文件已成功保存到 %s</string>
     <string name="enable_logs" >保存日志</string>
     <string name="sign_apk_after_merge">合并后签名 APK</string>
@@ -353,7 +353,7 @@
     <string name="no_apk_files_found">归档中未找到 APK 文件</string>
     <string name="manage_bottom_bar">管理底部栏</string>
     <string name="delete_button">删除按钮</string>
-    <string name="termux_perm"><![CDATA[注意：您需要授予 MP Manager 权限才能向 Termux 发送命令\n（权限 > 附加权限 > 在 Termux 环境中运行命令）]]></string>
+    <string name="termux_perm"><![CDATA[注意：您需要授予 Hexora 权限才能向 Termux 发送命令\n（权限 > 附加权限 > 在 Termux 环境中运行命令）]]></string>
     <string name="editor_settings">编辑器设置</string>
     <string name="icon_changed">图标已更改</string>
     <string name="could_not_decode_am">无法解码 AndroidManifest.xml</string>
@@ -858,8 +858,8 @@ Layout Inspector
     <string name="storage_roundtrip_done">往返完成</string>
     <string name="storage_nothing_selected">未选择任何内容，请先点击加载</string>
     <string name="storage_enable_autoclear">启用自动清除服务</string>
-    <string name="storage_autoclear_need">自动清除需要 MP Manager 缓存清理器无障碍服务。请在系统设置中启用它，然后再次启动。</string>
-    <string name="storage_autoclear_need_elevated">自动清除需要 MP Manager 缓存清理器无障碍服务。发现 Root/Shizuku，可以自动启用。</string>
+    <string name="storage_autoclear_need">自动清除需要 Hexora 缓存清理器无障碍服务。请在系统设置中启用它，然后再次启动。</string>
+    <string name="storage_autoclear_need_elevated">自动清除需要 Hexora 缓存清理器无障碍服务。发现 Root/Shizuku，可以自动启用。</string>
     <string name="storage_enable_auto">自动启用</string>
     <string name="storage_open_settings">打开设置</string>
     <string name="storage_service_enabled_again">服务已启用，请再次点击自动清除</string>
@@ -975,7 +975,7 @@ Layout Inspector
     <string name="wifi_save_failed">保存失败</string>
     <string name="wifi_qr_failed">二维码生成失败</string>
     <string name="wifi_nothing_to_export">无可导出内容</string>
-    <string name="wifi_exported">已导出到 Download/MP Manager</string>
+    <string name="wifi_exported">已导出到 Download/Hexora</string>
     <string name="wifi_export_failed">导出失败</string>
     <string name="wifi_networks_n">%1$d 个网络</string>
     <string name="wifi_root_needed_passwords">查看已保存密码需要 Root</string>
@@ -1103,7 +1103,7 @@ Layout Inspector
     <string name="toggle_hex_keypad">切换十六进制键盘</string>
     <string name="height_15_90">高度 %% (15–90)</string>
     <string name="toast_message">Toast 消息</string>
-    <string name="def_msg">来自 MP Manager 的问候</string>
+    <string name="def_msg">来自 Hexora 的问候</string>
     <string name="duration">持续时间</string>
     <string name="position">位置</string>
     <string name="def">默认</string>

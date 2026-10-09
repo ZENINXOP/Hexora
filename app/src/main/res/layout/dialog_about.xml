@@ -57,6 +57,14 @@
             android:text="@string/about_description"
             android:textSize="15sp" />
 
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="@string/hexora_credits"
+            android:textColor="?attr/colorOnSurfaceVariant"
+            android:textSize="13sp" />
+
         <com.google.android.material.button.MaterialButton
             android:id="@+id/aboutGithub"
             style="@style/Widget.Material3.Button.OutlinedButton"

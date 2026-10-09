@@ -338,7 +338,7 @@ public class FileOpener {
         withReadableCopy(file, readable -> {
             Uri uri;
             try {
-                uri = FileProvider.getUriForFile(context, "io.github.abdurazaaqmohammed.MPManager.provider", readable);
+                uri = FileProvider.getUriForFile(context, io.github.abdurazaaqmohammed.MPManager.BuildConfig.APPLICATION_ID + ".provider", readable);
             } catch (Exception e) {
                 showOpenWithDialog(readable, fileName);
                 return;
@@ -357,7 +357,7 @@ public class FileOpener {
     private void showAppsForMime(File file, String fileName, boolean useActual) {
         Uri uri;
         try {
-            uri = FileProvider.getUriForFile(context, "io.github.abdurazaaqmohammed.MPManager.provider", file);
+            uri = FileProvider.getUriForFile(context, io.github.abdurazaaqmohammed.MPManager.BuildConfig.APPLICATION_ID + ".provider", file);
         } catch (Exception e) {
             new ErrorUtil(context).showError(e);
             return;
@@ -834,7 +834,7 @@ public class FileOpener {
                 File staged = stageZipEntry((ZipEntryInfo) item);
                 context.handler.post(() -> {
                     try {
-                        Uri uri = FileProvider.getUriForFile(context, "io.github.abdurazaaqmohammed.MPManager.provider", staged);
+                        Uri uri = FileProvider.getUriForFile(context, io.github.abdurazaaqmohammed.MPManager.BuildConfig.APPLICATION_ID + ".provider", staged);
                         String shareMime = MimeUtil.getMimeTypeForAction(context, staged);
                         context.startActivity(Intent.createChooser(new Intent(Intent.ACTION_SEND).setType(shareMime != null ? shareMime : "application/octet-stream").putExtra(Intent.EXTRA_STREAM, uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), "Share " + fileName));
                     } catch (Exception e) {

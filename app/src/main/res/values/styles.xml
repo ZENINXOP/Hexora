@@ -1,7 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
-    <style name="Theme.MyApp.Black" parent="Theme.Material3.DynamicColors.Dark.NoActionBar">
+    <style name="Theme.Hexora" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/hexora_accent</item>
+        <item name="colorOnPrimary">@android:color/white</item>
+        <item name="colorSecondary">@color/hexora_accent</item>
+        <item name="colorSurface">@color/hexora_surface</item>
+        <item name="colorOnSurface">@color/hexora_text</item>
+        <item name="colorOnSurfaceVariant">@color/hexora_text_secondary</item>
+        <item name="colorSurfaceVariant">@color/hexora_bar</item>
+        <item name="colorSurfaceContainer">@color/hexora_bar</item>
+        <item name="colorSurfaceContainerHigh">@color/hexora_selection</item>
+        <item name="android:windowBackground">@color/hexora_surface</item>
+        <item name="android:statusBarColor">@color/hexora_bar</item>
+        <item name="android:navigationBarColor">@color/hexora_bar</item>
+    </style>
+
+    <style name="Theme.MyApp.Black" parent="Theme.MyApp.Dark">
         <item name="colorSurface">@android:color/black</item>
         <item name="android:windowBackground">@android:color/black</item>
         <item name="colorSurfaceVariant">@android:color/black</item>
@@ -10,14 +25,34 @@
         <item name="android:windowLightStatusBar">false</item>
         <item name="android:windowLightNavigationBar">false</item>
     </style>
-    <style name="Theme.MyApp.Dark" parent="Theme.Material3.DynamicColors.Dark.NoActionBar">
+    <style name="Theme.MyApp.Dark" parent="Theme.Material3.Dark.NoActionBar">
+        <item name="colorPrimary">@color/hexora_accent_dark</item>
+        <item name="colorOnPrimary">@android:color/white</item>
+        <item name="colorSecondary">@color/hexora_accent_dark</item>
+        <item name="colorSurface">@color/hexora_surface_dark</item>
+        <item name="colorOnSurface">@color/hexora_text_dark</item>
+        <item name="colorOnSurfaceVariant">@color/hexora_text_secondary_dark</item>
+        <item name="colorSurfaceVariant">@color/hexora_bar_dark</item>
+        <item name="colorSurfaceContainer">@color/hexora_bar_dark</item>
+        <item name="colorSurfaceContainerHigh">@color/hexora_selection_dark</item>
+        <item name="android:windowBackground">@color/hexora_surface_dark</item>
         <item name="android:statusBarColor">?attr/colorSurface</item>
         <item name="android:navigationBarColor">?attr/colorSurface</item>
         <item name="android:windowLightStatusBar">false</item>
         <item name="android:windowLightNavigationBar">false</item>
     </style>
 
-    <style name="Theme.MyApp.Light" parent="Theme.Material3.DynamicColors.Light.NoActionBar">
+    <style name="Theme.MyApp.Light" parent="Theme.Material3.Light.NoActionBar">
+        <item name="colorPrimary">@color/hexora_accent_light</item>
+        <item name="colorOnPrimary">@android:color/white</item>
+        <item name="colorSecondary">@color/hexora_accent_light</item>
+        <item name="colorSurface">@color/hexora_surface_light</item>
+        <item name="colorOnSurface">@color/hexora_text_light</item>
+        <item name="colorOnSurfaceVariant">@color/hexora_text_secondary_light</item>
+        <item name="colorSurfaceVariant">@color/hexora_bar_light</item>
+        <item name="colorSurfaceContainer">@color/hexora_bar_light</item>
+        <item name="colorSurfaceContainerHigh">@color/hexora_selection_light</item>
+        <item name="android:windowBackground">@color/hexora_surface_light</item>
         <item name="android:statusBarColor">?attr/colorSurface</item>
         <item name="android:navigationBarColor">?attr/colorSurface</item>
         <item name="android:windowLightStatusBar">true</item>

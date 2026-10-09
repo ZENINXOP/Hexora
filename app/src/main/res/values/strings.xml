@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name" translatable="false">MP Manager</string>
+    <string name="app_name" translatable="false">Hexora</string>
     <string name="success_saved">File saved successfully to %s</string>
     <string name="enable_logs" >Save logs</string>
     <string name="sign_apk_after_merge">Sign the APK after merging</string>
@@ -362,7 +362,7 @@
     <string name="no_apk_files_found">No APK files found in archive</string>
     <string name="manage_bottom_bar">Manage Bottom Bar</string>
     <string name="delete_button">Delete Button</string>
-    <string name="termux_perm"><![CDATA[Note: You need to grant permission for MP Manager to be able to send command to Termux\n(Permissions > Additional Permissions > Run commands in Termux environment)]]></string>
+    <string name="termux_perm"><![CDATA[Note: You need to grant permission for Hexora to be able to send command to Termux\n(Permissions > Additional Permissions > Run commands in Termux environment)]]></string>
     <string name="editor_settings">Editor Settings</string>
     <string name="icon_changed">Icon changed</string>
     <string name="could_not_decode_am">Could not decode AndroidManifest.xml</string>
@@ -965,8 +965,8 @@ Layout Inspector
     <string name="storage_roundtrip_done">Round-trip done</string>
     <string name="storage_nothing_selected">Nothing selected, tap Load first</string>
     <string name="storage_enable_autoclear">Enable auto-clear service</string>
-    <string name="storage_autoclear_need">Auto-clear needs the MP Manager Cache Cleaner accessibility service. Enable it in system settings, then start again.</string>
-    <string name="storage_autoclear_need_elevated">Auto-clear needs the MP Manager Cache Cleaner accessibility service. Root/Shizuku found, it can be enabled automatically.</string>
+    <string name="storage_autoclear_need">Auto-clear needs the Hexora Cache Cleaner accessibility service. Enable it in system settings, then start again.</string>
+    <string name="storage_autoclear_need_elevated">Auto-clear needs the Hexora Cache Cleaner accessibility service. Root/Shizuku found, it can be enabled automatically.</string>
     <string name="storage_enable_auto">Enable automatically</string>
     <string name="storage_open_settings">Open settings</string>
     <string name="storage_service_enabled_again">Service enabled, tap auto-clear again</string>
@@ -1082,7 +1082,7 @@ Layout Inspector
     <string name="wifi_save_failed">Save failed</string>
     <string name="wifi_qr_failed">QR failed</string>
     <string name="wifi_nothing_to_export">Nothing to export</string>
-    <string name="wifi_exported">Exported to Download/MP Manager</string>
+    <string name="wifi_exported">Exported to Download/Hexora</string>
     <string name="wifi_export_failed">Export failed</string>
     <string name="wifi_networks_n">%1$d networks</string>
     <string name="wifi_root_needed_passwords">Root needed for saved passwords</string>
@@ -1210,7 +1210,7 @@ Layout Inspector
     <string name="toggle_hex_keypad">Toggle hex keypad</string>
     <string name="height_15_90">Height %% (15–90)</string>
     <string name="toast_message">Toast message</string>
-    <string name="def_msg">Hello from MP Manager</string>
+    <string name="def_msg">Hello from Hexora</string>
     <string name="duration">Duration</string>
     <string name="position">Position</string>
     <string name="def">Default</string>

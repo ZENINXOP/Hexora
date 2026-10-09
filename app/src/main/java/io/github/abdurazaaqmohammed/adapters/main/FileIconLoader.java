@@ -172,7 +172,7 @@ public class FileIconLoader {
         if (cachedIconTheme == theme && cachedIconBucket == bucket) return;
         cachedIconTheme = theme;
         cachedIconBucket = bucket;
-        cachedFolderIcon  = badge(res, density, R.drawable.ic_folder_mt, 0xFF252525, false);
+        cachedFolderIcon  = ResourcesCompat.getDrawable(res, R.drawable.ic_folder_mt, null);
         cachedApkIcon     = badge(res, density, R.drawable.apk_document_24px, 0xFF2E7D32, true);
         cachedImageIcon   = badge(res, density, R.drawable.image_24px, 0xFF6A1B9A, true);
         cachedVideoIcon   = badge(res, density, R.drawable.video_24px, 0xFFC62828, true);

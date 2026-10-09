@@ -76,12 +76,12 @@
             android:requestLegacyExternalStorage="true"
            android:enableOnBackInvokedCallback="false"
            android:largeHeap="true"
-           android:theme="@style/Theme.Material3.DayNight.NoActionBar"
+           android:theme="@style/Theme.Hexora"
            android:name="io.github.ratul.topactivity.App"
            android:icon="@mipmap/ic_launcher"
-           android:label="MP Manager">
+           android:label="@string/app_name">
         <activity
-            android:theme="@style/Theme.Material3.DayNight.NoActionBar"
+            android:theme="@style/Theme.Hexora"
             android:name="io.github.abdurazaaqmohammed.MPManager.MainActivity"
             android:exported="true">
             <intent-filter>
@@ -90,23 +90,23 @@
             </intent-filter>
         </activity>
            <activity
-               android:theme="@style/Theme.Material3.DayNight.NoActionBar"
+               android:theme="@style/Theme.Hexora"
                android:name="io.github.abdurazaaqmohammed.ApkExtractor.APKExtractorActivity"
             android:exported="false">
         </activity>
         <activity
-            android:theme="@style/Theme.Material3.DayNight.NoActionBar"
+            android:theme="@style/Theme.Hexora"
             android:name="io.github.abdurazaaqmohammed.tools.ToolsHubActivity"
             android:exported="false"
             android:label="Plugins">
         </activity>
         <activity
-            android:theme="@style/Theme.Material3.DayNight.NoActionBar"
+            android:theme="@style/Theme.Hexora"
             android:name="io.github.abdurazaaqmohammed.tools.ToolRunnerActivity"
             android:exported="false">
         </activity>
         <activity
-            android:theme="@style/Theme.Material3.DayNight.NoActionBar"
+            android:theme="@style/Theme.Hexora"
             android:name="io.github.abdurazaaqmohammed.tools.WifiManagerActivity"
             android:exported="true">
             <intent-filter>
@@ -115,7 +115,7 @@
             </intent-filter>
         </activity>
         <activity
-            android:theme="@style/Theme.Material3.DayNight.NoActionBar"
+            android:theme="@style/Theme.Hexora"
             android:name="io.github.abdurazaaqmohammed.tools.StorageManagerActivity"
             android:exported="false">
         </activity>
@@ -131,7 +131,7 @@
         </service>
         <service
             android:name="io.github.abdurazaaqmohammed.tools.CacheCleanerService"
-            android:label="MP Manager Cache Cleaner"
+            android:label="Hexora Cache Cleaner"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
             android:exported="true">
             <intent-filter>
@@ -161,7 +161,7 @@
         <activity
             android:name="io.github.abdurazaaqmohammed.features.files.MainSettingsActivity"
             android:exported="false"
-            android:theme="@style/Theme.Material3.DayNight.NoActionBar"
+            android:theme="@style/Theme.Hexora"
             android:configChanges="orientation|screenSize|keyboardHidden" />
         <activity
             android:name="io.github.abdurazaaqmohammed.ui.activities.EditorSettingsActivity"
@@ -170,37 +170,37 @@
         <activity
             android:name="io.github.abdurazaaqmohammed.ui.activities.HexEditorActivity"
             android:exported="false"
-            android:theme="@style/Theme.Material3.DayNight.NoActionBar"
+            android:theme="@style/Theme.Hexora"
             android:configChanges="orientation|screenSize|keyboardHidden"
             android:windowSoftInputMode="adjustResize|stateHidden" />
         <activity
             android:name="io.github.abdurazaaqmohammed.arsc.ArscEditorPlusActivity"
             android:exported="false"
-            android:theme="@style/Theme.Material3.DayNight.NoActionBar"
+            android:theme="@style/Theme.Hexora"
             android:configChanges="orientation|screenSize|keyboardHidden"
             android:windowSoftInputMode="adjustResize|stateHidden" />
         <activity
             android:name="io.github.abdurazaaqmohammed.arsc.ArscEditorActivity"
             android:exported="false"
-            android:theme="@style/Theme.Material3.DayNight.NoActionBar"
+            android:theme="@style/Theme.Hexora"
             android:configChanges="orientation|screenSize|keyboardHidden"
             android:windowSoftInputMode="adjustResize|stateHidden" />
         <activity
             android:name="io.github.abdurazaaqmohammed.arsc.ArscTextActivity"
             android:exported="false"
-            android:theme="@style/Theme.Material3.DayNight.NoActionBar"
+            android:theme="@style/Theme.Hexora"
             android:configChanges="orientation|screenSize|keyboardHidden"
             android:windowSoftInputMode="adjustResize|stateHidden" />
         <activity
             android:name="io.github.abdurazaaqmohammed.ui.activities.CompareTextActivity"
             android:exported="false"
-            android:theme="@style/Theme.Material3.DayNight.NoActionBar"
+            android:theme="@style/Theme.Hexora"
             android:windowSoftInputMode="adjustResize|stateHidden"
             android:configChanges="orientation|screenSize|keyboardHidden" />
         <activity
             android:name="io.github.abdurazaaqmohammed.ui.activities.CompareDexActivity"
             android:exported="false"
-            android:theme="@style/Theme.Material3.DayNight.NoActionBar"
+            android:theme="@style/Theme.Hexora"
             android:windowSoftInputMode="adjustResize|stateHidden"
             android:configChanges="orientation|screenSize|keyboardHidden" />
            <activity
@@ -216,14 +216,14 @@
                 android:configChanges="orientation|screenSize" />
             <provider
                 android:name="rikka.shizuku.ShizukuProvider"
-                android:authorities="io.github.abdurazaaqmohammed.MPManager.shizuku"
+                android:authorities="${applicationId}.shizuku"
                 android:multiprocess="false"
                 android:enabled="true"
                 android:exported="true"
                 android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
             <provider
                 android:name="androidx.startup.InitializationProvider"
-               android:authorities="io.github.abdurazaaqmohammed.MPManager.androidx-startup"
+               android:authorities="${applicationId}.androidx-startup"
                android:exported="false"
                tools:ignore="MissingClass">
                <meta-data
@@ -238,7 +238,7 @@
                 android:configChanges="orientation|screenSize" />
            <provider
                android:name="androidx.core.content.FileProvider"
-               android:authorities="io.github.abdurazaaqmohammed.MPManager.provider"
+               android:authorities="${applicationId}.provider"
                android:exported="false"
                android:grantUriPermissions="true">
                <meta-data
@@ -275,14 +275,14 @@
              <activity
                  android:name="io.github.abdurazaaqmohammed.player.ImageViewerActivity"
                  android:configChanges="orientation|screenSize|keyboardHidden"
-                 android:theme="@style/Theme.Material3.DayNight.NoActionBar" />
+                 android:theme="@style/Theme.Hexora" />
              <activity
                  android:name="io.github.abdurazaaqmohammed.player.ImageEditActivity"
                  android:exported="true"
                  android:label="@string/image_editor"
                  android:configChanges="orientation|screenSize|keyboardHidden"
                  android:windowSoftInputMode="adjustResize|stateHidden"
-                 android:theme="@style/Theme.Material3.DayNight.NoActionBar">
+                 android:theme="@style/Theme.Hexora">
                  <intent-filter>
                      <action android:name="android.intent.action.VIEW" />
                      <action android:name="android.intent.action.EDIT" />
@@ -300,7 +300,7 @@
                   android:exported="true"
                   android:label="Locate"
                   android:configChanges="orientation|screenSize|keyboardHidden"
-                  android:theme="@style/Theme.Material3.DayNight.NoActionBar">
+                  android:theme="@style/Theme.Hexora">
                   <intent-filter>
                       <action android:name="android.intent.action.SEND" />
                       <action android:name="android.intent.action.VIEW" />
@@ -313,7 +313,7 @@
                   android:exported="true"
                   android:label="@string/save"
                  android:configChanges="orientation|screenSize|keyboardHidden"
-                 android:theme="@style/Theme.Material3.DayNight.NoActionBar">
+                 android:theme="@style/Theme.Hexora">
                  <intent-filter>
                      <action android:name="android.intent.action.SEND" />
                      <action android:name="android.intent.action.VIEW" />
@@ -329,7 +329,7 @@
             <activity
                 android:name="io.github.abdurazaaqmohammed.player.MediaPlayerActivity"
                 android:configChanges="orientation|screenSize|keyboardHidden"
-                android:theme="@style/Theme.Material3.DayNight.NoActionBar" />
+                android:theme="@style/Theme.Hexora" />
             <service
                 android:name="io.github.abdurazaaqmohammed.player.MusicService"
                 android:foregroundServiceType="mediaPlayback"

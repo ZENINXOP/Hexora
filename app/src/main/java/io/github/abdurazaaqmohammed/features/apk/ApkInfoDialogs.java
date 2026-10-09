@@ -970,7 +970,7 @@ public class ApkInfoDialogs {
                 if (packageInfo == null || (appInfo = packageInfo.applicationInfo) == null) {
                     context.handler.post(() -> {
                         ad.dismiss();
-                        Uri uri = FileProvider.getUriForFile(context, "io.github.abdurazaaqmohammed.MPManager.provider", file);
+                        Uri uri = FileProvider.getUriForFile(context, io.github.abdurazaaqmohammed.MPManager.BuildConfig.APPLICATION_ID + ".provider", file);
                         context.startActivity(Intent.createChooser(new Intent(Intent.ACTION_VIEW)
                                 .setDataAndType(uri, context.getContentResolver().getType(uri))
                                 .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), "Open " + fileName));

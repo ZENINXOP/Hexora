@@ -717,7 +717,7 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
         requestPermissionLauncher = registerForActivityResult(new ActivityResultContracts.RequestPermission(), isGranted -> { });
 
         new Thread(() -> {
-            File frameworks = new File("/sdcard/MP Manager/frameworks/");
+            File frameworks = new File("/sdcard/Hexora/frameworks/");
             if(!doesNotHaveStoragePerm(this) && !frameworks.exists()) try(
                     InputStream is23 = rss.openRawResource(R.raw.android_23);
                     InputStream is24 = rss.openRawResource(R.raw.android_24);
@@ -734,7 +734,7 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
                     InputStream is35 = rss.openRawResource(R.raw.android_35);
                     InputStream is36 = rss.openRawResource(R.raw.android_36)
             ) {
-                frameworks.mkdir();
+                frameworks.mkdirs();
                 FileUtils.copyFile(is23, new File(frameworks, "android_23.apk"));
                 FileUtils.copyFile(is24, new File(frameworks, "android_24.apk"));
                 FileUtils.copyFile(is25, new File(frameworks, "android_25.apk"));
@@ -750,7 +750,6 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
                 FileUtils.copyFile(is35, new File(frameworks, "android_35.apk"));
                 FileUtils.copyFile(is36, new File(frameworks, "android_36.apk"));
             } catch (Exception ignored) { }
-            setupPullToRefresh();
         }).start();
 
         handler = new Handler(Looper.getMainLooper());
@@ -867,6 +866,7 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
 
         pane1.setLayoutManager(new LinearLayoutManager(this));
         pane2.setLayoutManager(new LinearLayoutManager(this));
+        setupPullToRefresh();
 
         pane1.setOnTouchListener((v, event) -> {
             if (event.getAction() == MotionEvent.ACTION_DOWN) {
@@ -886,285 +886,285 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
             return false;
         });
 
-        new Thread(() -> {
-            TextView currentFolderView = findViewById(R.id.currentFolderPath);
-            currentFolderView.setText(TextUtils.isEmpty(homeDir1Path) ? Environment.getExternalStorageDirectory().getPath() : homeDir1Path);
-            currentFolderView.setOnLongClickListener(v -> {
-                CopyUtil.copyToClipboard(this, ((TextView) v).getText());
-                return false;
-            });
-            currentFolderView.setOnClickListener(v -> {
-                View textInputLayout = LayoutInflater.from(this).inflate(R.layout.material_edittext, null);//new TextInputLayout(this, null, com.google.android.material.R.style.Widget_MaterialComponents_TextInputLayout_OutlinedBox);
-                EditText input = textInputLayout.findViewById(R.id.m_et_edittext);
-                input.setText(((TextView) v).getText());
-                AlertDialog ad = dialogUtil.getDialogBuilder()
-                        .setTitle(R.string.path)
-                        .setView(textInputLayout)
-                        .setNegativeButton(android.R.string.cancel, null)
-                        .setNeutralButton(android.R.string.paste, null) // Note: Need to set it after otherwise the dialog auto close
-                        .setPositiveButton(android.R.string.ok, (dialog, which) -> {
-                            File inputPath = new File(input.getText().toString());
-                            boolean canOpen = inputPath.exists() && inputPath.isDirectory() || (!inputPath.exists() && inputPath.mkdirs());
-                            if (!canOpen) {
-                                try {
-                                    String abs = inputPath.getAbsolutePath();
-                                    if (AccessManager.exists(this, abs) && RootManager.getInstance(this).isDirectory(abs)) {
-                                        canOpen = true;
-                                    }
-                                } catch (Exception ignored) {
-                                }
-                            }
-                            if (canOpen) {
-                                boolean isPane1 = lastPaneSelected == 1;
-                                if (isPane1)
-                                    pane1Folder = inputPath;
-                                else
-                                    pane2Folder = inputPath;
-                                loadFolderInPane(inputPath, isPane1);
-                            } else {
-                                Extensions.showMessage(MainActivity.this, getString(R.string.navigate_create_failed, inputPath));
-                            }
-                        }).show();
-                ad.getButton(DialogInterface.BUTTON_NEUTRAL).setOnClickListener(v2 -> {
-                    int selectionStart = input.getSelectionStart();
-                    int selectionEnd = input.getSelectionEnd();
-                    if (selectionStart != selectionEnd) {
-                        input.getText().delete(selectionStart, selectionEnd);
-                    }
-                    CharSequence text = ((ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE)).getText();
-                    if (TextUtils.isEmpty(text)) Extensions.showMessage(this, rss.getString(R.string.nothing_found_to_paste));
-                    else input.getText().insert(selectionStart, text);
-                });
-            });
-            View addButton = findViewById(R.id.addButton);
-            addButton.setOnLongClickListener(this::showMsgOnLongPress);
-            addButton.setOnClickListener(v -> {
-                if (multiSelect.isActive()) {
-                    multiSelect.exitAll();
-                    return;
-                } else if(getCurrentPane().getAdapter() instanceof MainFilesArrayAdapter adapter && adapter.isInZip) {
-                    adapter.setMultiSelectMode(true);
-                    return;
-                }
-                View textInputLayout = LayoutInflater.from(this).inflate(R.layout.enter_name, null);
-                EditText input = textInputLayout.findViewById(R.id.m_et_edittext);
-                AlertDialog ad = dialogUtil.getDialogBuilder()
-                        .setTitle(getString(R.string.create))
-                        .setView(textInputLayout)
-                        .setNegativeButton(rss.getString(R.string.folder), (dialog, which) -> {
-                            boolean isPane1 = lastPaneSelected == 1;
-                            File ogFolder = isPane1 ? pane1Folder : pane2Folder;
-                            String inputStr = input.getText().toString();
-                            if (new File(ogFolder, inputStr).mkdir()) loadFolderInPane(ogFolder, isPane1);
-                            else if (mkdirViaRoot(ogFolder, inputStr)) loadFolderInPane(ogFolder, isPane1);
-                            else Extensions.showMessage(MainActivity.this, rss.getString(R.string.failed_to_create_folder, inputStr));
-                        })
-                        .setNeutralButton(android.R.string.paste, null) // Note: Need to set it after otherwise the dialog auto close
-                        .setPositiveButton(rss.getString(R.string.file), (dialog, which) -> {
-                            boolean isPane1 = lastPaneSelected == 1;
-                            File ogFolder = isPane1 ? pane1Folder : pane2Folder;
-                            String inputStr = input.getText().toString();
+        // View setup and listener registration must stay on the UI thread.
+        TextView currentFolderView = findViewById(R.id.currentFolderPath);
+        currentFolderView.setText(TextUtils.isEmpty(homeDir1Path) ? Environment.getExternalStorageDirectory().getPath() : homeDir1Path);
+        currentFolderView.setOnLongClickListener(v -> {
+            CopyUtil.copyToClipboard(this, ((TextView) v).getText());
+            return false;
+        });
+        currentFolderView.setOnClickListener(v -> {
+            View textInputLayout = LayoutInflater.from(this).inflate(R.layout.material_edittext, null);//new TextInputLayout(this, null, com.google.android.material.R.style.Widget_MaterialComponents_TextInputLayout_OutlinedBox);
+            EditText input = textInputLayout.findViewById(R.id.m_et_edittext);
+            input.setText(((TextView) v).getText());
+            AlertDialog ad = dialogUtil.getDialogBuilder()
+                    .setTitle(R.string.path)
+                    .setView(textInputLayout)
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .setNeutralButton(android.R.string.paste, null) // Note: Need to set it after otherwise the dialog auto close
+                    .setPositiveButton(android.R.string.ok, (dialog, which) -> {
+                        File inputPath = new File(input.getText().toString());
+                        boolean canOpen = inputPath.exists() && inputPath.isDirectory() || (!inputPath.exists() && inputPath.mkdirs());
+                        if (!canOpen) {
                             try {
-                                if (new File(ogFolder, inputStr).createNewFile()) loadFolderInPane(ogFolder, isPane1);
-                                else if (touchViaRoot(ogFolder, inputStr)) loadFolderInPane(ogFolder, isPane1);
-                                else Extensions.showMessage(MainActivity.this, rss.getString(R.string.failed_to_create_file, inputStr));
-                            } catch (IOException e) {
-                                if (touchViaRoot(ogFolder, inputStr)) loadFolderInPane(ogFolder, isPane1);
-                                else Extensions.showMessage(MainActivity.this, rss.getString(R.string.failed_to_create_file, inputStr));
-                            }
-                        }).show();
-                ad.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v2 -> {
-                    CharSequence text = ((ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE)).getText();
-                    if (TextUtils.isEmpty(text)) {
-                        Extensions.showMessage(MainActivity.this, rss.getString(R.string.nothing_found_to_paste)); return;
-                    }
-                    int selectionStart = input.getSelectionStart();
-                    int selectionEnd = input.getSelectionEnd();
-                    if (selectionStart != selectionEnd) {
-                        input.getText().delete(selectionStart, selectionEnd);
-                        input.getText().insert(selectionStart, text);
-                    } else if(selectionEnd == -1) { // Empty
-                        input.setText(text);
-                    }
-                });
-            });
-
-            View syncPaneButton = findViewById(R.id.syncPaneButton);
-            syncPaneButton.setOnLongClickListener(this::showMsgOnLongPress);
-            syncPaneButton.setOnClickListener(v -> {
-                RecyclerView.Adapter a = getCurrentPane().getAdapter();
-                if(a instanceof MainFilesArrayAdapter mainFilesArrayAdapter) {
-                    if (lastPaneSelected == 1)
-                        loadFolderInPane(pane2Folder = mainFilesArrayAdapter.isInZip ? pane1Folder.getParentFile() : pane1Folder, false);
-                    else
-                        loadFolderInPane(pane1Folder = mainFilesArrayAdapter.isInZip ? pane2Folder.getParentFile() : pane2Folder, true);
-                }
-            });
-
-            View moreOptionsMenu = findViewById(R.id.moreOptionsMenu);
-            moreOptionsMenu.setOnLongClickListener(this::showMsgOnLongPress);
-            moreOptionsMenu.setOnClickListener(v -> {
-                PopupMenu popup = new PopupMenu(MainActivity.this, v);
-                Menu menu = popup.getMenu();
-                menu.add(0, 0, 0, getString(R.string.menu_refresh)).setIcon(R.drawable.baseline_refresh_24);
-                menu.add(0, 1, 0, getString(R.string.filter)).setIcon(R.drawable.baseline_filter_list_24);
-                menu.add(0, 2, 0, getString(R.string.search)).setIcon(R.drawable.baseline_search_24);
-                menu.add(0, 15, 0, getString(R.string.find_in_files)).setIcon(R.drawable.ic_search_replace);
-                menu.add(0, 3, 0, getString(R.string.menu_select_all)).setIcon(R.drawable.baseline_select_all_24);
-                menu.add(0, 4, 0, getString(R.string.sort)).setIcon(R.drawable.baseline_sort_24);
-
-                SubMenu hiddenMenu = menu.addSubMenu(0, 5, 0, getString(R.string.menu_hidden_files));
-                hiddenMenu.setIcon(R.drawable.visibility_off_24px);
-                SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(MainActivity.this);
-                MenuItem sysItem = hiddenMenu.add(0, 6, 0, getString(R.string.menu_show_system_hidden));
-                sysItem.setCheckable(true).setChecked(prefs.getBoolean("show_system_hidden", false));
-                MenuItem manItem = hiddenMenu.add(0, 7, 0, getString(R.string.menu_show_manual_hidden));
-                manItem.setCheckable(true).setChecked(prefs.getBoolean("show_manually_hidden", false));
-
-                RecyclerView.Adapter a = getCurrentPane().getAdapter();
-                if ((a instanceof MainFilesArrayAdapter)) {
-                    MainFilesArrayAdapter adapter = (MainFilesArrayAdapter) getCurrentPane().getAdapter();
-                    MenuItem hideSel = hiddenMenu.add(0, 8, 0, getString(R.string.menu_hide_selected));
-                    hideSel.setEnabled(adapter != null && adapter.isMultiSelectMode());
-                    hiddenMenu.add(0, 9, 0, getString(R.string.edit_hidden_files)).setIcon(R.drawable.baseline_drive_file_rename_outline_24);
-                }
-
-                menu.add(0, 10, 0, getString(R.string.menu_add_bookmark)).setIcon(R.drawable.baseline_bookmark_24);
-                menu.add(0, 11, 0, getString(R.string.set_as_home)).setIcon(R.drawable.baseline_home_24);
-                menu.add(0, 12, 0, getString(R.string.menu_swap_panes)).setIcon(R.drawable.baseline_swap_horiz_24);
-                menu.add(0, 13, 0, getString(R.string.preferences)).setIcon(R.drawable.baseline_settings_24);
-                menu.add(0, 14, 0, getString(R.string.exit)).setIcon(R.drawable.baseline_exit_to_app_24);
-
-                popup.setOnMenuItemClickListener(item -> {
-                    switch (item.getItemId()) {
-                        case 0:
-                            reloadCurrentFolder();
-                            break;
-                        case 1:
-                            LinearLayout topBar = findViewById(R.id.topBar);
-                            LinearLayout pathLayout = (LinearLayout) topBar.getChildAt(1);
-                            TextInputLayout filterBox = (TextInputLayout) topBar.getChildAt(2);
-                            EditText filterBar = filterBox.getEditText();
-                            if (pathLayout.getVisibility() == View.VISIBLE) {
-                                pathLayout.setVisibility(View.GONE);
-                                filterBox.setVisibility(View.VISIBLE);
-                                if (filterBar != null) {
-                                    filterBar.requestFocus();
-                                    try {
-                                        InputMethodManager imm =
-                                                (InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
-                                        if (imm != null) imm.showSoftInput(filterBar, InputMethodManager.SHOW_IMPLICIT);
-                                    } catch (Exception ignored) {
-                                    }
+                                String abs = inputPath.getAbsolutePath();
+                                if (AccessManager.exists(this, abs) && RootManager.getInstance(this).isDirectory(abs)) {
+                                    canOpen = true;
                                 }
-                            } else {
-                                pathLayout.setVisibility(View.VISIBLE);
-                                filterBox.setVisibility(View.GONE);
-                                if (filterBar != null) filterBar.setText("");
+                            } catch (Exception ignored) {
+                            }
+                        }
+                        if (canOpen) {
+                            boolean isPane1 = lastPaneSelected == 1;
+                            if (isPane1)
+                                pane1Folder = inputPath;
+                            else
+                                pane2Folder = inputPath;
+                            loadFolderInPane(inputPath, isPane1);
+                        } else {
+                            Extensions.showMessage(MainActivity.this, getString(R.string.navigate_create_failed, inputPath));
+                        }
+                    }).show();
+            ad.getButton(DialogInterface.BUTTON_NEUTRAL).setOnClickListener(v2 -> {
+                int selectionStart = input.getSelectionStart();
+                int selectionEnd = input.getSelectionEnd();
+                if (selectionStart != selectionEnd) {
+                    input.getText().delete(selectionStart, selectionEnd);
+                }
+                CharSequence text = ((ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE)).getText();
+                if (TextUtils.isEmpty(text)) Extensions.showMessage(this, rss.getString(R.string.nothing_found_to_paste));
+                else input.getText().insert(selectionStart, text);
+            });
+        });
+        View addButton = findViewById(R.id.addButton);
+        addButton.setOnLongClickListener(this::showMsgOnLongPress);
+        addButton.setOnClickListener(v -> {
+            if (multiSelect.isActive()) {
+                multiSelect.exitAll();
+                return;
+            } else if(getCurrentPane().getAdapter() instanceof MainFilesArrayAdapter adapter && adapter.isInZip) {
+                adapter.setMultiSelectMode(true);
+                return;
+            }
+            View textInputLayout = LayoutInflater.from(this).inflate(R.layout.enter_name, null);
+            EditText input = textInputLayout.findViewById(R.id.m_et_edittext);
+            AlertDialog ad = dialogUtil.getDialogBuilder()
+                    .setTitle(getString(R.string.create))
+                    .setView(textInputLayout)
+                    .setNegativeButton(rss.getString(R.string.folder), (dialog, which) -> {
+                        boolean isPane1 = lastPaneSelected == 1;
+                        File ogFolder = isPane1 ? pane1Folder : pane2Folder;
+                        String inputStr = input.getText().toString();
+                        if (new File(ogFolder, inputStr).mkdir()) loadFolderInPane(ogFolder, isPane1);
+                        else if (mkdirViaRoot(ogFolder, inputStr)) loadFolderInPane(ogFolder, isPane1);
+                        else Extensions.showMessage(MainActivity.this, rss.getString(R.string.failed_to_create_folder, inputStr));
+                    })
+                    .setNeutralButton(android.R.string.paste, null) // Note: Need to set it after otherwise the dialog auto close
+                    .setPositiveButton(rss.getString(R.string.file), (dialog, which) -> {
+                        boolean isPane1 = lastPaneSelected == 1;
+                        File ogFolder = isPane1 ? pane1Folder : pane2Folder;
+                        String inputStr = input.getText().toString();
+                        try {
+                            if (new File(ogFolder, inputStr).createNewFile()) loadFolderInPane(ogFolder, isPane1);
+                            else if (touchViaRoot(ogFolder, inputStr)) loadFolderInPane(ogFolder, isPane1);
+                            else Extensions.showMessage(MainActivity.this, rss.getString(R.string.failed_to_create_file, inputStr));
+                        } catch (IOException e) {
+                            if (touchViaRoot(ogFolder, inputStr)) loadFolderInPane(ogFolder, isPane1);
+                            else Extensions.showMessage(MainActivity.this, rss.getString(R.string.failed_to_create_file, inputStr));
+                        }
+                    }).show();
+            ad.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v2 -> {
+                CharSequence text = ((ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE)).getText();
+                if (TextUtils.isEmpty(text)) {
+                    Extensions.showMessage(MainActivity.this, rss.getString(R.string.nothing_found_to_paste)); return;
+                }
+                int selectionStart = input.getSelectionStart();
+                int selectionEnd = input.getSelectionEnd();
+                if (selectionStart != selectionEnd) {
+                    input.getText().delete(selectionStart, selectionEnd);
+                    input.getText().insert(selectionStart, text);
+                } else if(selectionEnd == -1) { // Empty
+                    input.setText(text);
+                }
+            });
+        });
+
+        View syncPaneButton = findViewById(R.id.syncPaneButton);
+        syncPaneButton.setOnLongClickListener(this::showMsgOnLongPress);
+        syncPaneButton.setOnClickListener(v -> {
+            RecyclerView.Adapter a = getCurrentPane().getAdapter();
+            if(a instanceof MainFilesArrayAdapter mainFilesArrayAdapter) {
+                if (lastPaneSelected == 1)
+                    loadFolderInPane(pane2Folder = mainFilesArrayAdapter.isInZip ? pane1Folder.getParentFile() : pane1Folder, false);
+                else
+                    loadFolderInPane(pane1Folder = mainFilesArrayAdapter.isInZip ? pane2Folder.getParentFile() : pane2Folder, true);
+            }
+        });
+
+        View moreOptionsMenu = findViewById(R.id.moreOptionsMenu);
+        moreOptionsMenu.setOnLongClickListener(this::showMsgOnLongPress);
+        moreOptionsMenu.setOnClickListener(v -> {
+            PopupMenu popup = new PopupMenu(MainActivity.this, v);
+            Menu menu = popup.getMenu();
+            menu.add(0, 0, 0, getString(R.string.menu_refresh)).setIcon(R.drawable.baseline_refresh_24);
+            menu.add(0, 1, 0, getString(R.string.filter)).setIcon(R.drawable.baseline_filter_list_24);
+            menu.add(0, 2, 0, getString(R.string.search)).setIcon(R.drawable.baseline_search_24);
+            menu.add(0, 15, 0, getString(R.string.find_in_files)).setIcon(R.drawable.ic_search_replace);
+            menu.add(0, 3, 0, getString(R.string.menu_select_all)).setIcon(R.drawable.baseline_select_all_24);
+            menu.add(0, 4, 0, getString(R.string.sort)).setIcon(R.drawable.baseline_sort_24);
+
+            SubMenu hiddenMenu = menu.addSubMenu(0, 5, 0, getString(R.string.menu_hidden_files));
+            hiddenMenu.setIcon(R.drawable.visibility_off_24px);
+            SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(MainActivity.this);
+            MenuItem sysItem = hiddenMenu.add(0, 6, 0, getString(R.string.menu_show_system_hidden));
+            sysItem.setCheckable(true).setChecked(prefs.getBoolean("show_system_hidden", false));
+            MenuItem manItem = hiddenMenu.add(0, 7, 0, getString(R.string.menu_show_manual_hidden));
+            manItem.setCheckable(true).setChecked(prefs.getBoolean("show_manually_hidden", false));
+
+            RecyclerView.Adapter a = getCurrentPane().getAdapter();
+            if ((a instanceof MainFilesArrayAdapter)) {
+                MainFilesArrayAdapter adapter = (MainFilesArrayAdapter) getCurrentPane().getAdapter();
+                MenuItem hideSel = hiddenMenu.add(0, 8, 0, getString(R.string.menu_hide_selected));
+                hideSel.setEnabled(adapter != null && adapter.isMultiSelectMode());
+                hiddenMenu.add(0, 9, 0, getString(R.string.edit_hidden_files)).setIcon(R.drawable.baseline_drive_file_rename_outline_24);
+            }
+
+            menu.add(0, 10, 0, getString(R.string.menu_add_bookmark)).setIcon(R.drawable.baseline_bookmark_24);
+            menu.add(0, 11, 0, getString(R.string.set_as_home)).setIcon(R.drawable.baseline_home_24);
+            menu.add(0, 12, 0, getString(R.string.menu_swap_panes)).setIcon(R.drawable.baseline_swap_horiz_24);
+            menu.add(0, 13, 0, getString(R.string.preferences)).setIcon(R.drawable.baseline_settings_24);
+            menu.add(0, 14, 0, getString(R.string.exit)).setIcon(R.drawable.baseline_exit_to_app_24);
+
+            popup.setOnMenuItemClickListener(item -> {
+                switch (item.getItemId()) {
+                    case 0:
+                        reloadCurrentFolder();
+                        break;
+                    case 1:
+                        LinearLayout topBar = findViewById(R.id.topBar);
+                        LinearLayout pathLayout = (LinearLayout) topBar.getChildAt(1);
+                        TextInputLayout filterBox = (TextInputLayout) topBar.getChildAt(2);
+                        EditText filterBar = filterBox.getEditText();
+                        if (pathLayout.getVisibility() == View.VISIBLE) {
+                            pathLayout.setVisibility(View.GONE);
+                            filterBox.setVisibility(View.VISIBLE);
+                            if (filterBar != null) {
+                                filterBar.requestFocus();
                                 try {
                                     InputMethodManager imm =
                                             (InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
-                                    if (imm != null) imm.hideSoftInputFromWindow(topBar.getWindowToken(), 0);
+                                    if (imm != null) imm.showSoftInput(filterBar, InputMethodManager.SHOW_IMPLICIT);
                                 } catch (Exception ignored) {
                                 }
                             }
-                            break;
-                        case 2:
-                            showSearchDialog();
-                            break;
-                        case 15:
-                            showFindInFilesDialog();
-                            break;
-                        case 3:
-                            if (a instanceof MainFilesArrayAdapter) ((MainFilesArrayAdapter) a).selectAll();
-                            break;
-                        case 4:
-                            showSortDialog();
-                            break;
-                        case 6: {
-                            boolean isChecked = !item.isChecked();
-                            item.setChecked(isChecked);
-                            prefs.edit().putBoolean("show_system_hidden", isChecked).apply();
-                            reloadCurrentFolder();
-                            break;
-                        }
-                        case 7: {
-                            boolean isChecked = !item.isChecked();
-                            item.setChecked(isChecked);
-                            prefs.edit().putBoolean("show_manually_hidden", isChecked).apply();
-                            reloadCurrentFolder();
-                            break;
-                        }
-                        case 8:
-                            Set<String> manualHidden = new HashSet<>(prefs.getStringSet("manually_hidden_files", new HashSet<>()));
-                            for (Object obj : ((MainFilesArrayAdapter) a).getSelectedFiles()) {
-                                if (obj instanceof File)
-                                    manualHidden.add(((File) obj).getPath());
-                                else if (obj instanceof ZipEntryInfo)
-                                    manualHidden.add(((ZipEntryInfo) obj).getFullPath());
-                            }
-                            prefs.edit().putStringSet("manually_hidden_files", manualHidden).apply();
-                            ((MainFilesArrayAdapter) a).clearSelection();
-                            reloadCurrentFolder();
-                            break;
-                        case 9:
-                            showEditHiddenFilesDialog();
-                            break;
-                        case 10: {
-                            boolean isPane1 = lastPaneSelected == 1;
-                            File toBookmark = isPane1 ? pane1Folder : pane2Folder;
-                            addBookmark(toBookmark);
-                            Extensions.showMessage(MainActivity.this, rss.getString(R.string.added_to_bookmarks, toBookmark.getName()));
-                            break;
-                        }
-                        case 11: {
-                            boolean isPane1 = lastPaneSelected == 1;
-                            prefs.edit().putString(isPane1 ? "home1" : "home2", (isPane1 ? pane1Folder : pane2Folder).getPath())
-                                    .apply();
-                            Extensions.showMessage(MainActivity.this, R.string.set_as_home);
-                            break;
-                        }
-                        case 12:
-                            File temp = pane1Folder;
-                            pane1Folder = pane2Folder;
-                            pane2Folder = temp;
-                            loadFolderInPane(pane1Folder, true);
-                            loadFolderInPane(pane2Folder, false);
-                            break;
-                        case 13:
-                            showSettingsDialog();
-                            break;
-                        case 14:
-                            finishAffinity();
-                            break;
-                    }
-                    return true;
-                });
-                PopupMenus.forceShowIcons(popup);
-                popup.show();
-            });
-
-            View upButton = findViewById(R.id.upButton);
-            upButton.setOnLongClickListener(this::showMsgOnLongPress);
-            upButton.setOnClickListener(v -> {
-                boolean isPane1 = lastPaneSelected == 1;
-                RecyclerView.Adapter a = getCurrentPane().getAdapter();
-                if ((a instanceof MainFilesArrayAdapter adapter)) {
-                    if (adapter.isInZip) {
-                        File zipFile = isPane1 ? pane1Folder : pane2Folder;
-                        if (TextUtils.isEmpty(adapter.currentZipPath)) {
-                            if (zipFile.getParentFile() != null)
-                                loadFolderInPane(zipFile.getParentFile(), isPane1);
                         } else {
-                            File parentInZip = new File(adapter.currentZipPath).getParentFile();
-                            loadZipFolderInPane(zipFile, parentInZip != null ? parentInZip.getPath() : "", isPane1, true);
+                            pathLayout.setVisibility(View.VISIBLE);
+                            filterBox.setVisibility(View.GONE);
+                            if (filterBar != null) filterBar.setText("");
+                            try {
+                                InputMethodManager imm =
+                                        (InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
+                                if (imm != null) imm.hideSoftInputFromWindow(topBar.getWindowToken(), 0);
+                            } catch (Exception ignored) {
+                            }
                         }
-                    } else loadFolderInPane((File) adapter.getItem(0), isPane1);
-                } else {
-                    ftp.ftpParent(isPane1);
+                        break;
+                    case 2:
+                        showSearchDialog();
+                        break;
+                    case 15:
+                        showFindInFilesDialog();
+                        break;
+                    case 3:
+                        if (a instanceof MainFilesArrayAdapter) ((MainFilesArrayAdapter) a).selectAll();
+                        break;
+                    case 4:
+                        showSortDialog();
+                        break;
+                    case 6: {
+                        boolean isChecked = !item.isChecked();
+                        item.setChecked(isChecked);
+                        prefs.edit().putBoolean("show_system_hidden", isChecked).apply();
+                        reloadCurrentFolder();
+                        break;
+                    }
+                    case 7: {
+                        boolean isChecked = !item.isChecked();
+                        item.setChecked(isChecked);
+                        prefs.edit().putBoolean("show_manually_hidden", isChecked).apply();
+                        reloadCurrentFolder();
+                        break;
+                    }
+                    case 8:
+                        Set<String> manualHidden = new HashSet<>(prefs.getStringSet("manually_hidden_files", new HashSet<>()));
+                        for (Object obj : ((MainFilesArrayAdapter) a).getSelectedFiles()) {
+                            if (obj instanceof File)
+                                manualHidden.add(((File) obj).getPath());
+                            else if (obj instanceof ZipEntryInfo)
+                                manualHidden.add(((ZipEntryInfo) obj).getFullPath());
+                        }
+                        prefs.edit().putStringSet("manually_hidden_files", manualHidden).apply();
+                        ((MainFilesArrayAdapter) a).clearSelection();
+                        reloadCurrentFolder();
+                        break;
+                    case 9:
+                        showEditHiddenFilesDialog();
+                        break;
+                    case 10: {
+                        boolean isPane1 = lastPaneSelected == 1;
+                        File toBookmark = isPane1 ? pane1Folder : pane2Folder;
+                        addBookmark(toBookmark);
+                        Extensions.showMessage(MainActivity.this, rss.getString(R.string.added_to_bookmarks, toBookmark.getName()));
+                        break;
+                    }
+                    case 11: {
+                        boolean isPane1 = lastPaneSelected == 1;
+                        prefs.edit().putString(isPane1 ? "home1" : "home2", (isPane1 ? pane1Folder : pane2Folder).getPath())
+                                .apply();
+                        Extensions.showMessage(MainActivity.this, R.string.set_as_home);
+                        break;
+                    }
+                    case 12:
+                        File temp = pane1Folder;
+                        pane1Folder = pane2Folder;
+                        pane2Folder = temp;
+                        loadFolderInPane(pane1Folder, true);
+                        loadFolderInPane(pane2Folder, false);
+                        break;
+                    case 13:
+                        showSettingsDialog();
+                        break;
+                    case 14:
+                        finishAffinity();
+                        break;
                 }
+                return true;
             });
-        }).start();
+            PopupMenus.forceShowIcons(popup);
+            popup.show();
+        });
+
+        View upButton = findViewById(R.id.upButton);
+        upButton.setOnLongClickListener(this::showMsgOnLongPress);
+        upButton.setOnClickListener(v -> {
+            boolean isPane1 = lastPaneSelected == 1;
+            RecyclerView.Adapter a = getCurrentPane().getAdapter();
+            if ((a instanceof MainFilesArrayAdapter adapter)) {
+                if (adapter.isInZip) {
+                    File zipFile = isPane1 ? pane1Folder : pane2Folder;
+                    if (TextUtils.isEmpty(adapter.currentZipPath)) {
+                        if (zipFile.getParentFile() != null)
+                            loadFolderInPane(zipFile.getParentFile(), isPane1);
+                    } else {
+                        File parentInZip = new File(adapter.currentZipPath).getParentFile();
+                        loadZipFolderInPane(zipFile, parentInZip != null ? parentInZip.getPath() : "", isPane1, true);
+                    }
+                } else loadFolderInPane((File) adapter.getItem(0), isPane1);
+            } else {
+                ftp.ftpParent(isPane1);
+            }
+        });
+
 
         String locate = getIntent() == null ? null : getIntent().getStringExtra("locatePath");
         handler.post(() -> {

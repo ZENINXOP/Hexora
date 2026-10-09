@@ -38,7 +38,7 @@ public class FtpsCertificateUtil {
 
         CertAndKeyGen keyGen = new CertAndKeyGen("RSA", "SHA256withRSA");
         keyGen.generate(2048);
-        X500Name x500Name = new X500Name("CN=MP Manager FTP Server, O=MP Manager, L=Mobile, C=WW");
+        X500Name x500Name = new X500Name("CN=Hexora FTP Server, O=Hexora, L=Mobile, C=WW");
         long oneYear = 365L * 24 * 60 * 60;
         X509Certificate cert = keyGen.getSelfCertificate(x500Name, new Date(), oneYear);
 

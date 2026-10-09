@@ -46,8 +46,8 @@ public class UpdateUtil {
     private static final java.util.regex.Pattern VERSION_TAG =
             java.util.regex.Pattern.compile("^v?(\\d+(?:\\.\\d+)*)$");
 
-    /** The app's own APK asset, e.g. MP-Manager.1.0.9.apk. */
-    private static final String APP_APK_PREFIX = "mp-manager.";
+    /** Hexora release assets use names such as Hexora.0.1.0.apk. */
+    private static final String APP_APK_PREFIX = "hexora.";
 
     /** An MP-Manager release: newest first, tag, APK asset and changelog. */
     private static final class AppRelease {
@@ -58,6 +58,12 @@ public class UpdateUtil {
     }
 
     public static void checkForUpdates(boolean toast, AppCompatActivity context) {
+        if (io.github.abdurazaaqmohammed.MPManager.BuildConfig.UPDATE_REPOSITORY.isEmpty()) {
+            if (toast) android.widget.Toast.makeText(context,
+                    io.github.abdurazaaqmohammed.MPManager.R.string.hexora_updates_unavailable,
+                    android.widget.Toast.LENGTH_LONG).show();
+            return;
+        }
         Resources rss = context.getResources();
         SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(context);
         String lastVerChecked = prefs.getString(PREF_LAST_VER_CHECKED, null);
@@ -127,7 +133,7 @@ public class UpdateUtil {
                                             })
                                     .setNegativeButton("Go to GitHub Release", (dialog, which) -> context
                                             .startActivity(new Intent(Intent.ACTION_VIEW).setData(Uri.parse(
-                                                    "https://github.com/AbdurazaaqMohammed/MP-Manager/releases/tag/" + release.version))))
+                                                    "https://github.com/" + io.github.abdurazaaqmohammed.MPManager.BuildConfig.UPDATE_REPOSITORY + "/releases/tag/" + release.version))))
                                     .setNeutralButton(rss.getString(android.R.string.cancel), null).create();
                     alertDialog.setOnDismissListener(dialog -> prefs.edit()
                             .putString(PREF_LAST_VER_CHECKED, release.version).apply());
@@ -189,7 +195,8 @@ public class UpdateUtil {
 
     @NonNull
     private static HttpURLConnection getHttpURLConnection() throws IOException {
-        HttpURLConnection conn = (HttpURLConnection) new URL("https://api.github.com/repos/AbdurazaaqMohammed/MP-Manager/releases").openConnection();
+        HttpURLConnection conn = (HttpURLConnection) new URL("https://api.github.com/repos/"
+                + io.github.abdurazaaqmohammed.MPManager.BuildConfig.UPDATE_REPOSITORY + "/releases").openConnection();
         conn.setRequestMethod("GET");
         conn.setRequestProperty("User-Agent",
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36 Edg/128.0.0.0");

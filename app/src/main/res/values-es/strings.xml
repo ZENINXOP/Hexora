@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name" translatable="false">MP Manager</string>
+    <string name="app_name" translatable="false">Hexora</string>
     <string name="success_saved">Archivo guardado correctamente en %s</string>
     <string name="enable_logs">Guardar registros</string>
     <string name="sign_apk_after_merge">Firmar el APK después de combinar</string>
@@ -356,7 +356,7 @@
     <string name="no_apk_files_found">No se encontraron archivos APK en el archivo</string>
     <string name="manage_bottom_bar">Gestionar barra inferior</string>
     <string name="delete_button">Eliminar botón</string>
-    <string name="termux_perm"><![CDATA[Nota: Debes conceder permiso para que MP Manager pueda enviar comandos a Termux\n(Permisos > Permisos adicionales > Ejecutar comandos en el entorno Termux)]]></string>
+    <string name="termux_perm"><![CDATA[Nota: Debes conceder permiso para que Hexora pueda enviar comandos a Termux\n(Permisos > Permisos adicionales > Ejecutar comandos en el entorno Termux)]]></string>
     <string name="editor_settings">Ajustes del editor</string>
     <string name="icon_changed">Icono cambiado</string>
     <string name="could_not_decode_am">No se pudo decodificar AndroidManifest.xml</string>
@@ -955,8 +955,8 @@ Layout Inspector
     <string name="storage_roundtrip_done">Prueba completada</string>
     <string name="storage_nothing_selected">Nada seleccionado, toca Cargar primero</string>
     <string name="storage_enable_autoclear">Habilitar servicio de autoborrado</string>
-    <string name="storage_autoclear_need">El autoborrado necesita el servicio de accesibilidad MP Manager Cache Cleaner. Actívalo en ajustes del sistema y vuelve a iniciar.</string>
-    <string name="storage_autoclear_need_elevated">El autoborrado necesita el servicio de accesibilidad MP Manager Cache Cleaner. Root/Shizuku detectado, se puede activar automáticamente.</string>
+    <string name="storage_autoclear_need">El autoborrado necesita el servicio de accesibilidad Hexora Cache Cleaner. Actívalo en ajustes del sistema y vuelve a iniciar.</string>
+    <string name="storage_autoclear_need_elevated">El autoborrado necesita el servicio de accesibilidad Hexora Cache Cleaner. Root/Shizuku detectado, se puede activar automáticamente.</string>
     <string name="storage_enable_auto">Habilitar automáticamente</string>
     <string name="storage_open_settings">Abrir ajustes</string>
     <string name="storage_service_enabled_again">Servicio habilitado, toca autoborrado de nuevo</string>
@@ -1072,7 +1072,7 @@ Layout Inspector
     <string name="wifi_save_failed">Error al guardar</string>
     <string name="wifi_qr_failed">QR fallido</string>
     <string name="wifi_nothing_to_export">Nada que exportar</string>
-    <string name="wifi_exported">Exportado a Download/MP Manager</string>
+    <string name="wifi_exported">Exportado a Download/Hexora</string>
     <string name="wifi_export_failed">Exportación fallida</string>
     <string name="wifi_networks_n">%1$d redes</string>
     <string name="wifi_root_needed_passwords">Se necesita root para contraseñas guardadas</string>
@@ -1200,7 +1200,7 @@ Layout Inspector
     <string name="toggle_hex_keypad">Alternar teclado hexadecimal</string>
     <string name="height_15_90">Altura %% (15–90)</string>
     <string name="toast_message">Mensaje toast</string>
-    <string name="def_msg">Hola de MP Manager</string>
+    <string name="def_msg">Hola de Hexora</string>
     <string name="duration">Duración</string>
     <string name="position">Posición</string>
     <string name="def">Predeterminado</string>

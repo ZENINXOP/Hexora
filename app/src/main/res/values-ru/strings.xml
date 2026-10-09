@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name" translatable="false">MP Manager</string>
+    <string name="app_name" translatable="false">Hexora</string>
     <string name="success_saved">Файл успешно сохранён: %s</string>
     <string name="enable_logs">Сохранять журналы</string>
     <string name="sign_apk_after_merge">Подписывать APK после объединения</string>
@@ -355,7 +355,7 @@
     <string name="no_apk_files_found">APK-файлы в архиве не найдены</string>
     <string name="manage_bottom_bar">Настроить нижнюю панель</string>
     <string name="delete_button">Удалить кнопку</string>
-    <string name="termux_perm"><![CDATA[Примечание: необходимо разрешить MP Manager отправлять команды в Termux\n(Разрешения > Дополнительные разрешения > Выполнение команд в среде Termux)]]></string>
+    <string name="termux_perm"><![CDATA[Примечание: необходимо разрешить Hexora отправлять команды в Termux\n(Разрешения > Дополнительные разрешения > Выполнение команд в среде Termux)]]></string>
     <string name="editor_settings">Настройки редактора</string>
     <string name="icon_changed">Значок изменён</string>
     <string name="could_not_decode_am">Не удалось декодировать AndroidManifest.xml</string>
@@ -837,8 +837,8 @@
     <string name="storage_roundtrip_done">Проверка завершена</string>
     <string name="storage_nothing_selected">Ничего не выбрано, сначала нажмите «Загрузить»</string>
     <string name="storage_enable_autoclear">Включить службу автоочистки</string>
-    <string name="storage_autoclear_need">Для автоочистки нужна служба специальных возможностей «MP Manager Cache Cleaner». Включите её в системных настройках, затем начните снова.</string>
-    <string name="storage_autoclear_need_elevated">Для автоочистки нужна служба специальных возможностей «MP Manager Cache Cleaner». Найден Root/Shizuku, её можно включить автоматически.</string>
+    <string name="storage_autoclear_need">Для автоочистки нужна служба специальных возможностей «Hexora Cache Cleaner». Включите её в системных настройках, затем начните снова.</string>
+    <string name="storage_autoclear_need_elevated">Для автоочистки нужна служба специальных возможностей «Hexora Cache Cleaner». Найден Root/Shizuku, её можно включить автоматически.</string>
     <string name="storage_enable_auto">Включить автоматически</string>
     <string name="storage_open_settings">Открыть настройки</string>
     <string name="storage_service_enabled_again">Служба включена, снова нажмите автоочистку</string>
@@ -954,7 +954,7 @@
     <string name="wifi_save_failed">Не удалось сохранить</string>
     <string name="wifi_qr_failed">Не удалось создать QR</string>
     <string name="wifi_nothing_to_export">Нечего экспортировать</string>
-    <string name="wifi_exported">Экспортировано в Download/MP Manager</string>
+    <string name="wifi_exported">Экспортировано в Download/Hexora</string>
     <string name="wifi_export_failed">Не удалось экспортировать</string>
     <string name="wifi_networks_n">Сетей: %1$d</string>
     <string name="wifi_root_needed_passwords">Для сохранённых паролей нужен root</string>
@@ -1082,7 +1082,7 @@
     <string name="toggle_hex_keypad">Переключить hex-клавиатуру</string>
     <string name="height_15_90">Высота %% (15–90)</string>
     <string name="toast_message">Сообщение Toast</string>
-    <string name="def_msg">Привет от MP Manager</string>
+    <string name="def_msg">Привет от Hexora</string>
     <string name="duration">Длительность</string>
     <string name="position">Позиция</string>
     <string name="def">По умолчанию</string>

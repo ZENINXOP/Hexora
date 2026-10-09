@@ -638,7 +638,7 @@ public class WifiManagerActivity extends BaseActivity {
                     ContentValues values = new ContentValues();
                     values.put(MediaStore.Downloads.DISPLAY_NAME, fileName);
                     values.put(MediaStore.Downloads.MIME_TYPE, "text/plain");
-                    values.put(MediaStore.Downloads.RELATIVE_PATH, "Download/MP Manager");
+                    values.put(MediaStore.Downloads.RELATIVE_PATH, "Download/Hexora");
                     Uri uri = getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
                     if (uri == null) throw new Exception(getString(R.string.wifi_cannot_create_file));
                     try (OutputStream os = getContentResolver().openOutputStream(uri)) {
@@ -646,7 +646,7 @@ public class WifiManagerActivity extends BaseActivity {
                         os.write(all.toString().getBytes(StandardCharsets.UTF_8));
                     }
                 } else {
-                    File dir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "MP Manager");
+                    File dir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "Hexora");
                     if (!dir.isDirectory() && !dir.mkdirs() && !dir.isDirectory()) throw new Exception(getString(R.string.wifi_cannot_create_folder));
                     File out = new File(dir, fileName);
                     try (FileOutputStream fos = new FileOutputStream(out)) {

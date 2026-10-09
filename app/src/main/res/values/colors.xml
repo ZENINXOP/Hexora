@@ -2,4 +2,23 @@
 
 <resources>
     <color name="md_theme_primary">#AAC7FF</color>
+    <color name="hexora_icon_background">#303F75</color>
+    <color name="hexora_accent_light">#3569B5</color>
+    <color name="hexora_accent_dark">#8AB4F8</color>
+    <color name="hexora_surface_light">#FFFFFF</color>
+    <color name="hexora_surface_dark">#202124</color>
+    <color name="hexora_bar_light">#F2F3F5</color>
+    <color name="hexora_bar_dark">#292A2D</color>
+    <color name="hexora_text_light">#202124</color>
+    <color name="hexora_text_dark">#ECEFF1</color>
+    <color name="hexora_text_secondary_light">#60646C</color>
+    <color name="hexora_text_secondary_dark">#ADB1B8</color>
+    <color name="hexora_selection_light">#DBE8FC</color>
+    <color name="hexora_selection_dark">#33445D</color>
+    <color name="hexora_accent">@color/hexora_accent_light</color>
+    <color name="hexora_surface">@color/hexora_surface_light</color>
+    <color name="hexora_bar">@color/hexora_bar_light</color>
+    <color name="hexora_text">@color/hexora_text_light</color>
+    <color name="hexora_text_secondary">@color/hexora_text_secondary_light</color>
+    <color name="hexora_selection">@color/hexora_selection_light</color>
 </resources>
