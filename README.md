@@ -22,7 +22,8 @@ Hexora updates. Release APK filenames must start with `Hexora.`.
 
 ## Build
 
-Use JDK 17 and Android SDK platform 36. Set `sdk.dir` in an untracked
+The wrapper uses Gradle 8.13. Use JDK 17 and Android SDK platform 36.
+Set `sdk.dir` in an untracked
 `local.properties`, then run:
 
 ```sh
