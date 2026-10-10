@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="fill_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="16dp">
+
+    <com.google.android.material.card.MaterialCardView
+        android:layout_width="fill_parent"
+        android:layout_height="wrap_content">
+    <TextView
+        android:id="@+id/ip"
+        android:layout_gravity="center"
+        android:layout_marginStart="10dp"
+        android:layout_width="fill_parent"
+        android:layout_height="wrap_content"
+        android:background="?attr/selectableItemBackground"
+        style="@style/TextAppearance.MaterialComponents.Headline6" />
+
+        <LinearLayout
+            android:layout_gravity="end"
+            android:padding="10dp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content">
+            <ImageView
+                android:layout_width="wrap_content"
+                android:background="?attr/selectableItemBackground"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="10dp"
+                app:tint="?attr/colorOnSurface"
+                android:id="@+id/copy"
+                android:contentDescription="@android:string/copy"
+                android:src="@drawable/ic_copy_mt" />
+            <ImageView
+                android:layout_width="wrap_content"
+                android:id="@+id/share"
+                android:contentDescription="@string/share_text"
+                app:tint="?attr/colorOnSurface"
+                android:background="?attr/selectableItemBackground"
+                android:layout_height="wrap_content"
+                android:src="@drawable/baseline_share_24" />
+        </LinearLayout>
+
+    </com.google.android.material.card.MaterialCardView>
+    <com.google.android.material.textfield.TextInputLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        app:hintEnabled="true"
+        app:boxBackgroundMode="outline"
+        app:boxBackgroundColor="@android:color/transparent">
+
+        <com.google.android.material.textfield.TextInputEditText
+            android:id="@+id/portInput"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:inputType="number"
+            android:text="2121"
+            android:hint="@string/port"
+            tools:ignore="HardcodedText" />
+    </com.google.android.material.textfield.TextInputLayout>
+
+    <com.google.android.material.textfield.TextInputLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        app:hintEnabled="true"
+        app:boxBackgroundMode="outline"
+        app:boxBackgroundColor="@android:color/transparent">
+
+        <com.google.android.material.textfield.TextInputEditText
+            android:id="@+id/userInput"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:inputType="text"
+            android:hint="@string/username" />
+    </com.google.android.material.textfield.TextInputLayout>
+
+    <com.google.android.material.textfield.TextInputLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        app:hintEnabled="true"
+        app:boxBackgroundMode="outline"
+        app:boxBackgroundColor="@android:color/transparent">
+
+        <com.google.android.material.textfield.TextInputEditText
+            android:id="@+id/passInput"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:inputType="textPassword"
+            android:hint="@string/enter_password" />
+    </com.google.android.material.textfield.TextInputLayout>
+
+    <com.google.android.material.textfield.TextInputLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        app:hintEnabled="true"
+        app:boxBackgroundMode="outline"
+        app:boxBackgroundColor="@android:color/transparent"
+        style="@style/Widget.Material3.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
+        android:hint="@string/ftp_security">
+
+        <com.google.android.material.textfield.MaterialAutoCompleteTextView
+            android:id="@+id/securityInput"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:inputType="none"
+            android:singleLine="true" />
+    </com.google.android.material.textfield.TextInputLayout>
+
+    <!--<com.google.android.material.checkbox.MaterialCheckBox
+        android:layout_width="fill_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/save_password"
+        android:id="@+id/save_ftp_pass"/>-->
+
+    <FrameLayout
+        android:id="@+id/container"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content" />
+</LinearLayout>

@@ -1,0 +1,27 @@
+JingMatrix/LSPatch v1.2 (release 487)
+Source commit: 0dc50f42503711b14f5e2bb217c2bdd6321ce5be
+Core (JingMatrix/Vector) commit: e00c5c5038bbcc14e0b382ab893301d6993e6989
+Source: https://github.com/JingMatrix/LSPatch/tree/v1.2
+Core source: https://github.com/JingMatrix/Vector/tree/e00c5c5038bbcc14e0b382ab893301d6993e6989
+License: GNU GPL version 3; see UPSTREAM-LICENSE.txt.
+
+Credit: JingMatrix, LSPosed/LSPatch, Vector and their contributors. Upstream
+credits include Xpatch, LSPlant and apkzlib. Runtime DEX and native libraries
+were extracted unchanged from the official lspatch-v1.2-487-release.jar.
+The downloaded release SHA-256 and individual payload hashes are recorded
+in provenance.json. License files included in that release are retained too.
+
+Hexora's streaming archive/manifest/signing integration was written with
+OpenAI Codex assistance on 2026-10-10. Hexora uses a separate output, its
+selected signing key and duplicated ZIP entries in place of nested links.
+The upstream runtime binaries themselves have not been modified or rebuilt.
+
+The corresponding source, including all pinned recursive submodules, is
+provided alongside this runtime in Hexora's GitHub source distribution:
+https://github.com/ZENINXOP/Hexora/tree/main/third_party/lspatch
+See lspatch-v1.2-recursive-source.tar.gz and SOURCE_MANIFEST.json there.
+Preserve these sources and notices when redistributing this runtime.
+See qa/LSPATCH_SIGNATURE.md in Hexora's source tree for integration details.
+
+There is no warranty of compatibility. This engine does not provide a
+universal bypass of native, server-side or hardware-backed verification.

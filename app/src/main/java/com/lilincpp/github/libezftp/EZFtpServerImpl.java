@@ -1,0 +1,137 @@
+package com.lilincpp.github.libezftp;
+
+
+import com.lilincpp.github.libezftp.exceptions.EZFtpNoInitException;
+import com.lilincpp.github.libezftp.user.EZFtpUser;
+
+import org.apache.ftpserver.FtpServer;
+import org.apache.ftpserver.FtpServerFactory;
+import org.apache.ftpserver.ftplet.Authority;
+import org.apache.ftpserver.ftplet.FtpException;
+import org.apache.ftpserver.listener.ListenerFactory;
+import org.apache.ftpserver.ssl.SslConfigurationFactory;
+import org.apache.ftpserver.usermanager.impl.BaseUser;
+
+import java.io.File;
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * FTP server implement
+ */
+final class EZFtpServerImpl implements IEZFtpServer {
+
+    private static final String TAG = "EZFtpServerImpl";
+
+    private final FtpServer ftpServer;
+    private final Object lock = new Object();
+    private boolean isInit = false;
+
+    /**
+     * create a ftp server
+     *
+     * @param users support user list(need login)
+     * @param port  ftp server listen port
+     */
+    EZFtpServerImpl(List<EZFtpUser> users, int port) {
+        this(users, port, null, null, false);
+    }
+
+    /**
+     * create a ftp server with optional FTPS support
+     *
+     * @param users            support user list(need login)
+     * @param port             ftp server listen port
+     * @param keystoreFile     JKS keystore file containing a key entry, or null to disable FTPS
+     * @param keystorePassword keystore and key password
+     * @param implicitSsl      whether to use implicit TLS (FTPS direct) instead of explicit
+     */
+    EZFtpServerImpl(List<EZFtpUser> users, int port, File keystoreFile, String keystorePassword, boolean implicitSsl) {
+        //配置参数
+        FtpServerFactory serverFactory = new FtpServerFactory();
+        //设置访问用户名和密码还有共享路径
+        for (EZFtpUser user : users) {
+            BaseUser baseUser = new BaseUser();
+            baseUser.setName(user.getName());
+            baseUser.setPassword(user.getPassword());
+            baseUser.setHomeDirectory(user.getSharedPath());
+            List<Authority> authorities = new ArrayList<>();
+            authorities.add(user.getPermission().getAuthority());
+            baseUser.setAuthorities(authorities);
+            try {
+                serverFactory.getUserManager().save(baseUser);
+            } catch (FtpException e) {
+                e.printStackTrace();
+            }
+        }
+        //设置监听端口
+        ListenerFactory factory = new ListenerFactory();
+        factory.setPort(port);
+        if (keystoreFile != null && keystorePassword != null) {
+            SslConfigurationFactory sslFactory = new SslConfigurationFactory();
+            sslFactory.setKeystoreFile(keystoreFile);
+            sslFactory.setKeystorePassword(keystorePassword);
+            sslFactory.setKeyPassword(keystorePassword);
+            factory.setSslConfiguration(sslFactory.createSslConfiguration());
+            factory.setImplicitSsl(implicitSsl);
+        }
+        serverFactory.addListener("default", factory.createListener());
+        //创建FTP服务实例
+        ftpServer = serverFactory.createServer();
+        isInit = true;
+    }
+
+    /**
+     * make sure server is init
+     */
+    private void checkInit() {
+        synchronized (lock) {
+            if (!isInit) {
+                throw new EZFtpNoInitException("EZFtp server is no init or has been release!");
+            }
+        }
+    }
+
+    /**
+     * release ftp server
+     */
+    private void release() {
+        synchronized (lock) {
+            if (ftpServer != null && !ftpServer.isStopped()) {
+                ftpServer.stop();
+            }
+            isInit = false;
+        }
+    }
+
+    /**
+     * start ftp server
+     */
+    @Override
+    public void start() {
+        checkInit();
+        try {
+            ftpServer.start();
+        } catch (FtpException e) {
+            throw new IllegalStateException("Cannot start FTP server", e);
+        }
+    }
+
+    /**
+     * stop ftp server
+     */
+    @Override
+    public void stop() {
+        checkInit();
+        ftpServer.stop();
+    }
+
+    /**
+     * whether is stopped the ftp server
+     * @return true is stopped,false is not.
+     */
+    @Override
+    public boolean isStopped() {
+        return ftpServer.isStopped();
+    }
+}

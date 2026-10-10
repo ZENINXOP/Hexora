@@ -1,0 +1,110 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    compileSdk 36
+    lint {
+        baseline = file("lint.xml")
+    }
+    defaultConfig {
+        applicationId "app.hexora.manager"
+        minSdk 19
+        targetSdk 37
+        multiDexEnabled true
+        versionCode 12
+        versionName "0.1.1"
+        // Set to the Hexora owner/repository once its releases are published.
+        buildConfigField "String", "UPDATE_REPOSITORY", '""'
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            shrinkResources false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+        coreLibraryDesugaringEnabled true
+    }
+    namespace 'io.github.abdurazaaqmohammed.MPManager'
+
+    buildFeatures {
+        aidl true
+        buildConfig true
+    }
+
+    dependenciesInfo {
+        // Disables dependency metadata when building APKs.
+        includeInApk = false
+        // Disables dependency metadata when building Android App Bundles.
+        includeInBundle = false
+    }
+    packaging {
+        resources.excludes.add("META-INF/DEPENDENCIES")
+        resources.excludes.add("META-INF/versions/9/OSGI-INF/MANIFEST.MF")
+        resources.excludes.add("META-INF/versions/9/OSGI-INF/LICENSES/**")
+    }
+}
+
+dependencies {
+    implementation project(':sdk')
+    implementation project(':apkkit')
+    //implementation files('libs/APKEditor-1.4.8.jar')
+    implementation 'androidx.exifinterface:exifinterface:1.3.6'
+    implementation("androidx.multidex:multidex:2.0.1")
+    implementation 'com.android.volley:volley:1.2.1'
+    implementation 'androidx.startup:startup-runtime:1.1.0'
+    implementation 'androidx.media:media:1.7.0'
+    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.5'
+    //implementation files('libs/animato.jar')
+    implementation files('libs/antlr.jar')
+    implementation 'androidx.recyclerview:recyclerview:1.4.0-alpha01'
+    implementation 'androidx.viewpager2:viewpager2:1.0.0'
+    implementation files('libs/JCommand.jar')
+    implementation files('libs/bin-zip.jar')
+    implementation files('libs/arsc-parser.jar')
+    implementation files('libs/commons-compress-1.21.jar')
+    implementation files('libs/xz-1.9.jar')
+    implementation files('libs/junrar-7.5.5.jar')
+    implementation("com.google.android.material:material:1.12.0")
+    implementation 'androidx.swiperefreshlayout:swiperefreshlayout:1.1.0'
+    implementation("com.google.guava:guava:33.6.0-android")
+    implementation 'com.beust:jcommander:1.82'
+    implementation 'com.google.code.findbugs:jsr305:3.0.2'
+    //implementation 'com.github.AtifSayings:Animatoo:1.0.1'
+    //implementation 'com.github.chrisbanes:PhotoView:2.3.0'
+    implementation 'io.github.skylot:jadx-core:1.4.7'
+    implementation 'io.github.skylot:jadx-plugins-api:1.4.7'
+    implementation 'io.github.skylot:jadx-dex-input:1.4.7'
+    implementation 'org.slf4j:slf4j-android:1.7.36'
+    implementation "androidx.preference:preference:1.2.1"
+    implementation "androidx.collection:collection:1.6.0"
+    implementation 'io.noties.markwon:core:4.6.2'
+    implementation 'com.google.code.gson:gson:2.14.0'
+    implementation 'org.jruby.joni:joni:2.2.7'
+    implementation files('libs/language-java-debug.aar')//'io.github.Rosemoe.sora-editor:language-java:0.23.6'
+    implementation files('libs/editor-debug.aar')
+    implementation files('libs/language-textmate-debug.aar')
+    implementation 'net.lingala.zip4j:zip4j:2.11.6'
+    implementation 'io.github.java-diff-utils:java-diff-utils:4.17'
+    implementation(platform("io.github.Rosemoe.sora-editor:bom:0.23.6"))
+    implementation "androidx.biometric:biometric:1.1.0"
+    implementation "androidx.window:window:1.5.1"
+
+    implementation files('libs/commons-net-3.11.1.jar')
+    implementation("dev.rikka.shizuku:api:13.1.5")
+    implementation("dev.rikka.shizuku:provider:13.1.5")
+    implementation("org.apache.ftpserver:ftplet-api:1.2.1")
+    implementation("org.apache.ftpserver:ftpserver-core:1.2.1")
+    implementation("commons-io:commons-io:2.22.0")
+    implementation("org.bouncycastle:bcprov-jdk18on:1.85.2")
+    implementation("com.google.zxing:core:3.5.3")
+    implementation("com.journeyapps:zxing-android-embedded:4.3.0")
+    implementation("dev.rikka.shizuku:api:13.1.5")
+    implementation("dev.rikka.shizuku:provider:13.1.5")
+    testImplementation 'junit:junit:4.13.2'
+}

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="hexora_updates_unavailable">Updates will be available once Hexora releases are published.</string>
+    <string name="hexora_credits">Based on MP-Manager by Abdurazaaq Mohammed and its contributors. Hexora branding, interface refinements, and development assistance by OpenAI Codex.</string>
+    <string name="hexora_minimize">Minimize</string>
+    <string name="hexora_resume_editor">Resume editor</string>
+    <string name="hexora_java_preview">Java preview · read-only</string>
+    <string name="hexora_conversion_message">Generating Java preview…</string>
+    <plurals name="hexora_selected_files">
+        <item quantity="one">%d file selected</item>
+        <item quantity="other">%d files selected</item>
+    </plurals>
+    <string name="hexora_extract_zip">Extract ZIP</string>
+</resources>

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <files-path
+        name="internal"
+        path="."/>
+    <cache-path
+        name="cache"
+        path="."/>
+    <external-path name="external_files" path="."/>
+    <!-- root-path is load-bearing today (in-place shares of APKs under
+         /data/app and arbitrary files). Phase 2 migrates external-plugin
+         sharing to staged app-private copies + grants; revisit then. -->
+    <root-path name="root" path="." />
+</paths>

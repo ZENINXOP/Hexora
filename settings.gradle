@@ -1,0 +1,20 @@
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+rootProject.name = "Hexora"
+include ':app'
+include ':sdk'
+include ':packs:pack-math'
+include ':packs:pack-notes'
+include ':packs:pack-text'
+include ':packs:pack-random'
+include ':packs:pack-device'
+include ':packs:pack-media'
+include ':packs:pack-network'
+include ':samples:plugin-sample'
+include ':samples:plugin-kill-sig'
+include ':apkkit'

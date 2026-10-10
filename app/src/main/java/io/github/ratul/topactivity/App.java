@@ -1,0 +1,107 @@
+/*
+ *   Copyright (C) 2022 Ratul Hasan
+ *
+ *   This program is free software: you can redistribute it and/or modify
+ *   it under the terms of the GNU General Public License as published by
+ *   the Free Software Foundation, either version 3 of the License, or
+ *   (at your option) any later version.
+ *
+ *   This program is distributed in the hope that it will be useful,
+ *   but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ *   GNU General Public License for more details.
+ *
+ *   You should have received a copy of the GNU General Public License
+ *   along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+package io.github.ratul.topactivity;
+
+import android.app.Activity;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.content.Context;
+import android.content.Intent;
+import android.os.Build;
+import android.widget.Toast;
+
+import io.github.abdurazaaqmohammed.plugins.packs.PackManager;
+import io.github.codehasan.colorpicker.extensions.Extensions;
+
+import androidx.core.app.NotificationManagerCompat;
+import androidx.multidex.MultiDexApplication;
+
+import io.github.abdurazaaqmohammed.MPManager.R;
+import io.github.abdurazaaqmohammed.app.ServiceLocator;
+import io.github.abdurazaaqmohammed.utils.AppLogs;
+import io.github.ratul.topactivity.manager.NotificationUiManager;
+import io.github.ratul.topactivity.ui.ClipboardActivity;
+
+public class App extends MultiDexApplication {
+
+    private static App instance;
+
+    public static final String REPO = "codehasan/Current-Activity";
+    public static final String REPO_URL = "https://github.com/" + REPO;
+
+    private ClipboardManager clipboardManager;
+
+    public ClipboardManager getClipboardManager() {
+        return clipboardManager;
+    }
+
+    public static App getInstance() {
+        return instance;
+    }
+
+    @Override
+    protected void attachBaseContext(Context base) {
+        super.attachBaseContext(base);
+        instance = this;
+        AppLogs.install(base);
+    }
+
+    @Override
+    public void onCreate() {
+        super.onCreate();
+        instance = this;
+        ServiceLocator.init(this);
+        try {
+            // Tools (except a few built-ins like Storage Manager) ship as
+            // downloadable packs now; load whatever the user installed.
+            PackManager.loadInstalledPacks(this);
+        } catch (Exception ignored) {
+        }
+        clipboardManager = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            NotificationChannel channel = new NotificationChannel(
+                    NotificationUiManager.CHANNEL_ID,
+                    getString(R.string.notification_channel_name),
+                    NotificationManager.IMPORTANCE_LOW
+            );
+            channel.setDescription(getString(R.string.notification_channel_description));
+            NotificationManagerCompat.from(this).createNotificationChannel(channel);
+        }
+    }
+
+    public static void copyString(Context context, String str, String msg) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            instance.clipboardManager.setPrimaryClip(ClipData.newPlainText(context.getString(R.string.app_name), str));
+        } else {
+            context.startActivity(new Intent(context, ClipboardActivity.class)
+                    .putExtra(Intent.EXTRA_TEXT, str)
+                    .setFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+        }
+        showToast(context, msg);
+    }
+
+    public static void showToast(Context context, String message) {
+        try {
+            Extensions.showMessage((Activity) context, message);
+        } catch (Exception ignored) {
+            Toast.makeText(context, message, Toast.LENGTH_SHORT).show();
+        }
+    }
+}

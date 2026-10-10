@@ -1,0 +1,61 @@
+{
+  "name": "smali-light.json",
+  "settings": [
+    {
+      "settings": {
+        "background": "#FFFFFF",
+        "foreground": "#202124",
+        "lineHighlight": "#F1F5FB",
+        "selection": "#DBE8FC"
+      }
+    },
+    {
+      "scope": "comment",
+      "settings": {
+        "foreground": "#60646C"
+      }
+    },
+    {
+      "scope": "keyword",
+      "settings": {
+        "foreground": "#2457A6"
+      }
+    },
+    {
+      "scope": "storage",
+      "settings": {
+        "foreground": "#7047A3"
+      }
+    },
+    {
+      "scope": "string",
+      "settings": {
+        "foreground": "#287442"
+      }
+    },
+    {
+      "scope": "constant.numeric",
+      "settings": {
+        "foreground": "#925316"
+      }
+    },
+    {
+      "scope": "meta.return.type",
+      "settings": {
+        "foreground": "#7047A3"
+      }
+    },
+    {
+      "scope": "constant.character.escape",
+      "settings": {
+        "foreground": "#925316"
+      }
+    },
+    {
+      "scope": "invalid",
+      "settings": {
+        "foreground": "#B3261E"
+      }
+    }
+  ]
+}

@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="utf-8"?>
+<io.github.abdurazaaqmohammed.ui.MyDrawerLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/drawer_layout"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical">
+
+        <com.google.android.material.appbar.AppBarLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content">
+
+            <com.google.android.material.appbar.MaterialToolbar
+                android:id="@+id/toolbar"
+                android:layout_width="match_parent"
+                android:layout_height="?attr/actionBarSize"
+                app:navigationIcon="@drawable/baseline_menu_24">
+
+                <LinearLayout
+                    android:layout_width="wrap_content"
+                    android:layout_height="match_parent"
+                    android:layout_gravity="end"
+                    android:orientation="horizontal">
+
+                    <ImageButton
+                        android:id="@+id/btn_undo"
+                        android:enabled="false"
+                        android:layout_width="48dp"
+                        android:layout_height="match_parent"
+                        android:background="?attr/selectableItemBackgroundBorderless"
+                        android:src="@drawable/undo_24px"
+                        android:contentDescription="@string/undo"/>
+
+                    <ImageButton
+                        android:id="@+id/btn_redo"
+                        android:enabled="false"
+                        android:layout_width="48dp"
+                        android:layout_height="match_parent"
+                        android:background="?attr/selectableItemBackgroundBorderless"
+                        android:src="@drawable/undo_24px"
+                        android:scaleX="-1"
+                        android:contentDescription="@string/redo"/>
+
+                    <ImageButton
+                        android:id="@+id/btn_save"
+                        android:enabled="false"
+                        android:alpha="0.38"
+                        android:layout_width="48dp"
+                        android:layout_height="match_parent"
+                        android:background="?attr/selectableItemBackgroundBorderless"
+                        android:src="@drawable/save_24px"
+                        android:contentDescription="@string/save"/>
+
+                    <ImageButton
+                        android:id="@+id/btn_edit"
+                        android:layout_width="48dp"
+                        android:layout_height="match_parent"
+                        android:background="?attr/selectableItemBackgroundBorderless"
+                        android:src="@drawable/editor_text_select_start"
+                        android:contentDescription="@string/edit"/>
+
+                    <ImageButton
+                        android:id="@+id/btn_file"
+                        android:layout_width="48dp"
+                        android:layout_height="match_parent"
+                        android:background="?attr/selectableItemBackgroundBorderless"
+                        android:src="@drawable/baseline_more_vert_24"
+                        android:contentDescription="@string/file_options"/>
+
+                </LinearLayout>
+            </com.google.android.material.appbar.MaterialToolbar>
+        </com.google.android.material.appbar.AppBarLayout>
+
+        <FrameLayout
+            android:id="@+id/editor_container"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="280dp"
+        android:layout_height="match_parent"
+        android:layout_gravity="start"
+        android:background="?attr/colorSurface"
+        android:elevation="16dp"
+        android:orientation="vertical">
+
+        <androidx.appcompat.widget.Toolbar
+            android:id="@+id/drawer_toolbar"
+            android:layout_width="match_parent"
+            android:layout_height="?attr/actionBarSize"
+            app:title="@string/opened_files" />
+
+        <modder.hub.dexeditor.views.FastScrollerRecyclerView
+            android:id="@+id/tabs_recycler_view"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1" />
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="?attr/colorOutlineVariant" />
+
+        <androidx.appcompat.widget.AppCompatTextView
+            android:id="@+id/action_minimize"
+            android:focusable="true"
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:gravity="center_vertical"
+            android:paddingStart="20dp"
+            android:paddingEnd="20dp"
+            android:drawablePadding="16dp"
+            android:background="?attr/selectableItemBackground"
+            android:text="@string/hexora_minimize"
+            android:textSize="14sp"
+            android:textColor="?attr/colorOnSurface"
+            app:drawableStartCompat="@drawable/ic_minimize"
+            app:drawableTint="?attr/colorOnSurfaceVariant" />
+    </LinearLayout>
+
+</io.github.abdurazaaqmohammed.ui.MyDrawerLayout>

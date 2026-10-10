@@ -1,0 +1,44 @@
+{
+  "project": "JingMatrix/LSPatch",
+  "version": "v1.2",
+  "version_code": 487,
+  "commit": "0dc50f42503711b14f5e2bb217c2bdd6321ce5be",
+  "core_commit": "e00c5c5038bbcc14e0b382ab893301d6993e6989",
+  "source": "https://github.com/JingMatrix/LSPatch/tree/v1.2",
+  "release_url": "https://github.com/JingMatrix/LSPatch/releases/download/v1.2/lspatch-v1.2-487-release.jar",
+  "release_sha256": "d238fdc414d121b7fa454d8b4ccf420df3a8c97d563761861ff92bd9c5da2165",
+  "license": "GPL-3.0",
+  "assets": [
+    {
+      "path": "metaloader.dex",
+      "size": 12020,
+      "sha256": "6af8e8c959a1837099ea10974f87bf7847648a3c9cef18a9362ff83a83aa0c54"
+    },
+    {
+      "path": "loader.dex",
+      "size": 3646112,
+      "sha256": "16f544f449bb75e3147886314a5c3f66b0ef7da53e1e07715efbcbd77bbb70ac"
+    },
+    {
+      "path": "so/arm64-v8a/liblspatch.so",
+      "size": 477320,
+      "sha256": "2cff54544c166523fae5ae8f522510a4f6bcf189a3d3b02d14087e8d572ffb97"
+    },
+    {
+      "path": "so/armeabi-v7a/liblspatch.so",
+      "size": 313408,
+      "sha256": "b64081ebd118ccb2ff123a2d55477fac665a8bfa83f833e6007f1baa2c6e973c"
+    },
+    {
+      "path": "so/x86/liblspatch.so",
+      "size": 500384,
+      "sha256": "038f023cc83496a08c5a12cc2c009abd93f4456591b3fcf36c8cf8ab5329d651"
+    },
+    {
+      "path": "so/x86_64/liblspatch.so",
+      "size": 504736,
+      "sha256": "0ad971ee6ca57593911fc1a719f5898786edc8bcbdcaa1b91ccb2bb7c0551c18"
+    }
+  ],
+  "integration": "OpenAI Codex; original upstream runtime bytes, not rebuilt or executed"
+}

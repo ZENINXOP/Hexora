@@ -1,0 +1,1155 @@
+/*
+* Dex-Editor-Android an Advanced Dex Editor for Android 
+* Copyright 2024-2025, developer-krushna
+*
+* Redistribution and use in source and binary forms, with or without
+* modification, are permitted provided that the following conditions are
+* met:
+*
+*     * Redistributions of source code must retain the above copyright
+* notice, this list of conditions and the following disclaimer.
+*     * Redistributions in binary form must reproduce the above
+* copyright notice, this list of conditions and the following disclaimer
+* in the documentation and/or other materials provided with the
+* distribution.
+*     * Neither the name of developer-krushna nor the names of its
+* contributors may be used to endorse or promote products derived from
+* this software without specific prior written permission.
+*
+* THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+* "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+* LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+* A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+* OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+* SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+* LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+* DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+* THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+* (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+* OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+
+*     Please contact Krushna by email mt.modder.hub@gmail.com if you need
+*     additional information or have any questions
+*/
+
+
+package modder.hub.dexeditor.views;
+
+import android.app.Activity;
+import android.net.*;
+import android.os.*;
+import android.text.*;
+import android.util.*;
+import android.view.*;
+import android.widget.*;
+import android.content.res.*;
+import android.graphics.*;
+import android.content.*;
+import android.graphics.drawable.*;
+
+import androidx.annotation.NonNull;
+import androidx.appcompat.widget.TooltipCompat;
+import androidx.core.widget.ImageViewCompat;
+import com.google.android.material.color.MaterialColors;
+import io.github.rosemoe.sora.event.*;
+import io.github.rosemoe.sora.text.Content;
+import io.github.rosemoe.sora.text.Cursor;
+import io.github.rosemoe.sora.widget.CodeEditor;
+import io.github.rosemoe.sora.widget.EditorTouchEventHandler;
+import io.github.rosemoe.sora.widget.component.EditorTextActionWindow;
+
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+import java.nio.charset.StandardCharsets;
+import java.util.*;
+import java.util.function.Consumer;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+import io.github.abdurazaaqmohammed.MPManager.R;
+import io.github.abdurazaaqmohammed.plugins.ext.CodeEditorHandle;
+import io.github.abdurazaaqmohammed.plugins.ext.EditorAction;
+import io.github.abdurazaaqmohammed.plugins.ext.ExtensionIcons;
+import io.github.abdurazaaqmohammed.plugins.ext.ExtensionRegistry;
+import io.github.abdurazaaqmohammed.plugins.ipc.ExternalActions;
+import io.github.abdurazaaqmohammed.plugins.ipc.PluginContracts;
+import io.github.abdurazaaqmohammed.plugins.ipc.PluginHost;
+import io.github.abdurazaaqmohammed.plugins.ipc.PluginTrust;
+import modder.hub.dexeditor.activity.*;
+
+/*
+Author @developer-krushna
+Code fixed/enhancement/some hidden ideas/comments by ChatGPT
+*/
+
+
+public class TextActionWindow extends EditorTextActionWindow implements View.OnLongClickListener {
+	private static final long DISPLAY_DELAY = 200;
+	private final ItemClickCallBack actionCallback;
+	private ImageButton copyButton;
+	private ImageButton cutButton;
+	private final CodeEditor codeEditor;
+	private final boolean isEnabled;
+	private String extractedTextWithLAndSemiColon;
+	private ImageButton gotoButton;
+	private final EditorTouchEventHandler touchEventHandler;
+	private int lastEventCause;
+	private int lastCursorPosition;
+	private long lastScrollTime;
+	private ImageButton longSelectButton;
+	private ImageButton pasteButton;
+	private final View rootView;
+	private ImageButton selectAllButton;
+	private String selectedText;
+	private ImageButton translateButton;
+	private ImageButton commentButton;
+	private ImageButton shareButton;
+	private ImageButton openLinkButton;
+	private ImageButton customizeButton;
+	private ImageButton deleteButton;
+	private ImageButton arscIdButton;
+	private ImageButton arscGotoIdButton;
+	
+	private final Map<String, ImageButton> buttonMap = new HashMap<>();
+	private final ArrayList<String> menuItems = new ArrayList<>();
+	private static final Set<String> VALID_TLDS = new HashSet<>();
+	
+	static {
+		VALID_TLDS.add("com");
+		VALID_TLDS.add("org");
+		VALID_TLDS.add("net");
+		VALID_TLDS.add("in");
+		VALID_TLDS.add("cn");
+		VALID_TLDS.add("io");
+		VALID_TLDS.add("co");
+		VALID_TLDS.add("ai");
+	}
+	
+	
+	public interface ItemClickCallBack {
+		void onClickGoTo(View view, String text);
+		void onClickTranslate(View view, String text);
+		void onLongClickTranslate(View view);
+	}
+	
+	public interface ArscIdHandler {
+		boolean isArscIdAvailable(String selectedText);
+		void onArscIdClick(String selectedText);
+		void onArscGotoIdClick(String selectedText);
+	}
+	
+	private ArscIdHandler arscIdHandler;
+	
+	public void setArscIdHandler(ArscIdHandler handler) {
+		this.arscIdHandler = handler;
+		updateButtonStates();
+	}
+	
+	public TextActionWindow(CodeEditor codeEditor) {
+		this(codeEditor, null);
+	}
+	
+	public TextActionWindow(final CodeEditor codeEditor, ItemClickCallBack actionCallback) {
+		super(codeEditor);
+		this.isEnabled = true;
+		this.extractedTextWithLAndSemiColon = "";
+		this.selectedText = null;
+		this.codeEditor = codeEditor;
+		this.actionCallback = actionCallback;
+		this.touchEventHandler = codeEditor.getEventHandler();
+		
+		// Create root container
+		FrameLayout rootContainer = new FrameLayout(codeEditor.getContext());
+		this.rootView = rootContainer;
+		
+		// Load menu items from JSON
+		loadMenuItemsFromJson();
+		
+		// Initialize buttons
+		initializeButtons(rootContainer);
+		
+		applyColorScheme();
+		
+		setContentView(rootContainer);
+		setSize(0, (int) (this.codeEditor.getDpUnit() * 56.0f));
+		if (Build.VERSION.SDK_INT >= 21) getPopup().setElevation(codeEditor.getDpUnit() * 8);
+		
+		updateButtonStates();
+		
+		// Event subscriptions
+		codeEditor.subscribeEvent(SelectionChangeEvent.class, (event, unsubscribe) -> onSelectionChanged(codeEditor, event, unsubscribe));
+		
+		codeEditor.subscribeEvent(ScrollEvent.class, (event, unsubscribe) -> onScrollEvent(event, unsubscribe));
+		
+		codeEditor.subscribeEvent(HandleStateChangeEvent.class, (event, unsubscribe) -> onHandleStateChanged(event, unsubscribe));
+		
+		codeEditor.subscribeEvent(LongPressEvent.class, (event, unsubscribe) -> onLongPressEvent(codeEditor, event, unsubscribe));
+		
+		getPopup().setAnimationStyle(R.style.text_action_popup_animation);
+	}
+
+	@Override
+	protected void applyColorScheme() {
+		// The superclass calls this before our custom container is initialized.
+		if (rootView == null || codeEditor == null) return;
+		Context context = codeEditor.getContext();
+		int foreground = MaterialColors.getColor(context, com.google.android.material.R.attr.colorOnSurface, Color.BLACK);
+		int surface = MaterialColors.getColor(context, com.google.android.material.R.attr.colorSurface, Color.WHITE);
+		int outline = MaterialColors.getColor(context, com.google.android.material.R.attr.colorOutlineVariant, Color.GRAY);
+		GradientDrawable background = new GradientDrawable();
+		background.setColor(surface);
+		background.setCornerRadius(codeEditor.getDpUnit() * 8);
+		background.setStroke(Math.max(1, (int) codeEditor.getDpUnit()), outline);
+		rootView.setBackground(background);
+		ColorStateList tint = new ColorStateList(new int[][] {
+				new int[] {-android.R.attr.state_enabled}, new int[] {} },
+				new int[] {androidx.core.graphics.ColorUtils.setAlphaComponent(foreground, 97), foreground});
+		for (ImageButton button : buttonMap.values()) ImageViewCompat.setImageTintList(button, tint);
+	}
+
+	@Override
+	public void show() {
+		if (rootView == null) return;
+		updateButtonStates();
+		applyColorScheme();
+		// Sora measures its original five-button panel. Measure our actual,
+		// scrollable panel instead, keeping every action reachable on narrow screens.
+		int maxWidth = Math.max(1, codeEditor.getWidth() - (int) (16 * codeEditor.getDpUnit()));
+		int height = (int) (56 * codeEditor.getDpUnit());
+		rootView.measure(View.MeasureSpec.makeMeasureSpec(maxWidth, View.MeasureSpec.AT_MOST),
+				View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY));
+		setSize(Math.min(maxWidth, rootView.getMeasuredWidth()), height);
+		super.show();
+	}
+	
+	private void loadMenuItemsFromJson() {
+		// 1. Initialize SharedPreferences
+		SharedPreferences prefs = codeEditor.getContext()
+		.getSharedPreferences("editor_prefs", Context.MODE_PRIVATE);
+		
+		// 2. Check if config exists in SharedPreferences
+		String jsonConfig = prefs.getString("menu_order", null);
+		
+		// 3. If not exists, save default config first
+		if (jsonConfig == null) {
+			jsonConfig = 
+			"[" +
+			"{\"id\":\"panel_btn_select_all\",\"title\":\"Select All\",\"disabled\":false}," +
+			"{\"id\":\"panel_btn_copy\",\"title\":\"Copy\",\"disabled\":false}," +
+			"{\"id\":\"panel_btn_paste\",\"title\":\"Paste\",\"disabled\":false}," +
+			"{\"id\":\"id_btn\",\"title\":\"ID\",\"disabled\":false}," +
+			"{\"id\":\"goto_id_btn\",\"title\":\"Goto ID\",\"disabled\":false}," +
+			"{\"id\":\"goto_btn\",\"title\":\"Go To\",\"disabled\":false}," +
+			"{\"id\":\"translate_btn\",\"title\":\"Translate\",\"disabled\":false}," +
+			"{\"id\":\"panel_btn_cut\",\"title\":\"Cut\",\"disabled\":false}," +
+			"{\"id\":\"comment_btn\",\"title\":\"Toggle comment\",\"disabled\":false}," +
+			"{\"id\":\"openLink_btn\",\"title\":\"Open link\",\"disabled\":false}," +
+			"{\"id\":\"share_btn\",\"title\":\"Share\",\"disabled\":false}," +
+			"{\"id\":\"panel_btn_long_select\",\"title\":\"Long Select\",\"disabled\":false}," +
+			"{\"id\":\"delete_btn\",\"title\":\"Delete\",\"disabled\":false}," +
+			"{\"id\":\"customize_btn\",\"title\":\"Customize\",\"disabled\":false}" +
+			"]";
+			prefs.edit().putString("menu_order", jsonConfig).apply();
+		}
+		
+		// 4. Parse the JSON (only using IDs as before)
+		try {
+			JSONArray jsonArray = new JSONArray(jsonConfig);
+			menuItems.clear();
+			
+			for (int i = 0; i < jsonArray.length(); i++) {
+				JSONObject item = jsonArray.getJSONObject(i);
+				// Only add if not disabled
+				if (!item.optBoolean("disabled", false)) {
+					menuItems.add(item.getString("id"));
+				}
+			}
+			if (!menuItems.contains("id_btn") || !menuItems.contains("goto_id_btn")) {
+				boolean allDisabledId = isMenuIdDisabled(jsonArray, "id_btn");
+				boolean allDisabledGotoId = isMenuIdDisabled(jsonArray, "goto_id_btn");
+				boolean inserted = false;
+				if (!menuItems.contains("id_btn") && !allDisabledId) {
+					menuItems.add(defaultInsertPosition(menuItems, null), "id_btn");
+					inserted = true;
+				}
+				if (!menuItems.contains("goto_id_btn") && !allDisabledGotoId) {
+					menuItems.add(defaultInsertPosition(menuItems, "id_btn"), "goto_id_btn");
+					inserted = true;
+				}
+				if (inserted) {
+					persistMenuItems(jsonArray);
+				}
+			}
+		} catch (Exception e) {
+			// Fallback to default order (without titles)
+			menuItems.clear();
+			menuItems.add("panel_btn_select_all");
+			menuItems.add("panel_btn_copy");
+			menuItems.add("panel_btn_paste");
+			menuItems.add("id_btn");
+			menuItems.add("goto_id_btn");
+			menuItems.add("goto_btn");
+			menuItems.add("translate_btn");
+			menuItems.add("panel_btn_cut");
+			menuItems.add("comment_btn");
+			menuItems.add("openLink_btn");
+			menuItems.add("share_btn");
+			menuItems.add("panel_btn_long_select");
+			menuItems.add("delete_btn");
+			menuItems.add("id_btn");
+			menuItems.add("goto_id_btn");
+		}
+	}
+	
+		private boolean isMenuIdDisabled(JSONArray jsonArray, String id) {
+			try {
+				for (int i = 0; i < jsonArray.length(); i++) {
+					JSONObject item = jsonArray.getJSONObject(i);
+					if (id.equals(item.optString("id"))) {
+						return item.optBoolean("disabled", false);
+					}
+				}
+			} catch (Exception ignored) {
+			}
+			return false;
+		}
+		
+		private void persistMenuItems(JSONArray jsonArray) {
+			try {
+				for (String menuId : menuItems) {
+					boolean found = false;
+					for (int i = 0; i < jsonArray.length(); i++) {
+						if (menuId.equals(jsonArray.getJSONObject(i).optString("id"))) {
+							found = true;
+							break;
+						}
+					}
+					if (!found) {
+						JSONObject item = new JSONObject();
+						item.put("id", menuId);
+						item.put("title", menuTitleFor(menuId));
+						item.put("disabled", false);
+						jsonArray.put(item);
+					}
+				}
+				SharedPreferences prefs = codeEditor.getContext()
+				.getSharedPreferences("editor_prefs", Context.MODE_PRIVATE);
+				prefs.edit().putString("menu_order", jsonArray.toString()).apply();
+			} catch (Exception ignored) {
+			}
+		}
+		
+		private String menuTitleFor(String menuId) {
+			if ("id_btn".equals(menuId)) return "ID";
+			if ("goto_id_btn".equals(menuId)) return "Goto ID";
+			try {
+				String pluginTitle = ExtensionRegistry.editorTitle(menuId);
+				if (pluginTitle != null && !pluginTitle.isEmpty()) return pluginTitle;
+			} catch (Exception ignored) {
+			}
+			try {
+				ExternalActions.Entry entry = ExternalActions.findById(
+						ExternalActions.editorEntries(codeEditor.getContext()), menuId);
+				if (entry != null && entry.title != null && !entry.title.isEmpty()) {
+					return entry.title;
+				}
+			} catch (Exception ignored) {
+			}
+			return menuId;
+		}
+		
+		private int defaultInsertPosition(List<String> order, String afterId) {
+			if (afterId != null) {
+				int anchor = order.indexOf(afterId);
+				if (anchor >= 0) return Math.min(anchor + 1, order.size());
+			}
+			int paste = order.indexOf("panel_btn_paste");
+			if (paste >= 0) return Math.min(paste + 1, order.size());
+			return Math.min(3, order.size());
+		}
+	
+	private void initializeButtons(ViewGroup parent) {
+		parent.removeAllViews();
+		Context context = codeEditor.getContext();
+		
+		HorizontalScrollView scrollView = new HorizontalScrollView(context);
+		scrollView.setHorizontalScrollBarEnabled(false);
+		scrollView.setOverScrollMode(View.OVER_SCROLL_NEVER);
+		scrollView.setFillViewport(true);
+		LinearLayout container = new LinearLayout(context);
+		container.setOrientation(LinearLayout.HORIZONTAL);
+		container.setGravity(Gravity.CENTER_VERTICAL);
+		scrollView.addView(container);
+		parent.addView(scrollView, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT));
+		int edge = (int) (4 * codeEditor.getDpUnit());
+		container.setPadding(edge, edge, edge, edge);
+		
+		// Get selectable background
+		TypedValue outValue = new TypedValue();
+		context.getTheme().resolveAttribute(android.R.attr.selectableItemBackground, outValue, true);
+		
+		int buttonSize = (int) (48 * codeEditor.getDpUnit());
+		LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(buttonSize, buttonSize);
+		
+		// Define all possible buttons with their resources
+		Map<String, ButtonConfig> allButtons = new HashMap<>();
+		allButtons.put("panel_btn_select_all", new ButtonConfig(R.drawable.ic_selectall_mt, android.R.string.selectAll));
+		allButtons.put("panel_btn_copy", new ButtonConfig(R.drawable.ic_copy_mt, android.R.string.copy));
+		allButtons.put("panel_btn_paste", new ButtonConfig(R.drawable.ic_paste_mt, android.R.string.paste));
+		allButtons.put("goto_btn", new ButtonConfig(R.drawable.ic_goto_mt, R.string.go_to));
+		allButtons.put("translate_btn", new ButtonConfig(R.drawable.ic_translate_mt, R.string.translate));
+		allButtons.put("panel_btn_cut", new ButtonConfig(R.drawable.ic_cut_mt, android.R.string.cut));
+		allButtons.put("comment_btn", new ButtonConfig(R.drawable.ic_hash_mt, R.string.comment));
+		allButtons.put("openLink_btn", new ButtonConfig(R.drawable.ic_link_mt, R.string.link));
+		allButtons.put("share_btn", new ButtonConfig(R.drawable.ic_share_mt, R.string.share_text));
+		allButtons.put("panel_btn_long_select", new ButtonConfig(R.drawable.ic_text_select_start_mt, R.string.long_select));
+		allButtons.put("delete_btn", new ButtonConfig(R.drawable.ic_delete_mt, R.string.delete));
+		allButtons.put("id_btn", new ButtonConfig(R.drawable.ic_tag_mt, R.string.arsc_copy_id));
+		allButtons.put("goto_id_btn", new ButtonConfig(R.drawable.ic_goto_mt, R.string.arsc_goto_id));
+		allButtons.put("customize_btn", new ButtonConfig(R.drawable.ic_setting_mt, R.string.customize));
+		
+		// Create buttons in JSON-defined order
+		for (String buttonId : menuItems) {
+			ButtonConfig config = allButtons.get(buttonId);
+			String pluginTitle = null;
+			int pluginIcon = 0;
+			if (config == null) {
+				// Third-party editor action: installed pack first, then
+				// external (out-of-process) plugin (icon always generic —
+				// plugin resources are not usable in-process).
+				EditorAction ext = null;
+				ExternalActions.Entry entry = null;
+				try {
+					ext = ExtensionRegistry.findEditor(buttonId);
+				} catch (Exception ignored) {
+				}
+				if (ext == null) {
+					try {
+						entry = ExternalActions.findById(
+								ExternalActions.editorEntries(context), buttonId);
+					} catch (Exception ignored) {
+					}
+				}
+				if (ext == null && entry == null) {
+					continue; // Skip unknown button IDs
+				}
+				if (ext != null) {
+					pluginTitle = ext.title() == null || ext.title().isEmpty() ? buttonId : ext.title();
+					pluginIcon = ExtensionIcons.resId(context, ext.iconName(), R.drawable.ic_setting_mt);
+				} else {
+					pluginTitle = entry.title == null || entry.title.isEmpty() ? buttonId : entry.title;
+					pluginIcon = R.drawable.ic_setting_mt;
+				}
+			}
+
+			ImageButton button = new androidx.appcompat.widget.AppCompatImageButton(context);
+			button.setTag(buttonId);
+			button.setLayoutParams(params);
+			button.setBackgroundResource(outValue.resourceId);
+			button.setImageResource(config == null ? pluginIcon : config.iconRes);
+			int iconPadding = (int) (12 * codeEditor.getDpUnit());
+			button.setPadding(iconPadding, iconPadding, iconPadding, iconPadding);
+			button.setOnClickListener(this);
+
+			if ("translate_btn".equals(buttonId)) {
+				button.setOnLongClickListener(this);
+			}
+
+			container.addView(button);
+			buttonMap.put(buttonId, button);
+
+			setTooltipText(button, config == null ? pluginTitle : context.getString(config.tooltipRes));
+		}
+		
+		// Initialize all button variables
+		this.selectAllButton = buttonMap.get("panel_btn_select_all");
+		this.copyButton = buttonMap.get("panel_btn_copy");
+		this.pasteButton = buttonMap.get("panel_btn_paste"); 
+		this.gotoButton = buttonMap.get("goto_btn");
+		this.translateButton = buttonMap.get("translate_btn");
+		this.cutButton = buttonMap.get("panel_btn_cut");
+		this.longSelectButton = buttonMap.get("panel_btn_long_select");
+		this.commentButton = buttonMap.get("comment_btn");
+		this.openLinkButton = buttonMap.get("openLink_btn");
+		this.shareButton = buttonMap.get("share_btn");
+		this.deleteButton = buttonMap.get("delete_btn");
+		this.arscIdButton = buttonMap.get("id_btn");
+		this.arscGotoIdButton = buttonMap.get("goto_id_btn");
+		this.customizeButton = buttonMap.get("customize_btn");
+	}
+
+	private record ButtonConfig(int iconRes, int tooltipRes) {
+	}
+	
+	// Updated setTooltipText with null check
+	public void setTooltipText(View view, String tooltipText) {
+		if (view != null) {
+			view.setContentDescription(tooltipText);
+			TooltipCompat.setTooltipText(view, tooltipText);
+		}
+	}
+	
+	
+	@Override
+	public void onClick(View view) {
+		String buttonId = (String) view.getTag();
+		Cursor cursor = this.codeEditor.getCursor();
+		if (buttonId == null) return;
+		if (runPluginAction(buttonId)) {
+			dismiss();
+			return;
+		}
+
+		switch (buttonId) {
+			case "panel_btn_select_all":
+			this.codeEditor.selectAll();
+			break;
+			case "panel_btn_cut":
+			if (cursor.isSelected()) {
+				this.codeEditor.cutText();
+			}
+			break;
+			case "panel_btn_copy":
+			this.codeEditor.copyText();
+			this.codeEditor.setSelection(cursor.getRightLine(), cursor.getRightColumn());
+			break;
+			case "panel_btn_paste":
+			this.codeEditor.pasteText();
+			this.codeEditor.setSelection(cursor.getRightLine(), cursor.getRightColumn());
+			break;
+			case "panel_btn_long_select":
+			this.codeEditor.beginLongSelect();
+			break;
+			case "goto_btn":
+			this.actionCallback.onClickGoTo(view, this.extractedTextWithLAndSemiColon);
+			break;
+			case "comment_btn" :
+			toggleComment();
+			break;
+			case "delete_btn" :
+			this.codeEditor.deleteText();
+			break;
+			case "id_btn" :
+			if (cursor.isSelected() && arscIdHandler != null) {
+				String selectedText = getSelectedText(this.codeEditor.getText(), cursor.getLeft(), cursor.getRight());
+				if (selectedText != null) {
+					arscIdHandler.onArscIdClick(selectedText);
+				}
+			}
+			break;
+			case "goto_id_btn" :
+			if (cursor.isSelected() && arscIdHandler != null) {
+				String selectedText = getSelectedText(this.codeEditor.getText(), cursor.getLeft(), cursor.getRight());
+				if (selectedText != null) {
+					arscIdHandler.onArscGotoIdClick(selectedText);
+				}
+			}
+			break;
+			case "customize_btn" :
+			Intent intent = new Intent(codeEditor.getContext(), EditFloatingMenusActivity.class);
+			codeEditor.getContext().startActivity(intent);
+			break;
+			case "share_btn" :
+			if (cursor.isSelected()) {
+				String selectedText = getSelectedText(this.codeEditor.getText(), cursor.getLeft(), cursor.getRight());
+				this.selectedText = selectedText;
+				if (selectedText != null) {
+					try{
+						Intent shareIntent = new Intent(Intent.ACTION_SEND);
+						shareIntent.setType("text/plain");
+						shareIntent.putExtra(Intent.EXTRA_TEXT, selectedText);
+						codeEditor.getContext().startActivity(Intent.createChooser(shareIntent, "Share Text"));
+					}catch(Exception e){}
+				}
+			}
+			break;
+			case "openLink_btn" :
+			if (cursor.isSelected()) {
+				String selectedText = getSelectedText(this.codeEditor.getText(), cursor.getLeft(), cursor.getRight());
+				this.selectedText = selectedText;
+				if (selectedText != null) {
+					openLinkInBrowser(codeEditor.getContext(), selectedText);
+				}
+			}
+			break;
+			case "translate_btn":
+			if (cursor.isSelected()) {
+				String selectedText = getSelectedText(this.codeEditor.getText(), cursor.getLeft(), cursor.getRight());
+				this.selectedText = selectedText;
+				if (selectedText != null) {
+					this.actionCallback.onClickTranslate(view, selectedText);
+				}
+			}
+			break;
+		}
+		dismiss();
+	}
+
+	private Consumer<Intent> externalRunner;
+
+	/** Bridge for external editor plugins (set by the hosting fragment). */
+	public void setExternalRunner(Consumer<Intent> runner) {
+		this.externalRunner = runner;
+	}
+
+	private boolean runPluginAction(String buttonId) {
+		EditorAction ext = null;
+		try {
+			ext = ExtensionRegistry.findEditor(buttonId);
+		} catch (Exception ignored) {
+		}
+		if (ext != null) {
+			try {
+				ext.run(new CodeEditorHandle(this.codeEditor));
+			} catch (Exception ignored) {
+			}
+			return true;
+		}
+		// External (out-of-process) editor action: send text out, apply the
+		// returned replacement. Needs the fragment's result launcher bridge.
+		if (externalRunner == null) return false;
+		ExternalActions.Entry found = null;
+		try {
+			Context ctx = codeEditor.getContext();
+			found = ExternalActions.findById(ExternalActions.editorEntries(ctx), buttonId);
+		} catch (Exception ignored) {
+		}
+		if (found == null) return false;
+		final ExternalActions.Entry entry = found;
+		try {
+			Context ctx = codeEditor.getContext();
+			if (!(ctx instanceof Activity)) return false;
+			Activity activity = (Activity) ctx;
+			CodeEditorHandle handle = new CodeEditorHandle(this.codeEditor);
+			Intent intent = PluginHost.explicitIntent(entry.plugin,
+					PluginContracts.ACTION_EDITOR);
+			intent.putExtra(PluginContracts.EXTRA_PLUGIN_ID, entry.plugin.pluginId);
+			intent.putExtra(PluginContracts.EXTRA_SELECTED_TEXT, handle.selectedText());
+			String full = handle.fullText();
+			if (full != null && full.getBytes(StandardCharsets.UTF_8).length
+					<= PluginContracts.MAX_FULL_TEXT_BYTES) {
+				intent.putExtra(PluginContracts.EXTRA_FULL_TEXT, full);
+			}
+			PluginTrust.ensureTrusted(activity, entry.plugin, () -> {
+				try {
+					externalRunner.accept(intent);
+				} catch (Exception ignored) {
+				}
+			});
+		} catch (Exception ignored) {
+			return false;
+		}
+		return true;
+	}
+
+	/** Applies an external editor plugin result (called by the fragment). */
+	public void applyExternalEditorResult(int resultCode, Intent data) {
+		try {
+			if (resultCode != Activity.RESULT_OK || data == null) return;
+			CodeEditorHandle handle = new CodeEditorHandle(this.codeEditor);
+			if (data.hasExtra(PluginContracts.EXTRA_REPLACE_SELECTION)) {
+				String replacement = data.getStringExtra(PluginContracts.EXTRA_REPLACE_SELECTION);
+				if (replacement != null) handle.replaceSelection(replacement);
+			}
+			if (data.hasExtra(PluginContracts.EXTRA_SET_FULL_TEXT)) {
+				String full = data.getStringExtra(PluginContracts.EXTRA_SET_FULL_TEXT);
+				if (full != null) handle.setFullText(full);
+			}
+		} catch (Exception ignored) {
+		}
+	}
+	
+	@Override
+	public boolean onLongClick(View view) {
+		String buttonId = (String) view.getTag();
+		if (buttonId != null && buttonId.equals("translate_btn")) {
+			this.actionCallback.onLongClickTranslate(view);
+			dismiss();
+			return true;
+		}
+		return false;
+	}
+	
+	private void onScrollEvent(ScrollEvent scrollEvent, Unsubscribe unsubscribe) {
+		long lastScrollTime = this.lastScrollTime;
+		long currentTime = System.currentTimeMillis();
+		this.lastScrollTime = currentTime;
+		if (currentTime - lastScrollTime >= DISPLAY_DELAY || this.lastEventCause == 6) {
+			return;
+		}
+		postDisplayWindow();
+	}
+	
+	private void onHandleStateChanged(HandleStateChangeEvent handleStateChangeEvent, Unsubscribe unsubscribe) {
+		if (handleStateChangeEvent.isHeld()) {
+			postDisplayWindow();
+		}
+	}
+	
+	private void onLongPressEvent(CodeEditor codeEditor, LongPressEvent longPressEvent, Unsubscribe unsubscribe) {
+		if (codeEditor.getCursor().isSelected() && this.lastEventCause == 6) {
+			int index = longPressEvent.getIndex();
+			if (index >= codeEditor.getCursor().getLeft() && index <= codeEditor.getCursor().getRight()) {
+				this.lastEventCause = 0;
+				displayWindow();
+			}
+			longPressEvent.intercept(2);
+		}
+	}
+	
+	private void onSelectionChanged(CodeEditor codeEditor, SelectionChangeEvent selectionChangeEvent, Unsubscribe unsubscribe) {
+		updateButtonStates();
+		
+		int line = codeEditor.getCursor().getLeftLine();
+		int column = codeEditor.getCursor().getLeftColumn();
+		
+		String lineText = codeEditor.getText().getLine(line).toString();
+		String extractedText = extractTextWithLAndSemiColon(lineText, column);
+		
+		if ("NotAvailable".equals(extractedText)) {
+			if(column != 1){
+				extractedText = extractSmaliLabel(lineText, (column - 1));
+			} else {
+				extractedText = extractSmaliLabel(lineText, column);
+			}
+		}
+		this.extractedTextWithLAndSemiColon = extractedText;
+        
+		if (gotoButton != null) {
+			gotoButton.setVisibility("NotAvailable".equals(extractedText) ? View.GONE : View.VISIBLE);
+		}
+	}
+	
+	private void onHandleStateChangedFinal(final CodeEditor codeEditor, HandleStateChangeEvent handleStateChangeEvent, Unsubscribe unsubscribe) {
+		if (handleStateChangeEvent.getEditor().getCursor().isSelected() || handleStateChangeEvent.getHandleType() != 0 || handleStateChangeEvent.isHeld()) {
+			return;
+		}
+		displayWindow();
+		codeEditor.postDelayedInLifecycle(new Runnable() {
+			@Override
+			public void run() {
+				if (!codeEditor.getEventHandler().shouldDrawInsertHandle() && !codeEditor.getCursor().isSelected()) {
+					TextActionWindow.this.dismiss();
+				} else if (codeEditor.getCursor().isSelected()) {
+				} else {
+					codeEditor.postDelayedInLifecycle(this, 100L);
+				}
+			}
+		}, 100L);
+	}
+	
+	
+	private void updateButtonStates() {
+		updatePasteButtonState();
+		updateCopyButtonVisibility();
+		updateTranslateButtonVisibility();
+		updatePasteButtonVisibility();
+		updateCutButtonVisibility();
+		updateLongSelectButtonVisibility();
+		updateDeleteButtonVisibility();
+		updateShareButtonVisibility();
+		updateOpenLinkButtonVisibility();
+		updateCommentButtonVisibility();
+		updateArscIdButtonsVisibility();
+	}
+	
+	private void updateArscIdButtonsVisibility() {
+		int visibility = View.GONE;
+		if (arscIdHandler != null && this.codeEditor.getCursor().isSelected()) {
+			try {
+				Cursor cursor = this.codeEditor.getCursor();
+				String selectedText = getSelectedText(this.codeEditor.getText(), cursor.getLeft(), cursor.getRight());
+				if (selectedText != null && arscIdHandler.isArscIdAvailable(selectedText)) {
+					visibility = View.VISIBLE;
+				}
+			} catch (Exception ignored) {
+			}
+		}
+		if (arscIdButton != null) {
+			arscIdButton.setVisibility(visibility);
+		}
+		if (arscGotoIdButton != null) {
+			arscGotoIdButton.setVisibility(visibility);
+		}
+	}
+	
+	private void updatePasteButtonState() {
+		if (pasteButton != null) pasteButton.setEnabled(codeEditor.isEditable() && codeEditor.hasClip());
+	}
+	
+	private void updateCopyButtonVisibility() {
+		int visibility;
+		if (this.codeEditor.getCursor().isSelected()) {
+			visibility = View.VISIBLE;
+		} else {
+			visibility = View.GONE;
+		}
+		if(copyButton != null){
+			this.copyButton.setVisibility(visibility);
+		}
+	}
+	
+	private void updateOpenLinkButtonVisibility() {
+		int visibility;
+		Cursor cursor = this.codeEditor.getCursor();
+		
+		if (cursor.isSelected()) {
+			String selectedText = getSelectedText(this.codeEditor.getText(), cursor.getLeft(), cursor.getRight());
+			if(isLink(selectedText)){
+				visibility = View.VISIBLE;
+			} else {
+				visibility = View.GONE;
+			}
+		} else {
+			visibility = View.GONE;
+		}
+		if(openLinkButton != null){
+			this.openLinkButton.setVisibility(visibility);
+		}
+	}
+	
+	private void updateDeleteButtonVisibility() {
+		int visibility;
+		if (this.codeEditor.getCursor().isSelected() && this.codeEditor.isEditable()) {
+			visibility = View.VISIBLE;
+		} else {
+			visibility = View.GONE;
+		}
+		if(deleteButton != null){
+			this.deleteButton.setVisibility(visibility);
+		}
+	}
+	
+	private void updateCommentButtonVisibility(){
+		int visibility;
+		if (this.codeEditor.isEditable()) {
+			visibility = View.VISIBLE;
+		} else {
+			visibility = View.GONE;
+		}
+		if(commentButton != null){
+			this.commentButton.setVisibility(visibility);
+		}
+	}
+	
+	private void updateShareButtonVisibility() {
+		int visibility;
+		if (this.codeEditor.getCursor().isSelected()) {
+			visibility = View.VISIBLE;
+		} else {
+			visibility = View.GONE;
+		}
+		if(shareButton != null){
+			this.shareButton.setVisibility(visibility);
+		}
+	}
+	
+	private void updateTranslateButtonVisibility() {
+		int visibility;
+		if (this.codeEditor.getCursor().isSelected()) {
+			visibility = View.VISIBLE;
+		} else {
+			visibility = View.GONE;
+		}
+		if(translateButton != null){
+			this.translateButton.setVisibility(visibility);
+		}
+	}
+	
+	private void updatePasteButtonVisibility() {
+		int visibility;
+		if (this.codeEditor.isEditable()) {
+			visibility = View.VISIBLE;
+		} else {
+			visibility = View.GONE;
+		}
+		if(pasteButton != null){
+			this.pasteButton.setVisibility(visibility);
+		}
+	}
+	
+	
+	private void updateCutButtonVisibility() {
+		int visibility;
+		boolean isSelected = this.codeEditor.getCursor().isSelected();
+		boolean isEditable = this.codeEditor.isEditable();
+		
+		if (isSelected && isEditable) {
+			visibility = View.VISIBLE;
+		} else {
+			visibility = View.GONE;
+		}
+		this.cutButton.setVisibility(visibility);
+	}
+	
+	
+	private void updateLongSelectButtonVisibility() {
+		// If the text is selected then gone the long select button else show
+		if(longSelectButton != null){
+			if (this.codeEditor.getCursor().isSelected()) {
+				this.longSelectButton.setVisibility(View.GONE);
+			} else {
+				this.longSelectButton.setVisibility(View.VISIBLE);
+			}
+		}
+	}
+	
+	public void toggleComment() {
+		final CodeEditor editor = this.codeEditor;
+		final Content text = editor.getText();
+		final Cursor cursor = editor.getCursor();
+		
+		text.beginBatchEdit();
+		try {
+			if (cursor.isSelected()) {
+				int startLine = cursor.getLeftLine();
+				int endLine = cursor.getRightLine();
+				
+				// Phase 1: Check comment state (single pass)
+				boolean allCommented = true;
+				int[] firstCharPositions = new int[endLine - startLine + 1];
+				
+				for (int i = 0, line = startLine; line <= endLine; line++, i++) {
+					String lineStr = text.getLineString(line);
+					firstCharPositions[i] = getFirstNonWhitespace(lineStr);
+					
+					if (firstCharPositions[i] < lineStr.length() && 
+					lineStr.charAt(firstCharPositions[i]) != '#') {
+						allCommented = false;
+					}
+				}
+				
+				// Phase 2: Apply changes (single pass)
+				for (int i = 0, line = startLine; line <= endLine; line++, i++) {
+					int firstCharPos = firstCharPositions[i];
+					String lineStr = text.getLineString(line);
+					
+					if (firstCharPos >= lineStr.length()) continue;
+					
+					if (allCommented) {
+						if (lineStr.charAt(firstCharPos) == '#') {
+							int endPos = firstCharPos + 1;
+							if (endPos < lineStr.length() && lineStr.charAt(endPos) == ' ') {
+								endPos++;
+							}
+							text.delete(line, firstCharPos, line, endPos);
+						}
+					} else {
+						if (lineStr.charAt(firstCharPos) != '#') {
+							text.insert(line, firstCharPos, "# ");
+						}
+					}
+				}
+				
+				// Restore selection
+				editor.setSelectionRegion(startLine, 0, endLine, text.getColumnCount(endLine));
+			} else {
+				// Optimized single line version
+				int line = cursor.getLeftLine();
+				String lineStr = text.getLineString(line);
+				int firstCharPos = getFirstNonWhitespace(lineStr);
+				
+				if (firstCharPos < lineStr.length()) {
+					if (lineStr.charAt(firstCharPos) == '#') {
+						int endPos = firstCharPos + 1;
+						if (endPos < lineStr.length() && lineStr.charAt(endPos) == ' ') {
+							endPos++;
+						}
+						text.delete(line, firstCharPos, line, endPos);
+					} else {
+						text.insert(line, firstCharPos, "# ");
+					}
+				}
+			}
+		} finally {
+			text.endBatchEdit();
+		}
+	}
+	
+	private int getFirstNonWhitespace(String line) {
+		for (int i = 0; i < line.length(); i++) {
+			char c = line.charAt(i);
+			if (c != ' ' && c != '\t') {
+				return i;
+			}
+		}
+		return line.length();
+	}
+	
+	
+	public static void openLinkInBrowser(Context context, String url) {
+		if (context == null || TextUtils.isEmpty(url)) {
+			return;
+		}
+		String normalizedUrl = normalizeUrl(url);
+		if (normalizedUrl == null) {
+			return;
+		}
+		try {
+			Intent intent = new Intent(Intent.ACTION_VIEW);
+			intent.setData(Uri.parse(normalizedUrl));
+			context.startActivity(intent);
+		} catch (Exception e) {
+			Toast.makeText(context, "No browser available", Toast.LENGTH_SHORT).show();
+		}
+	}
+	
+	protected String getSelectedText(@NonNull CharSequence charSequence, int start, int end) {
+		if (end < start) {
+			return null;
+		}
+		return charSequence instanceof Content ? ((Content) charSequence).substring(start, end) : charSequence.subSequence(start, end).toString();
+	}
+	
+	private void postDisplayWindow() {
+		if (isShowing()) {
+			dismiss();
+			if (this.codeEditor.getCursor().isSelected()) {
+				this.codeEditor.postDelayedInLifecycle(new Runnable() {
+					@Override
+					public void run() {
+						if (!TextActionWindow.this.touchEventHandler.hasAnyHeldHandle() && !TextActionWindow.this.codeEditor.getSnippetController().isInSnippet() && System.currentTimeMillis() - TextActionWindow.this.lastScrollTime > DISPLAY_DELAY && TextActionWindow.this.codeEditor.getScroller().isFinished()) {
+							TextActionWindow.this.displayWindow();
+						} else {
+							TextActionWindow.this.codeEditor.postDelayedInLifecycle(this, DISPLAY_DELAY);
+						}
+					}
+				}, DISPLAY_DELAY);
+			}
+		}
+	}
+	
+	public String extractTextWithLAndSemiColon(String text, int position) {
+		Matcher matcher = Pattern.compile("(L(?:[^;L]|L(?!\\w*/))+(?:/[^;L]|L(?!\\w*/))*;)").matcher(text);
+		while (matcher.find()) {
+			if (matcher.start() <= position && position < matcher.end()) {
+				return matcher.group();
+			}
+		}
+		
+		Matcher matcher2 = Pattern.compile(";->([^:()]+):|;->([^()]+)\\(([^)]*)\\)").matcher(text);
+		if (matcher2.find()) {
+			if ((matcher2.start(1) == -1 || matcher2.start(1) - 2 > position || position >= matcher2.end(1)) && 
+			(matcher2.start(2) == -1 || matcher2.start(2) - 2 > position || position >= matcher2.end(2))) {
+				return (matcher2.start(3) == -1 || text.charAt(matcher2.start(3) - 1) == '(' || 
+				text.charAt(matcher2.start(3) - 1) == ':' || position != matcher2.start(3) - 1) ? 
+				"NotAvailable" : matcher2.group(3);
+			}
+			int lastSpaceIndex = text.lastIndexOf(32, Math.max(matcher2.start(1), matcher2.start(2)) - 2);
+			return lastSpaceIndex != -1 ? text.substring(lastSpaceIndex + 1) : "NotAvailable";
+		}
+		return "NotAvailable";
+	}
+	
+	public static String extractSmaliLabel(String text, int position) {
+		if (text == null || text.isEmpty() || position < 0 || position >= text.length()) {
+			return "NotAvailable";
+		}
+		
+		int lineStart = position;
+		while (lineStart > 0 && text.charAt(lineStart-1) != '\n') lineStart--;
+		int lineEnd = position;
+		while (lineEnd < text.length() && text.charAt(lineEnd) != '\n') lineEnd++;
+		String currentLine = text.substring(lineStart, lineEnd).trim();
+		
+		if (currentLine.startsWith(".field") || 
+		currentLine.matches("^[is]?[g|p]et(-\\w+)?\\s.*") ||
+		currentLine.matches("^\\s*L[^;]+;->\\w+:")) {
+			return "NotAvailable";
+		}
+		
+		Pattern pattern = Pattern.compile("(:[a-zA-Z_0-9]+)");
+		Matcher matcher = pattern.matcher(text);
+		
+		while (matcher.find()) {
+			int start = matcher.start();
+			int end = matcher.end();
+			
+			while (end < text.length() && !Character.isWhitespace(text.charAt(end))) {
+				end++;
+			}
+			
+			if (position >= start && position < end) {
+				return text.substring(start, Math.min(end, text.length()));
+			}
+		}
+		
+		Matcher lineMatcher = pattern.matcher(currentLine);
+		if (lineMatcher.find()) {
+			return lineMatcher.group();
+		}
+		
+		return "NotAvailable";
+	}
+	
+	public static boolean isLink(String text) {
+		if (TextUtils.isEmpty(text)) {
+			return false;
+		}
+		
+		// Check for full URLs with protocol
+		String urlRegex = "^(https?|ftp)://[\\w.-]+(\\.[a-zA-Z]{2,})+[/\\w.-]*$";
+		
+		// Check for simple domains (without protocol)
+		String domainRegex = "^([\\w-]+\\.)+([a-zA-Z]{2,})$";
+		
+		Pattern urlPattern = Pattern.compile(urlRegex, Pattern.CASE_INSENSITIVE);
+		Pattern domainPattern = Pattern.compile(domainRegex, Pattern.CASE_INSENSITIVE);
+		
+		if (urlPattern.matcher(text).matches()) {
+			return true;
+		}
+		
+		if (domainPattern.matcher(text).matches()) {
+			String tld = text.substring(text.lastIndexOf('.') + 1).toLowerCase();
+			return VALID_TLDS.contains(tld);
+		}
+		
+		if (text.toLowerCase().startsWith("www.")) {
+			String rest = text.substring(4);
+			if (domainPattern.matcher(rest).matches()) {
+				String tld = rest.substring(rest.lastIndexOf('.') + 1).toLowerCase();
+				return VALID_TLDS.contains(tld);
+			}
+		}
+		
+		return false;
+	}
+	
+	public static String normalizeUrl(String text) {
+		if (TextUtils.isEmpty(text)) {
+			return null;
+		}
+		
+		// If already starts with http:// or https://
+		if (text.toLowerCase().startsWith("http://") || 
+		text.toLowerCase().startsWith("https://")) {
+			return text;
+		}
+		
+		// If starts with www.
+		if (text.toLowerCase().startsWith("www.")) {
+			return "http://" + text;
+		}
+		
+		// If it's a valid domain without prefix
+		if (isLink(text) && text.contains(".")) {
+			return "http://" + text;
+		}
+		
+		return null;
+	}
+	
+	
+	
+	public static void applyRippleEffect(View view, String backgroundColor, String strokeColor, double cornerRadius, double strokeWidth, String rippleColor) {
+		GradientDrawable gradientDrawable = new GradientDrawable();
+		gradientDrawable.setColor(Color.parseColor(backgroundColor));
+		gradientDrawable.setCornerRadius((float) cornerRadius);
+		gradientDrawable.setStroke((int) strokeWidth, Color.parseColor("#" + rippleColor.replace("#", "")));
+		view.setBackground(new RippleDrawable(new ColorStateList(new int[][]{new int[0]}, new int[]{Color.parseColor("#FF757575")}), gradientDrawable, null));
+		view.setElevation(5.0f);
+	}
+}

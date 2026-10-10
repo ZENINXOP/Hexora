@@ -1,0 +1,82 @@
+{
+  "project": "JingMatrix/LSPatch",
+  "version": "v1.2",
+  "archive": "lspatch-v1.2-recursive-source.tar.gz",
+  "size": 13130219,
+  "sha256": "12a0d939ae88a38bd12143b95616a00243aa52bf45244b5d679c8d439be3a8d2",
+  "source_files": 2680,
+  "repositories": [
+    {
+      "path": ".",
+      "commit": "0dc50f42503711b14f5e2bb217c2bdd6321ce5be",
+      "url": "https://github.com/JingMatrix/LSPatch.git"
+    },
+    {
+      "path": "core",
+      "commit": "e00c5c5038bbcc14e0b382ab893301d6993e6989",
+      "url": "https://github.com/JingMatrix/LSPosed.git"
+    },
+    {
+      "path": "core/external/apache/commons-lang",
+      "commit": "e66ad3dd2e8538e24940d97179c960a60dd25495",
+      "url": "https://github.com/apache/commons-lang.git"
+    },
+    {
+      "path": "core/external/axml/manifest-editor",
+      "commit": "c238e28f3a1a0275c38945aa4f646b065d3f5889",
+      "url": "https://github.com/JingMatrix/ManifestEditor.git"
+    },
+    {
+      "path": "core/external/dobby",
+      "commit": "05a09ac6807a6bb1726350e40ea4b127c1c79809",
+      "url": "https://github.com/JingMatrix/Dobby.git"
+    },
+    {
+      "path": "core/external/fmt",
+      "commit": "21d4cc15c8a2a3536aab5623258ba3b3dae573ce",
+      "url": "https://github.com/fmtlib/fmt.git"
+    },
+    {
+      "path": "core/external/lsplant",
+      "commit": "49d2e5641dfb222e24cd1fc0e9968a5a00496baa",
+      "url": "https://github.com/JingMatrix/LSPlant.git"
+    },
+    {
+      "path": "core/external/lsplant/docs/doxygen-awesome-css",
+      "commit": "df88fe4fdd97714fadfd3ef17de0b4401f804052",
+      "url": "https://github.com/jothepro/doxygen-awesome-css.git"
+    },
+    {
+      "path": "core/external/lsplant/lsplant/src/main/jni/external/dex_builder",
+      "commit": "ac7fb2230954ee311808bad469b0db501f31bfb8",
+      "url": "https://github.com/JingMatrix/DexBuilder.git"
+    },
+    {
+      "path": "core/external/lsplant/lsplant/src/main/jni/external/dex_builder/external/parallel_hashmap",
+      "commit": "0cd57d29a959256ed66b2afdd1009928fc625d09",
+      "url": "https://github.com/greg7mdp/parallel-hashmap.git"
+    },
+    {
+      "path": "core/external/lsplt",
+      "commit": "9df80d48ac9084d614c2c81a52614ed78a434a9d",
+      "url": "https://github.com/JingMatrix/LSPlt"
+    },
+    {
+      "path": "core/external/xz-embedded",
+      "commit": "ae63ae3a36ed01724674e8f3d750dc47bf125410",
+      "url": "https://github.com/tukaani-project/xz-embedded.git"
+    },
+    {
+      "path": "core/services/libxposed",
+      "commit": "3318940876192e29cf6ab07637e899e22a87ebf0",
+      "url": "https://github.com/JingMatrix/libxposed-service.git"
+    },
+    {
+      "path": "core/xposed/libxposed",
+      "commit": "39cac0845771547c9c67a3e3ce255af110a54a0e",
+      "url": "https://github.com/JingMatrix/libxposed-api.git"
+    }
+  ],
+  "format": "git archive of each pinned repository, recursively overlaid; excludes Git metadata",
+  "integration": "OpenAI Codex; upstream source unmodified"
+}

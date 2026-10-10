@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <integer-array name="framework_versions">
+        <item>22</item>
+        <item>23</item>
+        <item>24</item>
+        <item>25</item>
+        <item>26</item>
+        <item>27</item>
+        <item>28</item>
+        <item>29</item>
+        <item>30</item>
+        <item>31</item>
+        <item>32</item>
+        <item>33</item>
+        <item>34</item>
+        <item>35</item>
+    </integer-array>
+
+    <string-array name="theme_entries">
+        <item>Dracula</item>
+        <item>Eclipse</item>
+        <item>VS2019</item>
+        <item>GitHub</item>
+        <item>NotepadXX</item>
+    </string-array>
+
+    <string-array name="theme_values">
+        <item>drac</item>
+        <item>ecl</item>
+        <item>vs</item>
+        <item>gh</item>
+        <item>np</item>
+    </string-array>
+
+    <string-array name="install_locations">
+        <item>Auto</item>
+        <item>Internal Only</item>
+        <item>Prefer External</item>
+        <item>Default</item>
+    </string-array>
+
+    <string-array name="font_styles">
+        <item>Normal</item>
+        <item>Monospace</item>
+    </string-array>
+
+    <string-array name="font_style_values">
+        <item>normal</item>
+        <item>monospace</item>
+    </string-array>
+
+    <string-array name="font_sizes">
+        <item>8</item>
+        <item>10</item>
+        <item>12</item>
+        <item>14</item>
+        <item>16</item>
+        <item>18</item>
+        <item>20</item>
+        <item>22</item>
+        <item>24</item>
+        <item>26</item>
+        <item>28</item>
+        <item>30</item>
+    </string-array>
+
+    <string-array name="font_size_values">
+        <item>8</item>
+        <item>10</item>
+        <item>12</item>
+        <item>14</item>
+        <item>16</item>
+        <item>18</item>
+        <item>20</item>
+        <item>22</item>
+        <item>24</item>
+        <item>26</item>
+        <item>28</item>
+        <item>30</item>
+    </string-array>
+
+    <string-array name="pref_magnifier_size_entries">
+        <item>Large</item>
+        <item>Medium</item>
+        <item>Small</item>
+    </string-array>
+
+    <string-array name="pref_magnifier_size_values">
+        <item>large</item>
+        <item>medium</item>
+        <item>small</item>
+    </string-array>
+
+    <string-array name="pref_capture_range_entries">
+        <item>Large</item>
+        <item>Medium</item>
+        <item>Small</item>
+    </string-array>
+
+    <string-array name="pref_capture_range_values">
+        <item>large</item>
+        <item>medium</item>
+        <item>small</item>
+    </string-array>
+
+    <string-array name="pref_capture_speed_entries">
+        <item>Fast</item>
+        <item>Normal</item>
+        <item>Slow</item>
+    </string-array>
+
+    <string-array name="pref_capture_speed_values">
+        <item>fast</item>
+        <item>normal</item>
+        <item>slow</item>
+    </string-array>
+</resources>

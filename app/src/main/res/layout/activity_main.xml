@@ -1,0 +1,455 @@
+<?xml version="1.0" encoding="utf-8"?>
+<io.github.abdurazaaqmohammed.ui.MyDrawerLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/drawer_layout"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <androidx.coordinatorlayout.widget.CoordinatorLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent">
+
+        <RelativeLayout
+            android:id="@+id/main"
+            android:background="?attr/colorSurface"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" >
+
+            <LinearLayout
+                android:id="@+id/topBar"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:minHeight="56dp"
+                android:background="?attr/colorSurfaceVariant"
+                android:gravity="center_vertical">
+
+                <ImageView
+                    android:id="@+id/hamburgerMenu"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:padding="12dp"
+                    app:tint="?attr/colorOnSurface"
+                    android:contentDescription="@string/menu"
+                    android:background="?attr/selectableItemBackground"
+                    android:src="@drawable/baseline_menu_24" />
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical"
+                    android:paddingEnd="8dp"
+                    android:paddingStart="8dp">
+
+                    <TextView
+                        android:id="@+id/currentFolderPath"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:maxLines="1"
+                        android:ellipsize="start"
+                        android:textSize="16sp"
+                        android:textColor="?attr/colorOnSurface"
+                        android:contentDescription="@string/current_folder_path"/>
+
+                    <TextView
+                        android:id="@+id/folderCount"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:textSize="12sp"
+                        android:textColor="?attr/colorOnSurfaceVariant"
+                        android:layout_marginEnd="8dp"/>
+                </LinearLayout>
+
+                <ImageButton
+                    android:id="@+id/build"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:padding="12dp"
+                    android:visibility="gone"
+                    android:background="?attr/selectableItemBackground"
+                    android:contentDescription="@string/compile"
+                    android:src="@drawable/gavel_24px"
+                    app:tint="?attr/colorOnSurface" />
+
+                <ImageView
+                    android:id="@+id/moreOptionsMenu"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:padding="12dp"
+                    app:tint="?attr/colorOnSurface"
+                    android:src="@drawable/baseline_more_vert_24"
+                    android:contentDescription="@string/more"
+                    android:background="?attr/selectableItemBackground" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/panesRow"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:layout_below="@id/topBar"
+                android:layout_above="@id/bottomBar"
+                android:baselineAligned="false"
+                android:orientation="horizontal">
+
+                <LinearLayout
+                    android:id="@+id/pane1Column"
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:id="@+id/pane1Path"
+                        android:layout_width="match_parent"
+                        android:layout_height="32dp"
+                        android:gravity="center_vertical"
+                        android:paddingHorizontal="8dp"
+                        android:singleLine="true"
+                        android:ellipsize="start"
+                        android:textSize="11sp"
+                        android:textColor="?attr/colorOnSurfaceVariant"
+                        android:background="?attr/colorSurfaceVariant" />
+
+                    <FrameLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="0dp"
+                        android:layout_weight="1">
+
+                        <androidx.swiperefreshlayout.widget.SwipeRefreshLayout
+                            android:id="@+id/swipeRefreshPane1"
+                            android:layout_width="match_parent"
+                            android:layout_height="match_parent">
+
+                            <androidx.recyclerview.widget.RecyclerView
+                                android:id="@+id/listViewPane1"
+                                android:layout_width="match_parent"
+                                android:layout_height="match_parent"
+                                android:scrollbars="vertical" />
+                        </androidx.swiperefreshlayout.widget.SwipeRefreshLayout>
+
+                        <TextView
+                            android:id="@+id/pane1Empty"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_gravity="center"
+                            android:gravity="center"
+                            android:padding="12dp"
+                            android:text="@string/hexora_empty_folder"
+                            android:textSize="13sp"
+                            android:textColor="?attr/colorOnSurfaceVariant"
+                            android:visibility="gone" />
+                    </FrameLayout>
+                </LinearLayout>
+
+                <View
+                    android:layout_width="1dp"
+                    android:layout_height="match_parent"
+                    android:background="?attr/colorOutlineVariant" />
+
+                <LinearLayout
+                    android:id="@+id/pane2Column"
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:id="@+id/pane2Path"
+                        android:layout_width="match_parent"
+                        android:layout_height="32dp"
+                        android:gravity="center_vertical"
+                        android:paddingHorizontal="8dp"
+                        android:singleLine="true"
+                        android:ellipsize="start"
+                        android:textSize="11sp"
+                        android:textColor="?attr/colorOnSurfaceVariant"
+                        android:background="?attr/colorSurfaceVariant" />
+
+                    <FrameLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="0dp"
+                        android:layout_weight="1">
+
+                        <androidx.swiperefreshlayout.widget.SwipeRefreshLayout
+                            android:id="@+id/swipeRefreshPane2"
+                            android:layout_width="match_parent"
+                            android:layout_height="match_parent">
+
+                            <androidx.recyclerview.widget.RecyclerView
+                                android:id="@+id/listViewPane2"
+                                android:layout_width="match_parent"
+                                android:layout_height="match_parent"
+                                android:scrollbars="vertical" />
+                        </androidx.swiperefreshlayout.widget.SwipeRefreshLayout>
+
+                        <TextView
+                            android:id="@+id/pane2Empty"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_gravity="center"
+                            android:gravity="center"
+                            android:padding="12dp"
+                            android:text="@string/hexora_empty_folder"
+                            android:textSize="13sp"
+                            android:textColor="?attr/colorOnSurfaceVariant"
+                            android:visibility="gone" />
+                    </FrameLayout>
+                </LinearLayout>
+            </LinearLayout>
+
+
+                <LinearLayout
+                    android:id="@+id/bottomBar"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:minHeight="48dp"
+                    android:background="?attr/colorSurfaceVariant"
+                    android:gravity="center"
+                    android:layout_alignParentBottom="true">
+
+                    <ImageView
+                        android:id="@+id/backButton"
+                        app:tint="?attr/colorOnSurface"
+                        android:background="?attr/selectableItemBackground"
+                        android:layout_width="0dp"
+                        android:layout_height="48dp"
+                        android:layout_weight="1"
+                        android:src="@drawable/chevron_left_24px"
+                        android:contentDescription="@string/back"
+                        android:padding="8dp"
+                        android:layout_gravity="center"/>
+
+                    <ImageView
+                        android:id="@+id/forwardButton"
+                        app:tint="?attr/colorOnSurface"
+                        android:background="?attr/selectableItemBackground"
+                        android:layout_width="0dp"
+                        android:layout_height="48dp"
+                        android:layout_weight="1"
+                        android:src="@drawable/chevron_right_24px"
+                        android:contentDescription="@string/forward"
+                        android:padding="8dp"
+                        android:layout_gravity="center"/>
+
+                    <ImageView
+                        android:id="@+id/addButton"
+                        app:tint="?attr/colorOnSurface"
+                        android:background="?attr/selectableItemBackground"
+                        android:layout_width="0dp"
+                        android:layout_height="48dp"
+                        android:layout_weight="1"
+                        android:src="@drawable/add_24px"
+                        android:contentDescription="@string/newFileOrFolder"
+                        android:padding="8dp"
+                        android:layout_gravity="center" />
+
+                    <ImageView
+                        android:id="@+id/syncPaneButton"
+                        app:tint="?attr/colorOnSurface"
+                        android:background="?attr/selectableItemBackground"
+                        android:layout_width="0dp"
+                        android:layout_height="48dp"
+                        android:layout_weight="1"
+                        android:src="@drawable/baseline_swap_horiz_24"
+                        android:contentDescription="@string/sync"
+                        android:padding="8dp"
+                        android:layout_gravity="center" />
+
+                    <ImageView
+                        android:id="@+id/upButton"
+                        app:tint="?attr/colorOnSurface"
+                        android:background="?attr/selectableItemBackground"
+                        android:layout_width="0dp"
+                        android:layout_height="48dp"
+                        android:layout_weight="1"
+                        android:src="@drawable/arrow_drop_up_24px"
+                        android:contentDescription="@string/parent_dir"
+                        android:padding="8dp"
+                        android:layout_gravity="center"/>
+            </LinearLayout>
+
+        </RelativeLayout>
+
+        <LinearLayout
+            android:id="@+id/bookmarks_drawer"
+            android:layout_width="match_parent"
+            android:layout_height="300dp"
+            android:background="?attr/colorSurface"
+            android:orientation="vertical"
+            app:layout_behavior="com.google.android.material.bottomsheet.BottomSheetBehavior"
+            app:behavior_hideable="true"
+            app:behavior_peekHeight="0dp">
+
+            <LinearLayout
+                android:id="@+id/bookmarksBatchBar"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="?attr/colorSurfaceVariant"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp"
+                android:visibility="gone">
+
+                <Button
+                    android:id="@+id/batchCopy"
+                    style="@style/Widget.Material3.Button.TextButton"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@android:string/copy" />
+
+                <Button
+                    android:id="@+id/batchMove"
+                    style="@style/Widget.Material3.Button.TextButton"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/move" />
+
+                <Button
+                    android:id="@+id/batchDelete"
+                    style="@style/Widget.Material3.Button.TextButton"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/delete" />
+
+                <Button
+                    android:id="@+id/batchCancel"
+                    style="@style/Widget.Material3.Button.TextButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@android:string/cancel" />
+            </LinearLayout>
+
+            <FrameLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content">
+
+                <com.google.android.material.tabs.TabLayout
+                    android:id="@+id/bookmarksTabs"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    app:tabGravity="fill"
+                    app:tabMode="fixed">
+
+                    <com.google.android.material.tabs.TabItem
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/bookmarks" />
+
+                    <com.google.android.material.tabs.TabItem
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/history" />
+                </com.google.android.material.tabs.TabLayout>
+
+                <ImageButton
+                    android:id="@+id/bookmarksMenuButton"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:layout_gravity="end|center_vertical"
+                    android:layout_marginEnd="8dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="@string/more"
+                    android:src="@drawable/baseline_more_vert_24"
+                    app:tint="?attr/colorOnSurface" />
+            </FrameLayout>
+
+            <androidx.viewpager2.widget.ViewPager2
+                android:id="@+id/bookmarksPager"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1" />
+
+            <Button
+                android:id="@+id/bookmarksCloseButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_margin="8dp"
+                android:text="@string/close"
+                style="@style/Widget.Material3.Button.OutlinedButton" />
+        </LinearLayout>
+
+    </androidx.coordinatorlayout.widget.CoordinatorLayout>
+
+    <LinearLayout
+        android:id="@+id/sidebar_drawer"
+        android:layout_width="280dp"
+        android:layout_height="match_parent"
+        android:layout_gravity="start"
+        android:background="@drawable/bg_sidebar"
+        android:orientation="vertical"
+        android:clickable="true"
+        android:focusable="true">
+
+        <LinearLayout
+            android:id="@+id/sidebarTitle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="?attr/selectableItemBackground"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="16dp"
+            android:paddingTop="16dp"
+            android:paddingEnd="16dp"
+            android:paddingBottom="16dp">
+
+            <ImageView
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:importantForAccessibility="no"
+                android:src="@mipmap/ic_launcher" />
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginStart="16dp"
+                android:text="@string/app_name"
+                android:textColor="?attr/colorOnSurface"
+                android:textSize="20sp"
+                android:textStyle="bold" />
+
+            <ImageButton
+                android:id="@+id/sidebarOrganizeButton"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@string/organize_sidebar"
+                android:src="@drawable/drag_handle_24px"
+                app:tint="?attr/colorOnSurface" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/storageContainer"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingStart="12dp"
+            android:paddingTop="8dp"
+            android:paddingEnd="12dp"
+            android:paddingBottom="8dp" />
+
+        <androidx.swiperefreshlayout.widget.SwipeRefreshLayout
+            android:id="@+id/sidebarRefresh"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1">
+
+            <ListView
+                android:id="@+id/sidebarList"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:clipToPadding="false"
+                android:divider="@android:color/transparent"
+                android:dividerHeight="0dp"
+                android:paddingHorizontal="8dp"
+                android:paddingTop="4dp"
+                android:paddingBottom="8dp" />
+        </androidx.swiperefreshlayout.widget.SwipeRefreshLayout>
+    </LinearLayout>
+</io.github.abdurazaaqmohammed.ui.MyDrawerLayout>

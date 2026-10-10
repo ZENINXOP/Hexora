@@ -1,0 +1,933 @@
+package io.github.abdurazaaqmohammed.ui.activities;
+
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.graphics.Color;
+import android.os.Bundle;
+import android.text.SpannableString;
+import android.text.TextUtils;
+import android.text.style.BackgroundColorSpan;
+import android.text.style.ForegroundColorSpan;
+import android.util.Base64;
+import android.view.GestureDetector;
+import android.view.Gravity;
+import android.view.LayoutInflater;
+import android.view.Menu;
+import android.view.MenuItem;
+import android.view.MotionEvent;
+import android.view.View;
+import android.view.ViewGroup;
+import android.widget.ArrayAdapter;
+import android.widget.AutoCompleteTextView;
+import android.widget.CheckBox;
+import android.widget.EditText;
+import android.widget.LinearLayout;
+import android.widget.TextView;
+
+import androidx.annotation.NonNull;
+import androidx.appcompat.app.ActionBar;
+import io.github.abdurazaaqmohammed.core.ui.base.BaseActivity;
+
+import androidx.recyclerview.widget.LinearLayoutManager;
+import androidx.recyclerview.widget.RecyclerView;
+
+import com.google.android.material.appbar.MaterialToolbar;
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
+import com.google.android.material.color.MaterialColors;
+
+import java.io.File;
+import java.io.IOException;
+import java.io.RandomAccessFile;
+import java.math.BigInteger;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.TreeMap;
+
+import io.github.abdurazaaqmohammed.MPManager.R;
+import io.github.abdurazaaqmohammed.ui.UiFields;
+import io.github.abdurazaaqmohammed.utils.AccessManager;
+import io.github.abdurazaaqmohammed.utils.ErrorUtil;
+import io.github.abdurazaaqmohammed.utils.UiPrefs;
+import io.github.abdurazaaqmohammed.utils.ProgressManager;
+import io.github.abdurazaaqmohammed.utils.RootStaging;
+import io.github.codehasan.colorpicker.extensions.Extensions;
+import modder.hub.dexeditor.views.FastScrollerRecyclerView;
+
+
+public class HexEditorActivity extends BaseActivity {
+
+    private File file;
+    private RandomAccessFile raf;
+    private long size;
+    private boolean readOnly;
+    private String rootOriginalPath;
+
+    private final TreeMap<Integer, Integer> mods = new TreeMap<>();
+    private final ArrayDeque<int[]> undoStack = new ArrayDeque<>();
+    private final ArrayDeque<int[]> redoStack = new ArrayDeque<>();
+
+    private int cursorPos;
+    private boolean nibbleHigh = true;
+    private HexRowAdapter adapter;
+    private TextView statusText;
+    private LinearLayoutManager layoutManager;
+
+    private View lastTouchedCell;
+    private GestureDetector tapDetector;
+
+    private final View.OnTouchListener cellTouchListener = (v, ev) -> {
+        if (ev.getActionMasked() == MotionEvent.ACTION_DOWN) lastTouchedCell = v;
+        if (tapDetector != null) tapDetector.onTouchEvent(ev);
+        return false;
+    };
+
+    // Search panel state
+    private View searchPanel, inspectorPanel;
+    private EditText searchValue, replaceValue;
+    private AutoCompleteTextView searchType, replaceType;
+    private CheckBox searchBigEndian, replaceBigEndian, inspectorBigEndian;
+    private int searchTypeIndex, replaceTypeIndex;
+    private byte[] lastPattern;
+    private long lastMatchPos = -1;
+    private TextView[] inspectorValues;
+    private TextView inspectorRawHex;
+
+    private static final List<String> DATA_TYPES = Arrays.asList(
+            "Hex Text", "ASCII String", "Unicode String", "UTF-8 String", "GBK String",
+            "Signed Byte", "Unsigned Byte", "Signed Short", "Unsigned Short",
+            "Signed Int", "Unsigned Int", "Signed Long", "Unsigned Long", "Float", "Double");
+
+    private static final int TYPE_HEX_TEXT = 0, TYPE_ASCII = 1, TYPE_UNICODE = 2, TYPE_UTF8 = 3, TYPE_GBK = 4,
+            TYPE_SBYTE = 5, TYPE_UBYTE = 6, TYPE_SSHORT = 7, TYPE_USHORT = 8,
+            TYPE_SINT = 9, TYPE_UINT = 10, TYPE_SLONG = 11, TYPE_ULONG = 12, TYPE_FLOAT = 13, TYPE_DOUBLE = 14;
+
+    private static boolean endianApplies(int type) {
+        return switch (type) {
+            case TYPE_UNICODE, TYPE_SSHORT, TYPE_USHORT, TYPE_SINT, TYPE_UINT,
+                 TYPE_SLONG, TYPE_ULONG, TYPE_FLOAT, TYPE_DOUBLE -> true;
+            default -> false;
+        };
+    }
+
+    private static int typeSize(int type) {
+        return switch (type) {
+            case TYPE_SSHORT, TYPE_USHORT, TYPE_UNICODE -> 2;
+            case TYPE_SINT, TYPE_UINT, TYPE_FLOAT -> 4;
+            case TYPE_SLONG, TYPE_ULONG, TYPE_DOUBLE -> 8;
+            default -> 1;
+        };
+    }
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_hex_editor);
+
+        String path = getIntent().getStringExtra("path");
+        file = path != null ? new File(path) : null;
+        String rop = getIntent().getStringExtra("rootOriginalPath");
+        if (rop != null && !rop.isEmpty() && file != null
+                && !rop.equals(file.getAbsolutePath())) {
+            rootOriginalPath = rop;
+        }
+        if (file == null || !file.isFile()) {
+            Extensions.showMessage(this, getString(R.string.hex_file_not_found));
+            finish();
+            return;
+        }
+        try {
+            try {
+                raf = new RandomAccessFile(file, "rw");
+                readOnly = false;
+            } catch (Exception e) {
+                raf = new RandomAccessFile(file, "r");
+                readOnly = true;
+            }
+            size = raf.length();
+        } catch (Exception e) {
+            new ErrorUtil(this).showError(e);
+            finish();
+            return;
+        }
+
+        MaterialToolbar toolbar = findViewById(R.id.hexToolbar);
+        toolbar.setTitle(R.string.hex_editor);
+        toolbar.setSubtitle(rootOriginalPath != null
+                ? new File(rootOriginalPath).getName() + " (root)"
+                : file.getName());
+        setSupportActionBar(toolbar);
+        ActionBar actionBar = getSupportActionBar();
+        if (actionBar != null) {
+            actionBar.setDisplayHomeAsUpEnabled(true);
+            actionBar.setHomeAsUpIndicator(androidx.appcompat.R.drawable.abc_ic_ab_back_material);
+        }
+        toolbar.setNavigationOnClickListener(v -> handleBack());
+
+        tapDetector = new GestureDetector(this, new GestureDetector.SimpleOnGestureListener() {
+            @Override
+            public boolean onSingleTapUp(MotionEvent e) {
+                View v = lastTouchedCell;
+                if (v != null && v.getTag() instanceof Integer) setCursor((Integer) v.getTag(), false);
+                return false;
+            }
+
+            @Override
+            public void onLongPress(MotionEvent e) {
+                // Deliberately not consumed: the selectable TextView starts text selection natively
+            }
+        });
+
+        setupHeader();
+
+        statusText = findViewById(R.id.statusText);
+        FastScrollerRecyclerView recycler = findViewById(R.id.hexRecycler);
+        layoutManager = new LinearLayoutManager(this);
+        recycler.setLayoutManager(layoutManager);
+        adapter = new HexRowAdapter();
+        recycler.setAdapter(adapter);
+
+        setupKeypad();
+
+        View keypad = findViewById(R.id.hexKeypad);
+        keypad.setVisibility(readOnly ? View.GONE : View.VISIBLE);
+        findViewById(R.id.btnToggleKeypad).setOnClickListener(v ->
+                keypad.setVisibility(keypad.getVisibility() == View.VISIBLE ? View.GONE : View.VISIBLE));
+
+        searchPanel = findViewById(R.id.searchPanel);
+        inspectorPanel = findViewById(R.id.inspectorPanel);
+        setupSearch();
+        setupInspector();
+
+        updateStatus();
+    }
+
+    private void setupSearch() {
+        searchValue = searchPanel.findViewById(R.id.searchValue);
+        searchType = searchPanel.findViewById(R.id.searchType);
+        searchBigEndian = searchPanel.findViewById(R.id.searchBigEndian);
+        replaceValue = searchPanel.findViewById(R.id.replaceValue);
+        replaceType = searchPanel.findViewById(R.id.replaceType);
+        replaceBigEndian = searchPanel.findViewById(R.id.replaceBigEndian);
+
+        setupDropdown(searchType, idx -> {
+            searchTypeIndex = idx;
+            searchBigEndian.setEnabled(endianApplies(idx));
+        });
+        setupDropdown(replaceType, idx -> {
+            replaceTypeIndex = idx;
+            replaceBigEndian.setEnabled(endianApplies(idx));
+        });
+
+        searchPanel.findViewById(R.id.btnCloseSearch).setOnClickListener(v -> searchPanel.setVisibility(View.GONE));
+        searchPanel.findViewById(R.id.btnSearchNext).setOnClickListener(v -> findNext());
+        searchPanel.findViewById(R.id.btnSearchPrev).setOnClickListener(v -> findPrev());
+        searchPanel.findViewById(R.id.btnDoReplace).setOnClickListener(v -> replaceCurrentMatch());
+
+        View headerRow = searchPanel.findViewById(R.id.replaceHeaderRow);
+        View replaceArea = searchPanel.findViewById(R.id.replaceArea);
+        TextView arrow = searchPanel.findViewById(R.id.replaceExpandArrow);
+        headerRow.setOnClickListener(v -> {
+            boolean expanding = replaceArea.getVisibility() != View.VISIBLE;
+            replaceArea.setVisibility(expanding ? View.VISIBLE : View.GONE);
+            arrow.setText(expanding ? "▾" : "▸");
+        });
+    }
+
+    private interface TypeSelectedListener {
+        void onTypeSelected(int index);
+    }
+
+    private void setupDropdown(AutoCompleteTextView dropdown, TypeSelectedListener listener) {
+        ArrayAdapter<String> typeAdapter = new ArrayAdapter<>(this, android.R.layout.simple_dropdown_item_1line, DATA_TYPES);
+        dropdown.setAdapter(typeAdapter);
+        dropdown.setText(DATA_TYPES.get(0), false);
+        dropdown.setOnItemClickListener((parent, view, position, id) -> listener.onTypeSelected(position));
+        dropdown.setOnClickListener(v -> dropdown.showDropDown());
+    }
+
+    private void setupHeader() {
+        View header = findViewById(R.id.hexHeader);
+        int[] cellIds = {R.id.cell0, R.id.cell1, R.id.cell2, R.id.cell3, R.id.cell4, R.id.cell5, R.id.cell6, R.id.cell7};
+        for (int i = 0; i < cellIds.length; i++) {
+            TextView cell = header.findViewById(cellIds[i]);
+            cell.setText(String.format(Locale.US, "%X", i));
+            cell.setClickable(false);
+        }
+        TextView asciiHeader = header.findViewById(R.id.asciiCell);
+        asciiHeader.setText("01234567");
+    }
+
+    private void setupKeypad() {
+        LinearLayout keypad = findViewById(R.id.hexKeypad);
+        char[] digits = "0123456789ABCDEF".toCharArray();
+        int digitIndex = 0;
+        for (int row = 0; row < keypad.getChildCount(); row++) {
+            LinearLayout keyRow = (LinearLayout) keypad.getChildAt(row);
+            for (int i = 0; i < keyRow.getChildCount(); i++) {
+                View key = keyRow.getChildAt(i);
+                if (!(key instanceof TextView)) continue;
+                int d = Character.digit(digits[digitIndex++], 16);
+                key.setEnabled(!readOnly);
+                key.setOnClickListener(v -> inputNibble(d));
+            }
+        }
+    }
+
+    private int readByte(int pos) {
+        Integer modded = mods.get(pos);
+        if (modded != null) return modded;
+        try {
+            if (pos >= size) return -1;
+            synchronized (raf) {
+                raf.seek(pos);
+                return raf.read();
+            }
+        } catch (IOException e) {
+            return -1;
+        }
+    }
+
+    private void inputNibble(int digit) {
+        if (readOnly || cursorPos >= size) return;
+        int oldVal = readByte(cursorPos);
+        if (oldVal == -1) return;
+        boolean wasHigh = nibbleHigh;
+        int newVal = wasHigh ? ((digit << 4) | (oldVal & 0x0F)) : ((oldVal & 0xF0) | digit);
+
+        if (wasHigh) {
+            undoStack.push(new int[]{cursorPos, oldVal, newVal});
+            redoStack.clear();
+        } else {
+            int[] top = undoStack.peek();
+            if (top != null && top[0] == cursorPos) top[2] = newVal;
+            else undoStack.push(new int[]{cursorPos, oldVal, newVal});
+        }
+        mods.put(cursorPos, newVal);
+        nibbleHigh = !nibbleHigh;
+        refreshRows(cursorPos, cursorPos);
+        // Advance to the next byte only after the low (2nd) character was entered so both characters of the current byte can be edited
+        if (!wasHigh && cursorPos + 1 < size) setCursor(cursorPos + 1, false);
+        updateStatus();
+    }
+
+    private void undo() {
+        if (undoStack.isEmpty()) return;
+        int[] e = undoStack.pop();
+        mods.put(e[0], e[1]);
+        redoStack.push(e);
+        nibbleHigh = true;
+        setCursor(e[0], true);
+    }
+
+    private void redo() {
+        if (redoStack.isEmpty()) return;
+        int[] e = redoStack.pop();
+        mods.put(e[0], e[2]);
+        undoStack.push(e);
+        nibbleHigh = true;
+        setCursor(e[0], true);
+    }
+
+    private void setCursor(int pos, boolean scroll) {
+        int old = cursorPos;
+        cursorPos = Math.max(0, (int) Math.min(pos, Math.max(0, size - 1)));
+        nibbleHigh = true;
+        refreshRows(old, cursorPos);
+        if (scroll) layoutManager.scrollToPositionWithOffset(cursorPos / 8, (int) (getResources().getDisplayMetrics().density * 80));
+        updateStatus();
+    }
+
+    private void refreshRows(int... positions) {
+        for (int p : positions) {
+            int row = Math.min(p / 8, Math.max(0, adapter.getItemCount() - 1));
+            if (row >= 0 && row < adapter.getItemCount()) adapter.notifyItemChanged(row);
+        }
+        updateStatus();
+    }
+
+    private void updateStatus() {
+        int val = readByte(cursorPos);
+        String text = String.format(Locale.US, "Val: %02Xh  Pos: %Xh  Size: %Xh [HEX]",
+                val == -1 ? 0 : val, cursorPos, size);
+        statusText.setText(text);
+        updateInspector();
+    }
+
+    private void setupInspector() {
+        inspectorRawHex = inspectorPanel.findViewById(R.id.inspectorRawHex);
+        LinearLayout rows = inspectorPanel.findViewById(R.id.inspectorRows);
+        inspectorBigEndian = inspectorPanel.findViewById(R.id.inspectorBigEndian);
+        inspectorBigEndian.setOnCheckedChangeListener((b, checked) -> updateInspector());
+
+        String[] labels = {"Signed Byte", "Unsigned Byte", "Signed Short", "Unsigned Short",
+                "Signed Int", "Unsigned Int", "Signed Long", "Unsigned Long", "Float", "Double"};
+        inspectorValues = new TextView[labels.length];
+        for (int i = 0; i < labels.length; i++) {
+            TextView label = new TextView(this);
+            label.setText(labels[i]);
+            label.setTextColor(MaterialColors.getColor(this, com.google.android.material.R.attr.colorOnSurface, Color.WHITE));
+            label.setTextSize(18);
+            label.setPadding(0, dp(10), 0, dp(2));
+            rows.addView(label);
+
+            TextView value = new TextView(this);
+            value.setTextColor(MaterialColors.getColor(this, com.google.android.material.R.attr.colorOnSurfaceVariant, Color.GRAY));
+            value.setTextSize(15);
+            value.setTextIsSelectable(true);
+            value.setPadding(0, 0, 0, dp(4));
+            rows.addView(value);
+            inspectorValues[i] = value;
+        }
+    }
+
+    private int dp(int v) {
+        return (int) (v * getResources().getDisplayMetrics().density + 0.5f);
+    }
+
+    private void updateInspector() {
+        if (inspectorValues == null || inspectorPanel == null || inspectorPanel.getVisibility() != View.VISIBLE) return;
+        boolean be = inspectorBigEndian.isChecked();
+        int[] b = new int[8];
+        for (int i = 0; i < 8; i++) b[i] = readByte(cursorPos + i);
+
+        StringBuilder raw = new StringBuilder();
+        for (int i = 0; i < 8; i++) raw.append(String.format(Locale.US, "%02X ", b[i]));
+        inspectorRawHex.setText(raw.toString().trim());
+
+        long u16 = unsigned(b, 0, 2, be), u32 = unsigned(b, 0, 4, be), u64 = unsigned(b, 0, 8, be);
+        setInspectorValue(0, b[0] >= 0 ? String.valueOf((byte) b[0]) : null);
+        setInspectorValue(1, b[0] >= 0 ? String.valueOf(b[0] & 0xFF) : null);
+        setInspectorValue(2, b[1] >= 0 ? String.valueOf((short) u16) : null);
+        setInspectorValue(3, b[1] >= 0 ? Long.toUnsignedString(u16) : null);
+        setInspectorValue(4, b[3] >= 0 ? String.valueOf((int) u32) : null);
+        setInspectorValue(5, b[3] >= 0 ? Long.toUnsignedString(u32) : null);
+        setInspectorValue(6, b[7] >= 0 ? String.valueOf(u64) : null);
+        setInspectorValue(7, b[7] >= 0 ? Long.toUnsignedString(u64) : null);
+        setInspectorValue(8, b[3] >= 0 ? String.valueOf(Float.intBitsToFloat((int) u32)) : null);
+        setInspectorValue(9, b[7] >= 0 ? String.valueOf(Double.longBitsToDouble(u64)) : null);
+    }
+
+    private void setInspectorValue(int index, String value) {
+        inspectorValues[index].setText(value != null ? value : "—");
+    }
+
+    private static long unsigned(int[] b, int off, int len, boolean bigEndian) {
+        long v = 0;
+        for (int i = 0; i < len; i++) {
+            int by = b[off + i];
+            if (by < 0) return v;
+            v |= (by & 0xFFL) << (8 * (bigEndian ? len - 1 - i : i));
+        }
+        return v;
+    }
+
+    private byte[] buildPattern(int type, String text, boolean bigEndian) throws Exception {
+        if (text == null || TextUtils.isEmpty(text.trim())) throw new IllegalArgumentException("Empty search value");
+        switch (type) {
+            case TYPE_HEX_TEXT: {
+                String hex = text.replaceAll("[^0-9a-fA-F]", "");
+                if (hex.isEmpty() || hex.length() % 2 != 0) throw new IllegalArgumentException("Invalid hex");
+                return toBytes(hex);
+            }
+            case TYPE_ASCII: return text.getBytes(StandardCharsets.ISO_8859_1);
+            case TYPE_UNICODE: return text.getBytes(bigEndian ? StandardCharsets.UTF_16BE : StandardCharsets.UTF_16LE);
+            case TYPE_UTF8: return text.getBytes(StandardCharsets.UTF_8);
+            case TYPE_GBK: try {return text.getBytes("GBK");} catch (Exception e) {return text.getBytes(StandardCharsets.UTF_8);}
+            default: {
+                long v = parseNumberForType(type, text);
+                int len = typeSize(type);
+                byte[] out = new byte[len];
+                putValue(out, 0, v, len, bigEndian);
+                return out;
+            }
+        }
+    }
+
+    private static void putValue(byte[] out, int off, long val, int len, boolean bigEndian) {
+        for (int i = 0; i < len; i++)
+            out[off + i] = (byte) ((val >> (8 * (bigEndian ? len - 1 - i : i))) & 0xFF);
+    }
+
+    private long parseNumberForType(int type, String text) throws NumberFormatException {
+        String t = text.trim();
+        switch (type) {
+            case TYPE_SBYTE: return Byte.parseByte(t);
+            case TYPE_UBYTE: {long v = Long.parseLong(t); if (v < 0 || v > 255) throw new NumberFormatException(); return v;}
+            case TYPE_SSHORT: return Short.parseShort(t);
+            case TYPE_USHORT: {long v = Long.parseLong(t); if (v < 0 || v > 65535) throw new NumberFormatException(); return v;}
+            case TYPE_SINT: return Integer.parseInt(t);
+            case TYPE_UINT: {BigInteger bi = new BigInteger(t); BigInteger max = BigInteger.valueOf(4294967295L); if (bi.signum() < 0 || bi.compareTo(max) > 0) throw new NumberFormatException(); return bi.longValue();}
+            case TYPE_SLONG: return Long.parseLong(t);
+            case TYPE_ULONG: {BigInteger bi = new BigInteger(t); BigInteger max = new BigInteger("18446744073709551615"); if (bi.signum() < 0 || bi.compareTo(max) > 0) throw new NumberFormatException(); return bi.longValue();}
+            case TYPE_FLOAT: return Float.floatToIntBits(Float.parseFloat(t));
+            case TYPE_DOUBLE: return Double.doubleToLongBits(Double.parseDouble(t));
+            default: throw new IllegalArgumentException("Not a numeric type");
+        }
+    }
+
+    private boolean ensureSearchPattern() {
+        lastPattern = null;
+        try {
+            lastPattern = buildPattern(searchTypeIndex, searchValue.getText().toString(), searchBigEndian.isChecked());
+            return true;
+        } catch (Exception e) {
+            Extensions.showMessage(this, getString(R.string.hex_invalid_search, DATA_TYPES.get(searchTypeIndex)));
+            return false;
+        }
+    }
+
+    private void findNext() {
+        if (!ensureSearchPattern()) return;
+        scan(cursorPos + 1, true);
+    }
+
+    private void findPrev() {
+        if (!ensureSearchPattern()) return;
+        scan(cursorPos - 1, false);
+    }
+
+    private void scan(long start, boolean forward) {
+        final byte[] pattern = lastPattern;
+        final long startPos = start < 0 ? (forward ? 0 : Math.max(0, size - pattern.length)) : start;
+        final ProgressManager pm = new ProgressManager(this, true);
+        pm.setText(getString(R.string.search) + "…");
+        pm.show();
+        new Thread(() -> {
+            long found = -1;
+            if (forward) {
+                for (long p = startPos; p + pattern.length <= size; p++)
+                    if (matchesAt(p, pattern)) {found = p; break;}
+            } else {
+                for (long p = Math.min(startPos, size - pattern.length); p >= 0; p--)
+                    if (matchesAt(p, pattern)) {found = p; break;}
+            }
+            final long f = found;
+            runOnUiThread(() -> {
+                pm.dismiss();
+                if (f >= 0) {
+                    lastMatchPos = f;
+                    setCursor((int) f, true);
+                } else {
+                    Extensions.showMessage(this, getString(R.string.hex_not_found));
+                }
+            });
+        }).start();
+    }
+
+    private boolean matchesAt(long pos, byte[] pattern) {
+        for (int i = 0; i < pattern.length; i++)
+            if (readByte((int) (pos + i)) != (pattern[i] & 0xFF)) return false;
+        return true;
+    }
+
+    private void replaceCurrentMatch() {
+        if (!ensureSearchPattern()) return;
+        long target = lastMatchPos >= 0 ? lastMatchPos : cursorPos;
+        if (target + lastPattern.length > size) {
+            Extensions.showMessage(this, getString(R.string.hex_not_found));
+            return;
+        }
+        byte[] repl;
+        try {
+            repl = buildPattern(replaceTypeIndex, replaceValue.getText().toString(), replaceBigEndian.isChecked());
+        } catch (Exception e) {
+            Extensions.showMessage(this, getString(R.string.hex_invalid_replace, DATA_TYPES.get(replaceTypeIndex)));
+            return;
+        }
+        writeBytesAt(target, repl, null);
+        lastMatchPos = target;
+        findNext();
+    }
+
+    private void writeBytesAt(long pos, byte[] data, Runnable extraUndoAction) {
+        List<int[]> entries = new ArrayList<>();
+        for (int i = 0; i < data.length; i++) {
+            int p = (int) (pos + i);
+            if (p >= size) break;
+            int oldVal = readByte(p);
+            int newVal = data[i] & 0xFF;
+            mods.put(p, newVal);
+            entries.add(new int[]{p, oldVal, newVal});
+        }
+        undoStack.addAll(entries); // each entry undone individually
+        redoStack.clear();
+        nibbleHigh = true;
+        if (adapter != null) {
+            int firstRow = (int) (pos / 8);
+            int lastRow = (int) ((pos + Math.max(1, entries.size()) - 1) / 8);
+            for (int r = firstRow; r <= lastRow && r < adapter.getItemCount(); r++) adapter.notifyItemChanged(r);
+        }
+        setCursor((int) Math.min(pos + data.length, Math.max(0, size - 1)), false);
+        updateStatus();
+    }
+
+    private void showPasteFromDialog() {
+        if (readOnly) {
+            Extensions.showMessage(this, getString(R.string.hex_read_only));
+            return;
+        }
+        String[] options = {getString(R.string.hex_paste_hex), getString(R.string.hex_paste_dec), getString(R.string.hex_paste_bin),
+                getString(R.string.hex_paste_ascii), getString(R.string.hex_paste_b64)};
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(getString(R.string.hex_paste_from))
+                .setItems(options, (d, w) -> promptPasteInput(w))
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    private void promptPasteInput(int formatIndex) {
+        String[] formats = {"hex", "decimal", "binary", "ASCII", "Base64"};
+        EditText input = new EditText(this);
+        input.setMinLines(3);
+        input.setGravity(Gravity.TOP);
+        input.setText(getClipboardText());
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(getString(R.string.hex_paste_from_x, formats[formatIndex]))
+                .setView(UiFields.wrap(this, input, getString(R.string.hex_paste_bytes), 16))
+                .setPositiveButton(android.R.string.ok, (d, w) -> {
+                    try {
+                        byte[] data = parsePastedBytes(formatIndex, input.getText().toString());
+                        if (data == null || data.length == 0) {
+                            Extensions.showMessage(this, getString(R.string.hex_nothing_to_paste));
+                            return;
+                        }
+                        writeBytesAt(cursorPos, data, null);
+                        Extensions.showMessage(this, getString(R.string.hex_pasted_n, data.length));
+                    } catch (IllegalArgumentException e) {
+                        Extensions.showMessage(this, e.getMessage());
+                    }
+                })
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    private String getClipboardText() {
+        ClipboardManager cm = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+        ClipData cd = cm != null ? cm.getPrimaryClip() : null;
+        return cd != null && cd.getItemCount() > 0 && cd.getItemAt(0).getText() != null
+                ? String.valueOf(cd.getItemAt(0).getText()) : "";
+    }
+
+    private byte[] parsePastedBytes(int format, String text) {
+        if (TextUtils.isEmpty(text)) return new byte[0];
+        switch (format) {
+            case 0: { // Hex text
+                String hex = text.replaceAll("[^0-9a-fA-F]", "").toLowerCase(Locale.ROOT);
+                if (hex.length() % 2 != 0) throw new IllegalArgumentException(getString(R.string.hex_even));
+                byte[] out = new byte[hex.length() / 2];
+                for (int i = 0; i < out.length; i++)
+                    out[i] = (byte) Integer.parseInt(hex.substring(i * 2, i * 2 + 2), 16);
+                return out;
+            }
+            case 1: { // Decimal text
+                String[] parts = text.trim().split("[,\\s]+");
+                byte[] out = new byte[parts.length];
+                for (int i = 0; i < parts.length; i++) out[i] = (byte) Integer.parseInt(parts[i].trim());
+                return out;
+            }
+            case 2: { // Binary text
+                String bits = text.replaceAll("[^01]", "");
+                if (bits.isEmpty() || bits.length() % 8 != 0)
+                    throw new IllegalArgumentException(getString(R.string.hex_bin8));
+                byte[] out = new byte[bits.length() / 8];
+                for (int i = 0; i < out.length; i++)
+                    out[i] = (byte) Integer.parseInt(bits.substring(i * 8, i * 8 + 8), 2);
+                return out;
+            }
+            case 3: return text.getBytes(StandardCharsets.ISO_8859_1); // ASCII
+            case 4:
+                return Base64.decode(text.trim(), Base64.DEFAULT); // Base64
+            default: return new byte[0];
+        }
+    }
+
+    private static byte[] toBytes(String upperHex) {
+        byte[] out = new byte[upperHex.length() / 2];
+        for (int i = 0; i < out.length; i++)
+            out[i] = (byte) Integer.parseInt(upperHex.substring(i * 2, i * 2 + 2), 16);
+        return out;
+    }
+
+
+    private void saveChanges() {
+        saveChanges(null);
+    }
+
+    private void saveChanges(Runnable onSaved) {
+        if (mods.isEmpty()) {
+            if (onSaved != null) onSaved.run();
+            return;
+        }
+        if (readOnly) {
+            if (onSaved == null) Extensions.showMessage(this, getString(R.string.hex_read_only));
+            else finish();
+            return;
+        }
+        if (RootStaging.needsWriteConfirm(rootOriginalPath)) {
+            new MaterialAlertDialogBuilder(this)
+                    .setTitle(getString(R.string.editor_write_system))
+                    .setMessage(getString(R.string.editor_write_system_msg, rootOriginalPath))
+                    .setPositiveButton(android.R.string.ok, (d, w) -> saveChangesRoot(onSaved))
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .show();
+            return;
+        }
+        saveChangesRoot(onSaved);
+    }
+
+    private void saveChangesRoot(Runnable onSaved) {
+        backupForSave();
+        try (RandomAccessFile w = new RandomAccessFile(file, "rw")) {
+            for (Map.Entry<Integer, Integer> entry : mods.entrySet()) {
+                w.seek(entry.getKey());
+                w.writeByte(entry.getValue());
+            }
+            mods.clear();
+            undoStack.clear();
+            redoStack.clear();
+            adapter.notifyDataSetChanged();
+            updateStatus();
+            Extensions.showMessage(this, R.string.saved);
+        } catch (Exception e) {
+            new ErrorUtil(this).showError(e);
+            return;
+        }
+        if (rootOriginalPath != null) {
+            Extensions.showMessage(this, getString(R.string.editor_writing_root));
+            new Thread(() -> {
+                try {
+                    RootStaging.writeBack(this, file, rootOriginalPath);
+                    runOnUiThread(() -> Extensions.showMessage(this, getString(R.string.editor_saved_root)));
+                } catch (Exception e) {
+                    runOnUiThread(() -> new ErrorUtil(this).showError(e));
+                }
+            }).start();
+        }
+        if (onSaved != null) onSaved.run();
+    }
+
+    private void backupForSave() {
+        try {
+            if (!UiPrefs.genBackup(this)) return;
+            if (rootOriginalPath != null) {
+                if (AccessManager.fileOpsOn(this) && AccessManager.exists(this, rootOriginalPath)) {
+                    AccessManager.copyFile(this, rootOriginalPath, rootOriginalPath + ".bak", true);
+                }
+            } else if (file != null && file.isFile()) {
+                File bak = new File(file.getPath() + ".bak");
+                try (RandomAccessFile in = new RandomAccessFile(file, "r");
+                     RandomAccessFile out = new RandomAccessFile(bak, "rw")) {
+                    byte[] buf = new byte[65536];
+                    int n;
+                    while ((n = in.read(buf)) != -1) out.write(buf, 0, n);
+                }
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void revertChanges() {
+        if (mods.isEmpty()) return;
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(getString(R.string.hex_revert))
+                .setMessage(getString(R.string.hex_revert_msg))
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(android.R.string.ok, (d, w) -> {
+                    mods.clear();
+                    undoStack.clear();
+                    redoStack.clear();
+                    nibbleHigh = true;
+                    adapter.notifyDataSetChanged();
+                    updateStatus();
+                }).show();
+    }
+
+    private void showGotoDialog() {
+        EditText input = new EditText(this);
+        input.setHint(getString(R.string.hex_offset_hint));
+        input.setText(String.format(Locale.US, "%X", cursorPos));
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(getString(R.string.hex_go_offset))
+                .setView(UiFields.wrap(this, input, null, 16))
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(android.R.string.ok, (d, w) -> {
+                    try {
+                        long target = Long.parseLong(input.getText().toString().trim(), 16);
+                        setCursor((int) Math.min(target, Math.max(0, size - 1)), true);
+                    } catch (NumberFormatException ignored) {
+                        Extensions.showMessage(this, getString(R.string.hex_invalid_offset));
+                    }
+                }).show();
+    }
+
+    private void confirmDiscardAndFinish() {
+        if (mods.isEmpty()) {
+            finish();
+            return;
+        }
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(getString(R.string.hex_unsaved))
+                .setMessage(getString(R.string.hex_discard_unsaved))
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.save, (d, w) -> saveChanges(this::finish))
+                .setNeutralButton(R.string.delete, (d, w) -> finish())
+                .show();
+    }
+
+    /** Shared by the toolbar up-arrow and the system back gesture. */
+    private void handleBack() {
+        onBackPressed();
+    }
+
+    @Override
+    public boolean onSupportNavigateUp() {
+        handleBack();
+        return true;
+    }
+
+    @Override
+    public void onBackPressed() {
+        if(inspectorPanel.getVisibility() == View.VISIBLE) inspectorPanel.setVisibility(View.GONE);
+        else if(searchPanel.getVisibility() == View.VISIBLE) searchPanel.setVisibility(View.GONE);
+        else confirmDiscardAndFinish();
+    }
+
+    @Override
+    public boolean onCreateOptionsMenu(Menu menu) {
+        getMenuInflater().inflate(R.menu.menu_hex_editor, menu);
+        menu.findItem(R.id.action_undo).setEnabled(!readOnly);
+        menu.findItem(R.id.action_redo).setEnabled(!readOnly);
+        menu.findItem(R.id.action_save).setVisible(!readOnly);
+        return true;
+    }
+
+    @Override
+    public boolean onOptionsItemSelected(@NonNull MenuItem item) {
+        int id = item.getItemId();
+        if (id == R.id.action_undo) undo();
+        else if (id == R.id.action_redo) redo();
+        else if (id == R.id.action_save) saveChanges();
+        else if (id == R.id.action_goto) showGotoDialog();
+        else if (id == R.id.action_revert) revertChanges();
+        else if (id == R.id.action_search) {
+            searchPanel.setVisibility(searchPanel.getVisibility() == View.VISIBLE ? View.GONE : View.VISIBLE);
+            inspectorPanel.setVisibility(View.GONE);
+        } else if (id == R.id.action_inspector) {
+            inspectorPanel.setVisibility(inspectorPanel.getVisibility() == View.VISIBLE ? View.GONE : View.VISIBLE);
+            searchPanel.setVisibility(View.GONE);
+            updateInspector();
+        } else if (id == R.id.action_paste_from) showPasteFromDialog();
+        else if (id == R.id.action_exit) confirmDiscardAndFinish();
+        else return super.onOptionsItemSelected(item);
+        return true;
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        if (raf != null) try {
+            raf.close();
+        } catch (IOException ignored) {
+        }
+    }
+
+    private int getPrimaryColor() {
+        return MaterialColors.getColor(this, com.google.android.material.R.attr.colorPrimary, Color.BLUE);
+    }
+
+    private int getOnPrimaryColor() {
+        return MaterialColors.getColor(this, com.google.android.material.R.attr.colorOnPrimary, Color.WHITE);
+    }
+
+    private int getPrimaryContainerColor() {
+        return MaterialColors.getColor(this, com.google.android.material.R.attr.colorPrimaryContainer, Color.LTGRAY);
+    }
+
+    private class HexRowAdapter extends RecyclerView.Adapter<HexRowAdapter.ViewHolder> {
+
+        HexRowAdapter() {
+            setHasStableIds(true);
+        }
+
+        @Override
+        public long getItemId(int position) {
+            return position;
+        }
+
+        @NonNull
+        @Override
+        public ViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
+            return new ViewHolder(LayoutInflater.from(HexEditorActivity.this).inflate(R.layout.item_hex_row, parent, false));
+        }
+
+        @Override
+        public void onBindViewHolder(@NonNull ViewHolder holder, int position) {
+            int rowStart = position * 8;
+            int[] values = new int[8];
+            for (int i = 0; i < 8; i++) values[i] = readByte(rowStart + i);
+
+            holder.offsetCell.setText(String.format(Locale.US, "%04X", rowStart & 0xFFFF));
+
+            int selCol = cursorPos - rowStart;
+            for (int i = 0; i < 8; i++) {
+                TextView cell = holder.cells[i];
+                if (values[i] == -1) {
+                    cell.setText("");
+                    cell.setBackground(null);
+                    continue;
+                }
+                cell.setText(String.format(Locale.US, "%02X", values[i]));
+                if (i == selCol) {
+                    cell.setBackgroundColor(getPrimaryContainerColor());
+                } else {
+                    cell.setBackground(null);
+                }
+                cell.setTag(rowStart + i);
+                cell.setOnTouchListener(cellTouchListener);
+            }
+
+            StringBuilder asciiBuilder = new StringBuilder();
+            for (int i = 0; i < 8; i++) {
+                int v = values[i];
+                asciiBuilder.append(v >= 0x20 && v <= 0x7E ? (char) v : '.');
+            }
+            SpannableString ascii = new SpannableString(asciiBuilder.toString());
+            if (selCol >= 0 && selCol < 8) {
+                ascii.setSpan(new BackgroundColorSpan(getPrimaryColor()), selCol, selCol + 1, 0);
+                ascii.setSpan(new ForegroundColorSpan(getOnPrimaryColor()), selCol, selCol + 1, 0);
+            }
+            holder.asciiCell.setText(ascii);
+        }
+
+        @Override
+        public int getItemCount() {
+            return (int) ((size + 7) / 8);
+        }
+
+        static class ViewHolder extends RecyclerView.ViewHolder {
+            final TextView offsetCell, asciiCell;
+            final TextView[] cells = new TextView[8];
+
+            ViewHolder(@NonNull View itemView) {
+                super(itemView);
+                offsetCell = itemView.findViewById(R.id.offsetCell);
+                asciiCell = itemView.findViewById(R.id.asciiCell);
+                cells[0] = itemView.findViewById(R.id.cell0);
+                cells[1] = itemView.findViewById(R.id.cell1);
+                cells[2] = itemView.findViewById(R.id.cell2);
+                cells[3] = itemView.findViewById(R.id.cell3);
+                cells[4] = itemView.findViewById(R.id.cell4);
+                cells[5] = itemView.findViewById(R.id.cell5);
+                cells[6] = itemView.findViewById(R.id.cell6);
+                cells[7] = itemView.findViewById(R.id.cell7);
+                // Selectable text lets the user pick individual nibbles (1 of the 2 chars) to copy them
+                for (TextView cell : cells) cell.setTextIsSelectable(true);
+            }
+        }
+    }
+}
