@@ -11,4 +11,8 @@
         <item quantity="other">%d files selected</item>
     </plurals>
     <string name="hexora_extract_zip">Extract ZIP</string>
+    <string name="editor_class_preview">JVM bytecode &#183; read-only</string>
+    <string name="class_viewer">Class viewer</string>
+    <string name="view_as_java">View as Java</string>
+    <string name="converting_java">Converting to Java&#8230;</string>
 </resources>

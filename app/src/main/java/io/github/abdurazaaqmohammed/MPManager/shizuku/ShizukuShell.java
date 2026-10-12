@@ -9,6 +9,7 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.FilterInputStream;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -50,6 +51,9 @@ public final class ShizukuShell {
                     notifyBinderCallbacks();
                 });
                 Shizuku.addBinderDeadListener(() -> Log.d(TAG, "binder dead"));
+                Shizuku.addRequestPermissionResultListener((requestCode, grantResult) -> {
+                    if (requestCode == 0 && grantResult == PackageManager.PERMISSION_GRANTED) notifyBinderCallbacks();
+                });
             }
             Log.d(TAG, "warmUp: binder=" + Shizuku.getBinder() + " ping=" + Shizuku.pingBinder());
         } catch (Throwable t) {
@@ -142,6 +146,29 @@ public final class ShizukuShell {
     }
 
     public static Result exec(String command, long timeoutSeconds) {
+        return exec(command, timeoutSeconds, null);
+    }
+
+    public static Result executeScript(java.io.File readable, java.io.File original, long timeoutSeconds) {
+        String path = RootManager.escapeShellArg(original.getAbsolutePath());
+        String parent = RootManager.escapeShellArg(original.getParent());
+        if (readable.getAbsolutePath().equals(original.getAbsolutePath())) {
+            return exec("cd " + parent + " && sh " + path, timeoutSeconds);
+        }
+        // Stream a staged/archived script to shell-owned storage, never expose our private cache.
+        String temp = "/data/local/tmp/hexora-script-" + java.util.UUID.randomUUID() + ".sh";
+        String command = "umask 077; tmp=" + RootManager.escapeShellArg(temp)
+                + "; trap 'rm -f \"$tmp\"' EXIT; cat >\"$tmp\" || exit 1; "
+                + "if [ -r " + path + " ]; then cd " + parent + " && sh " + path
+                + "; else cd /data/local/tmp && sh \"$tmp\"; fi";
+        try (InputStream input = new java.io.FileInputStream(readable)) {
+            return exec(command, timeoutSeconds, input);
+        } catch (IOException e) {
+            return new Result(false, "", e.getMessage(), -1);
+        }
+    }
+
+    private static Result exec(String command, long timeoutSeconds, InputStream input) {
         if (!isGranted()) {
             Log.d(TAG, "exec: not granted, refusing: " + command);
             return new Result(false, "", "Shizuku not granted", -1);
@@ -150,6 +177,16 @@ public final class ShizukuShell {
             ShizukuRemoteProcess p =
                     (ShizukuRemoteProcess) new ShizukuProcessFactory()
                             .newProcess(new String[]{"sh", "-c", command}, null, "/");
+            Thread inputThread = new Thread(() -> {
+                try (java.io.OutputStream output = p.getOutputStream()) {
+                    if (input != null) {
+                        byte[] bytes = new byte[65536];
+                        int count;
+                        while ((count = input.read(bytes)) != -1) output.write(bytes, 0, count);
+                    }
+                } catch (IOException ignored) { }
+            }, "hexora-shizuku-stdin");
+            inputThread.start();
             StringBuilder out = new StringBuilder();
             StringBuilder err = new StringBuilder();
             Thread outT = drain(p.getInputStream(), out);
@@ -168,12 +205,56 @@ public final class ShizukuShell {
             }
             outT.join(1000);
             errT.join(1000);
+            inputThread.join(1000);
             Log.d(TAG, "exec: exit=" + p.exitValue() + " cmd=" + command + " stderr=" + err);
             return new Result(p.exitValue() == 0, out.toString(), err.toString(), p.exitValue());
         } catch (Throwable t) {
             Log.d(TAG, "exec failed: " + command, t);
             return new Result(false, "", t.getMessage() == null ? t.getClass().getSimpleName() : t.getMessage(), -1);
         }
+    }
+
+    /** Streams bytes across the UID boundary; shell cannot write our private cache. */
+    public static InputStream openInputStream(String path) throws IOException {
+        if (!isGranted()) throw new IOException("Shizuku is not running or permission is missing");
+        final ShizukuRemoteProcess process;
+        try {
+            process = (ShizukuRemoteProcess) new ShizukuProcessFactory().newProcess(
+                    new String[]{"cat", path}, null, "/");
+            process.getOutputStream().close();
+        } catch (Exception e) {
+            throw new IOException("Cannot start Shizuku file read", e);
+        }
+        StringBuilder error = new StringBuilder();
+        Thread errors = drain(process.getErrorStream(), error);
+        return new FilterInputStream(process.getInputStream()) {
+            private boolean checked;
+            private void checkEnd(int count) throws IOException {
+                if (count != -1 || checked) return;
+                checked = true;
+                try {
+                    if (!process.waitForTimeout(30, TimeUnit.SECONDS)) throw new IOException("Shizuku read timed out");
+                    errors.join(1000);
+                    if (process.exitValue() != 0) throw new IOException("Cannot read " + path + ": " + error);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new IOException("Shizuku read interrupted", e);
+                }
+            }
+            @Override public int read() throws IOException {
+                int value = super.read();
+                checkEnd(value);
+                return value;
+            }
+            @Override public int read(byte[] bytes, int offset, int length) throws IOException {
+                int count = in.read(bytes, offset, length);
+                checkEnd(count);
+                return count;
+            }
+            @Override public void close() throws IOException {
+                try { super.close(); } finally { process.destroy(); }
+            }
+        };
     }
 
     private static Thread drain(InputStream is, StringBuilder sb) {

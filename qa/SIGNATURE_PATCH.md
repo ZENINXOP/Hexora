@@ -1,5 +1,8 @@
 # APK signature-check patch — 2026-10-10
 
+> Updated runtime evidence: [October 11 build and MuMu checks](RUNTIME_20261011.md).
+> The source-only status below records October 10.
+
 Status: source implementation only. No Gradle build, compilation, helper assembly, APK packaging, installation, unit-test execution or native runtime verification was performed. AI-assisted contribution: OpenAI Codex; upstream notices retained.
 
 Broader-engine follow-up: the dialog now also offers pinned LSPatch v1.2 advanced and experimental arm64 native-read modes. The static Java path described below remains available. See [LSPATCH_SIGNATURE.md](LSPATCH_SIGNATURE.md) for provenance, behavior, limits and source-only validation; no claim of universal or Xian Esp compatibility is made.

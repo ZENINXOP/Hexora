@@ -693,6 +693,10 @@ public class HexEditorActivity extends BaseActivity {
             adapter.notifyDataSetChanged();
             updateStatus();
             Extensions.showMessage(this, R.string.saved);
+            String zip = getIntent().getStringExtra("zipFilePath");
+            if (zip != null) setResult(757, new android.content.Intent()
+                    .setData(android.net.Uri.fromFile(file)).putExtra("zipFilePath", zip)
+                    .putExtra("zipEntryPath", getIntent().getStringExtra("zipEntryPath")));
         } catch (Exception e) {
             new ErrorUtil(this).showError(e);
             return;

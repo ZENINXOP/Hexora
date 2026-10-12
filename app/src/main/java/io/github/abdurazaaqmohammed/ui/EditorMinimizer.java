@@ -6,6 +6,7 @@ import android.view.inputmethod.InputMethodManager;
 
 import java.lang.ref.WeakReference;
 
+import io.github.abdurazaaqmohammed.MPManager.BuildConfig;
 import io.github.abdurazaaqmohammed.MPManager.MainActivity;
 
 /** Keeps the most recently minimized editor on its existing activity stack. */
@@ -13,7 +14,7 @@ public final class EditorMinimizer {
     public interface SessionOwner {
         void onEditorMinimized();
     }
-    public static final String ACTION_RESUME = "app.hexora.manager.RESUME_EDITOR";
+    public static final String ACTION_RESUME = BuildConfig.APPLICATION_ID + ".RESUME_EDITOR";
     private static WeakReference<Activity> minimized = new WeakReference<>(null);
 
     private EditorMinimizer() { }

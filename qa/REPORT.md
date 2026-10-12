@@ -1,5 +1,15 @@
 # Hexora native QA and UI report
 
+> Runtime follow-up (2026-10-11): builds resumed at the owner's request. Release
+> size, signature install/launch outcomes and editor/UI acceptance evidence are
+> recorded in [RUNTIME_20261011.md](RUNTIME_20261011.md). The dated source-only
+> notes below describe the earlier state.
+
+> JVM/AAR follow-up (2026-10-11): classes now open as wrapped, colored bytecode;
+> File Options includes View as Java for class/Smali files, including AAR entries.
+> Nested archive Back/Up/`..` use the logical parent. See [CLASS_AAR.md](CLASS_AAR.md)
+> and the dated runtime report for build and native checks.
+
 > Broader signature-engine follow-up (2026-10-10): integrated pinned JingMatrix/LSPatch v1.2 runtime assets with advanced and opt-in arm64 native-read modes beside the Java patch. Five read-only dependency checks passed; source checks passed. No build, APK packaging, installation or target-app execution; Xian Esp compatibility is unverified. See [LSPATCH_SIGNATURE.md](LSPATCH_SIGNATURE.md).
 
 > Signature crash follow-up (2026-10-10): read-only phone logs locate Xian Esp's startup failure in its native packed loader (`XDEC:8`). Source now rejects this unsupported bootstrap pattern before publishing another output. The target app is not repaired; no build or runtime validation was performed. See [SIGNATURE_CRASH.md](SIGNATURE_CRASH.md).

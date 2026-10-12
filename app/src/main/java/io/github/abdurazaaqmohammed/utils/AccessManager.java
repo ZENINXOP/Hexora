@@ -89,6 +89,16 @@ public final class AccessManager {
         return false;
     }
 
+    public static boolean isDirectory(Context context, String absPath) {
+        if (absPath == null) return false;
+        if (new File(absPath).isDirectory()) return true;
+        try {
+            if (active(context) == Backend.ROOT) return RootManager.getInstance(context).isDirectory(absPath);
+            if (active(context) == Backend.SHIZUKU) return ShizukuManager.isDirectory(context, absPath);
+        } catch (Exception ignored) { }
+        return false;
+    }
+
     public static File[] listWithStat(Context context, String dirPath) {
         Backend backend = active(context);
         if (backend == Backend.ROOT) {
@@ -130,6 +140,7 @@ public final class AccessManager {
         if (srcAbsPath == null || !srcAbsPath.startsWith("/")) {
             throw new IOException("Refusing to stage non-absolute path");
         }
+        if (SafAccess.resolve(new File(srcAbsPath), false) != null) return SafAccess.stage(context, new File(srcAbsPath));
         Backend backend = active(context);
         File dir = RootStaging.stageDir(context);
         String base = new File(srcAbsPath).getName();
@@ -180,6 +191,13 @@ public final class AccessManager {
         if (stagedCopy == null || !stagedCopy.isFile()) throw new IOException("Nothing to save");
         if (originalAbsPath == null || !originalAbsPath.startsWith("/")) {
             throw new IOException("Refusing to write non-absolute path");
+        }
+        if (SafAccess.resolve(new File(originalAbsPath), true) != null) {
+            try (java.io.InputStream input = new java.io.FileInputStream(stagedCopy);
+                 OutputStream output = SafAccess.openOutput(new File(originalAbsPath))) {
+                FileUtils.copyFile(input, output);
+            }
+            return;
         }
         Backend backend = active(context);
         if (backend == Backend.ROOT) {

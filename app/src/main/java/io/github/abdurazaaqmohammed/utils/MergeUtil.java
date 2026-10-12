@@ -147,6 +147,9 @@ public class MergeUtil {
         public boolean deviceOnly = true;
         public boolean extractNativeLibs = true;
         public List<String> splitNames = null;
+        public File outputDirectory;
+        public boolean temporaryInput;
+        public String outputName;
     }
 
     public static void mergeSplitApk(File file, MainActivity context) {
@@ -161,6 +164,10 @@ public class MergeUtil {
     }
 
     public static void showAntisplitDialog(File file, MainActivity context) {
+        showAntisplitDialog(file, context, false);
+    }
+
+    private static void showAntisplitDialog(File file, MainActivity context, boolean temporaryInput) {
         new Thread(() -> {
             List<FileHeader> splits = new ArrayList<>();
             try (ZipFile zf = new ZipFile(file)) {
@@ -170,15 +177,17 @@ public class MergeUtil {
                     }
                 }
             } catch (Exception e) {
+                if (temporaryInput) file.delete();
                 context.handler.post(() -> new ErrorUtil(context).showError(e));
                 return;
             }
             if (splits.isEmpty()) {
+                if (temporaryInput) file.delete();
                 context.handler.post(() -> Extensions.showMessage(context, context.getString(R.string.antisplit_no_splits)));
                 return;
             }
             String baseName = findBaseSplit(splits);
-            context.handler.post(() -> showAntisplitDialogInner(file, context, splits, baseName));
+            context.handler.post(() -> showAntisplitDialogInner(file, context, splits, baseName, temporaryInput));
         }).start();
     }
 
@@ -257,7 +266,7 @@ public class MergeUtil {
         return false;
     }
 
-    private static void showAntisplitDialogInner(File file, MainActivity context, List<FileHeader> splits, String baseName) {
+    private static void showAntisplitDialogInner(File file, MainActivity context, List<FileHeader> splits, String baseName, boolean temporaryInput) {
         float density = context.getResources().getDisplayMetrics().density;
         int pad = (int) (16 * density);
         LinearLayout root = new LinearLayout(context);
@@ -344,10 +353,38 @@ public class MergeUtil {
             else for (CheckBox cb : boxes) cb.setChecked(true);
         });
 
+        final File[] outputDirectory = {defaultOutputDirectory(context, file)};
+        TextView outputLabel = new TextView(context);
+        outputLabel.setText(context.getString(R.string.merge_output_folder, outputDirectory[0].getAbsolutePath()));
+        root.addView(outputLabel);
+        MaterialButton chooseOutput = new MaterialButton(context);
+        chooseOutput.setText(R.string.merge_choose_output);
+        chooseOutput.setOnClickListener(v -> {
+            io.github.abdurazaaqmohammed.ui.dialogs.FilePickerDialog.Properties props =
+                    new io.github.abdurazaaqmohammed.ui.dialogs.FilePickerDialog.Properties();
+            props.selection_type = io.github.abdurazaaqmohammed.ui.dialogs.FilePickerDialog.DIR_SELECT;
+            props.offset = outputDirectory[0];
+            io.github.abdurazaaqmohammed.ui.dialogs.FilePickerDialog picker =
+                    new io.github.abdurazaaqmohammed.ui.dialogs.FilePickerDialog(context, props);
+            picker.setDialogSelectionListener(paths -> {
+                if (paths != null && paths.length > 0) {
+                    outputDirectory[0] = new File(paths[0]);
+                    outputLabel.setText(context.getString(R.string.merge_output_folder, paths[0]));
+                }
+            });
+            picker.show();
+        });
+        root.addView(chooseOutput);
+        TextView expansionNote = new TextView(context);
+        expansionNote.setText(R.string.merge_obb_separate);
+        root.addView(expansionNote);
+        ScrollView optionsScroll = new ScrollView(context);
+        optionsScroll.addView(root);
         new MaterialAlertDialogBuilder(context)
-                .setTitle("AntiSplit")
-                .setView(root)
-                .setNegativeButton(android.R.string.cancel, null)
+                .setTitle(R.string.merge_single_apk)
+                .setView(optionsScroll)
+                .setOnCancelListener(d -> { if (temporaryInput) file.delete(); })
+                .setNegativeButton(android.R.string.cancel, (d, w) -> { if (temporaryInput) file.delete(); })
                 .setPositiveButton(context.getString(R.string.antisplit_merge), (d, w) -> {
                     boolean deviceOnly = deviceOnlySwitch.isChecked();
                     boolean extractLibs = extractSwitch.isChecked();
@@ -364,13 +401,14 @@ public class MergeUtil {
                     opts.autosign = autosign;
                     opts.deviceOnly = deviceOnly;
                     opts.extractNativeLibs = extractLibs;
+                    opts.outputDirectory = outputDirectory[0];
+                    opts.temporaryInput = temporaryInput;
+                    if (temporaryInput) opts.outputName = "split-files_merged.apk";
                     List<String> selected = new ArrayList<>();
                     for (CheckBox cb : boxes) {
                         String fullName = (String) cb.getTag();
                         if (fullName.equals(baseName)) {
                             selected.add(fullName);
-                        } else if (deviceOnly) {
-                            if (matchesDevice(fullName, context)) selected.add(fullName);
                         } else if (cb.isChecked()) {
                             selected.add(fullName);
                         }
@@ -381,92 +419,167 @@ public class MergeUtil {
                 }).show();
     }
 
-    public static void mergeSplitApk(File file, MainActivity context, Options opts) {
-        if (opts == null) opts = new Options();
-        final Options options = opts;
-        ProgressManager pm = new ProgressManager(context, true).show();
-        new RunUtil(null, context, null).runInBackground(() -> {
-            APKLogger logger = pm.getLogger();
-            File dir = new File(context.getCacheDir(), UUID.randomUUID().toString());
-            try(ApkBundle bundle = new ApkBundle()) {
-                bundle.setAPKLogger(logger);
-                applyPreferredCompression(bundle, context);
-                if (options.splitNames != null && !options.splitNames.isEmpty()) {
-                    if (!dir.isDirectory() && !dir.mkdirs() && !dir.isDirectory()) {
-                        logger.logMessage(context.getString(R.string.logger_cannot_create_tmp));
-                        return false;
-                    }
-                    try (ZipFile zf = new ZipFile(file)) {
-                        for (String name : options.splitNames) {
-                            try {
-                                FileHeader fh = zf.getFileHeader(name);
-                                if (fh != null) zf.extractFile(fh, dir.getAbsolutePath());
-                            } catch (Exception e) {
-                                logger.logMessage(context.getString(R.string.logger_skip_entry, name, String.valueOf(e.getMessage())));
-                            }
+    public static boolean isSplitBundle(String name) {
+        if (name == null) return false;
+        String lower = name.toLowerCase(Locale.ROOT);
+        return lower.endsWith(".xapk") || lower.endsWith(".apks")
+                || lower.endsWith(".apkm") || lower.endsWith(".aspk");
+    }
+
+    private static File defaultOutputDirectory(Context context, File file) {
+        File parent = file.getParentFile();
+        String data = context.getApplicationInfo().dataDir + File.separator;
+        if (parent != null && parent.canWrite() && !parent.getAbsolutePath().startsWith(data)) return parent;
+        return new File(android.os.Environment.getExternalStoragePublicDirectory(
+                android.os.Environment.DIRECTORY_DOWNLOADS), "Hexora");
+    }
+
+    public static void showMergeFilesDialog(List<File> files, MainActivity context) {
+        ProgressManager progress = new ProgressManager(context, true).show();
+        new Thread(() -> {
+            File archive = null;
+            try {
+                if (files == null || files.isEmpty()) throw new IOException(context.getString(R.string.antisplit_no_splits));
+                archive = File.createTempFile("split-files-", ".apks", context.getCacheDir());
+                java.util.Set<String> names = new java.util.HashSet<>();
+                try (java.util.zip.ZipOutputStream zip = new java.util.zip.ZipOutputStream(new java.io.FileOutputStream(archive))) {
+                    for (File file : files) {
+                        if (file == null || file.isDirectory() || !file.getName().toLowerCase(Locale.ROOT).endsWith(".apk")) {
+                            throw new IOException("Select APK files belonging to the same split app.");
                         }
-                    }
-                    bundle.loadApkDirectory(dir, false);
-                } else {
-                    try(ArchiveFile zf = new ArchiveFile(file)) {
-                        zf.extractAll(dir);
-                        bundle.loadApkDirectory(dir, false);
-                    }
-                }
-                for (ApkModule apkModule : bundle.getApkModuleList()) {
-                    String protect = Util.isProtected(apkModule);
-                    if (protect != null) {
-                        logger.logMessage(file.getAbsolutePath());
-                               logger.logMessage(protect);
-                        return false;
+                        String name = file.getName();
+                        if (!names.add(name.toLowerCase(Locale.ROOT))) throw new IOException("Duplicate split filename: " + name);
+                        zip.putNextEntry(new java.util.zip.ZipEntry(name));
+                        try (java.io.InputStream input = FileUtils.getInputStream(file)) {
+                            byte[] buffer = new byte[65536];
+                            int count;
+                            while ((count = input.read(buffer)) != -1) zip.write(buffer, 0, count);
+                        }
+                        zip.closeEntry();
                     }
                 }
-                try(ApkModule mergedModule = bundle.mergeModules(false)) {
-                    sanitizeManifest(mergedModule);
-                    try {
-                        mergedModule.setExtractNativeLibs(options.extractNativeLibs);
-                    } catch (Exception e) {
-                        logger.logMessage(context.getString(R.string.logger_extract_native_libs, String.valueOf(e.getMessage())));
-                    }
-                    mergedModule.refreshTable();
-                    mergedModule.refreshManifest();
-                    logger.logMessage(context.getString(R.string.logger_writing_apk));
-                    String outName = file.getName().replaceFirst("(?i)\\.(xapk|aspk|apks|apkm)$", "_antisplit.apk");
-                    if (outName.equals(file.getName())) outName = file.getName() + "_antisplit.apk";
-                    File outputFile = FileUtils.getUnusedFile(new File(file.getParentFile(), outName));
-                    mergedModule.writeApk(outputFile);
-                    pm.dismiss();
+                File prepared = archive;
+                context.handler.post(() -> { progress.dismiss(); showAntisplitDialog(prepared, context, true); });
+            } catch (Exception e) {
+                if (archive != null) archive.delete();
+                context.handler.post(() -> { progress.dismiss(); new ErrorUtil(context).showError(e); });
+            }
+        }, "hexora-split-inputs").start();
+    }
+
+    public static void showMergeFolderDialog(File folder, MainActivity context) {
+        new Thread(() -> {
+            File[] entries = folder.listFiles(f -> f.isFile() && f.getName().toLowerCase(Locale.ROOT).endsWith(".apk"));
+            context.handler.post(() -> {
+                if (entries == null || entries.length == 0) Extensions.showMessage(context, R.string.antisplit_no_splits);
+                else showMergeFilesDialog(java.util.Arrays.asList(entries), context);
+            });
+        }, "hexora-split-folder").start();
+    }
+
+    public static void mergeSplitApk(File file, MainActivity context, Options opts) {
+        final Options options = opts == null ? new Options() : opts;
+        ProgressManager progress = new ProgressManager(context, true).show();
+        new Thread(() -> {
+            File directory = new File(context.getCacheDir(), "merge-" + UUID.randomUUID());
+            File pending = null;
+            try (ApkBundle bundle = new ApkBundle()) {
+                bundle.setAPKLogger(progress.getLogger());
+                applyPreferredCompression(bundle, context);
+                io.github.abdurazaaqmohammed.domain.files.SplitApkInputs.extract(file, directory, options.splitNames);
+                bundle.loadApkDirectory(directory, false);
+                validateSplitModules(bundle);
+                for (ApkModule module : bundle.getApkModuleList()) {
+                    String protect = Util.isProtected(module);
+                    if (protect != null) throw new IOException(protect);
+                }
+                File outputDirectory = options.outputDirectory == null ? defaultOutputDirectory(context, file) : options.outputDirectory;
+                if (!outputDirectory.isDirectory() && !outputDirectory.mkdirs() && !outputDirectory.isDirectory()) {
+                    throw new IOException("Cannot create output folder.");
+                }
+                String name = options.outputName;
+                if (name == null) {
+                    name = file.getName().replaceFirst("(?i)\\.(xapk|aspk|apks|apkm)$", "_merged.apk");
+                    if (name.equals(file.getName())) name = file.getName() + "_merged.apk";
+                }
+                File output = FileUtils.getUnusedFile(new File(outputDirectory, name));
+                pending = File.createTempFile(".hexora-merge-", ".apk", outputDirectory);
+                try (ApkModule merged = bundle.mergeModules(false)) {
+                    sanitizeManifest(merged);
+                    merged.setExtractNativeLibs(options.extractNativeLibs);
+                    merged.refreshTable();
+                    merged.refreshManifest();
+                    merged.writeApk(pending);
+                }
+                File completed = pending;
+                context.handler.post(() -> {
+                    progress.dismiss();
                     if (options.autosign) {
-                        context.handler.post(() -> SignWrapper.requireAuth(context, sw -> {
-                            ProgressManager signPm = new ProgressManager(context, true);
-                            signPm.setText(R.string.signing, outputFile.getName());
-                            signPm.show();
+                        SignWrapper.requireAuth(context, signer -> {
+                            ProgressManager signing = new ProgressManager(context, true).setText(context.getString(R.string.signing, output.getName())).show();
                             new Thread(() -> {
                                 try {
-                                    sw.signApk(outputFile);
-                                    signPm.dismiss();
-                                    context.handler.post(() -> {
-                                        Extensions.showMessage(context, context.getString(R.string.logger_saved_to, outputFile.getName()));
-                                        context.reloadCurrentFolder();
-                                    });
-                                } catch (Exception e) {
-                                    signPm.dismiss();
-                                    new ErrorUtil(context).showError(e);
+                                    signer.signApk(completed);
+                                    File saved = publishMerge(completed, output, context);
+                                    signer.publishStagedV4Signature(completed, saved);
+                                    signer.discardStagedV4Signature(completed);
                                 }
-                            }).start();
-                        }));
-                    } else {
-                        context.handler.post(() -> {
-                            Extensions.showMessage(context, context.getString(R.string.logger_saved_to, outputFile.getName()));
-                            context.reloadCurrentFolder();
+                                catch (Exception e) {
+                                    completed.delete(); signer.discardStagedV4Signature(completed);
+                                    context.handler.post(() -> new ErrorUtil(context).showError(e));
+                                }
+                                finally { signing.dismiss(); }
+                            }, "hexora-sign-merged").start();
+                        }, () -> {
+                            completed.delete();
+                            // Only this job's staged sidecar, never an existing output.
+                            new File(completed.getParentFile(), completed.getName().replaceFirst("(?i)\\.apk$", ".idsig")).delete();
                         });
+                    } else {
+                        try { publishMerge(completed, output, context); }
+                        catch (Exception e) { completed.delete(); new ErrorUtil(context).showError(e); }
                     }
-                }
+                });
+                pending = null; // The UI/signing continuation now owns this completed copy.
+            } catch (Exception e) {
+                if (pending != null) pending.delete();
+                context.handler.post(() -> { progress.dismiss(); new ErrorUtil(context).showError(e); });
+            } finally {
+                Util.deleteDir(directory);
+                if (options.temporaryInput) file.delete();
             }
-            Util.deleteDir(dir);
-            dir.deleteOnExit();
-            return true;
+        }, "hexora-merge-splits").start();
+    }
+
+    private static void validateSplitModules(ApkBundle bundle) throws IOException {
+        String packageName = null;
+        Integer version = null;
+        int baseCount = 0;
+        for (ApkModule module : bundle.getApkModuleList()) {
+            String name = module.getPackageName();
+            if (name == null || name.isEmpty()) throw new IOException("An APK has no package name.");
+            if (packageName == null) { packageName = name; version = module.getVersionCode(); }
+            if (!packageName.equals(name) || version != module.getVersionCode()) {
+                throw new IOException("Select splits of the same app and version.");
+            }
+            if (!module.getAndroidManifest().isSplit()) baseCount++;
+        }
+        if (baseCount != 1) throw new IOException("Select exactly one base APK and its matching split APKs.");
+    }
+
+    private static File publishMerge(File completed, File requested, MainActivity context) throws IOException {
+        // A concurrent job must not replace a file that appeared while this merge was running.
+        File target;
+        synchronized (MergeUtil.class) {
+            target = FileUtils.getUnusedFile(requested);
+            if (!completed.renameTo(target)) throw new IOException("Cannot save the merged APK.");
+        }
+        File saved = target;
+        context.handler.post(() -> {
+            Extensions.showMessage(context, context.getString(R.string.logger_saved_to, saved.getName()));
+            context.loadFolderInPane(saved.getParentFile(), context.lastPaneSelected == 1);
         });
+        return saved;
     }
 
     public static File mergeBundle(ApkBundle bundle) throws IOException {

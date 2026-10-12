@@ -99,18 +99,6 @@
                     android:layout_weight="1"
                     android:orientation="vertical">
 
-                    <TextView
-                        android:id="@+id/pane1Path"
-                        android:layout_width="match_parent"
-                        android:layout_height="32dp"
-                        android:gravity="center_vertical"
-                        android:paddingHorizontal="8dp"
-                        android:singleLine="true"
-                        android:ellipsize="start"
-                        android:textSize="11sp"
-                        android:textColor="?attr/colorOnSurfaceVariant"
-                        android:background="?attr/colorSurfaceVariant" />
-
                     <FrameLayout
                         android:layout_width="match_parent"
                         android:layout_height="0dp"
@@ -153,18 +141,6 @@
                     android:layout_height="match_parent"
                     android:layout_weight="1"
                     android:orientation="vertical">
-
-                    <TextView
-                        android:id="@+id/pane2Path"
-                        android:layout_width="match_parent"
-                        android:layout_height="32dp"
-                        android:gravity="center_vertical"
-                        android:paddingHorizontal="8dp"
-                        android:singleLine="true"
-                        android:ellipsize="start"
-                        android:textSize="11sp"
-                        android:textColor="?attr/colorOnSurfaceVariant"
-                        android:background="?attr/colorSurfaceVariant" />
 
                     <FrameLayout
                         android:layout_width="match_parent"

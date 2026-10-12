@@ -26,14 +26,10 @@ public final class ShizukuFileOps {
     }
 
     /** Returns the original file unless it can only be read via Shizuku; then returns a cache copy. */
-    public static File materialize(Context context, File file) {
+    public static File materialize(Context context, File file) throws IOException {
         Context c = context != null ? context : appContext;
-        if (c == null || !(file instanceof ShizukuFile) || file.isDirectory()) return file;
-        try {
-            return ((ShizukuFile) file).materializeTo(c);
-        } catch (IOException e) {
-            return file;
-        }
+        if (!(file instanceof ShizukuFile) || file.isDirectory()) return file;
+        return ((ShizukuFile) file).materializeTo(c);
     }
 
     /** True when either side of the operation lives in Android/data or is a Shizuku-backed file. */

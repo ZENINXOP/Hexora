@@ -70,7 +70,7 @@ public final class SyntaxLexer {
         boolean markup() { return format == SyntaxFormat.XML || format == SyntaxFormat.HTML; }
         boolean slashComments() {
             return switch (format) {
-                case JAVASCRIPT, TYPESCRIPT, KOTLIN, GROOVY, JAVA, JSON, CSS, C, CPP, RUST, GO, PHP -> true;
+                case JAVASCRIPT, TYPESCRIPT, KOTLIN, GROOVY, JAVA, JVM, JSON, CSS, C, CPP, RUST, GO, PHP -> true;
                 default -> false;
             };
         }

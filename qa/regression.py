@@ -32,7 +32,7 @@ def reset():
     launch(ROOT)
     for _ in range(4):
         try:
-            if find(rid="pane1Path").get("text") == ROOT: break
+            if find(rid="currentFolderPath").get("text") == ROOT: break
         except AssertionError: pass
         time.sleep(.5)
     else: raise AssertionError("Launch did not display the requested fixture directory")

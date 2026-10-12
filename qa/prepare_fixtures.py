@@ -1,12 +1,13 @@
 """Recreate deterministic, disposable QA fixtures using only Python's standard library."""
 from pathlib import Path
+import os
 import gzip
 import io
 import shutil
 import tarfile
 import zipfile
 
-ROOT=Path(__file__).resolve().parent/"artifacts"/"fixtures"
+ROOT=Path(os.environ.get("HEXORA_ARTIFACTS", str(Path(__file__).resolve().parent/"artifacts")))/"fixtures"
 
 def prepare():
     ROOT.mkdir(parents=True,exist_ok=True)

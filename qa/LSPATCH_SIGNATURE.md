@@ -1,5 +1,8 @@
 # Broader APK signature compatibility — 2026-10-10
 
+> Updated runtime evidence: [October 11 build and MuMu checks](RUNTIME_20261011.md).
+> The source-only status below records October 10.
+
 AI-assisted integration: OpenAI Codex. Status: source integration with imported, unchanged upstream runtime assets. **No build, compilation, APK packaging, signing, installation or target-app execution was performed.** The five read-only Python asset checks passed; the six new JUnit tests have not been run. Xian Esp startup remains unverified.
 
 ## Research and chosen implementation

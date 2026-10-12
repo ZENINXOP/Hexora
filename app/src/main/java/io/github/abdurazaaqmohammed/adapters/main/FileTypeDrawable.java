@@ -39,7 +39,39 @@ public final class FileTypeDrawable extends Drawable {
         paint.setColor(Color.WHITE); paint.setAlpha(opacity);
         paint.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
         paint.setTextAlign(Paint.Align.CENTER);
-        if (type == FileType.JAVA) {
+        if (type == FileType.DEX || type == FileType.LIBRARY || type == FileType.CLASS
+                || type == FileType.PYTHON_BYTECODE) {
+            // Bytecode and native libraries have a chip mark, rather than a text page.
+            paint.setStyle(Paint.Style.STROKE); paint.setStrokeWidth(1.4f);
+            roundRect(canvas, 9, 7, 23, 21, 2, 2, paint);
+            for (int pin = 11; pin <= 21; pin += 5) {
+                canvas.drawLine(pin, 4, pin, 7, paint); canvas.drawLine(pin, 21, pin, 24, paint);
+                canvas.drawLine(6, pin - 4, 9, pin - 4, paint);
+                canvas.drawLine(23, pin - 4, 26, pin - 4, paint);
+            }
+            paint.setStyle(Paint.Style.FILL); paint.setTextSize(7);
+            canvas.drawText(type == FileType.LIBRARY ? "<>" : type == FileType.DEX ? "01" : "{}", 16, 17, paint);
+            paint.setTextSize(5); canvas.drawText(type.label, 16, 29, paint);
+        } else if (type == FileType.ARSC) {
+            for (int y = 9; y <= 19; y += 5) {
+                page.reset(); page.moveTo(7, y); page.lineTo(16, y - 4);
+                page.lineTo(25, y); page.lineTo(16, y + 4); page.close();
+                canvas.drawPath(page, paint);
+                paint.setColor(type.color); paint.setStrokeWidth(1);
+                canvas.drawLine(7, y + 1, 16, y + 5, paint);
+                canvas.drawLine(16, y + 5, 25, y + 1, paint);
+                paint.setColor(Color.WHITE);
+            }
+            paint.setTextSize(5); canvas.drawText("ARSC", 16, 29, paint);
+        } else if (type == FileType.DATABASE) {
+            roundRect(canvas, 8, 9, 24, 23, 2, 2, paint);
+            roundBounds.set(8, 6, 24, 12); canvas.drawOval(roundBounds, paint);
+            paint.setColor(type.color); paint.setStyle(Paint.Style.STROKE); paint.setStrokeWidth(1.2f);
+            roundBounds.set(8, 11, 24, 17); canvas.drawArc(roundBounds, 0, 180, false, paint);
+            roundBounds.set(8, 16, 24, 22); canvas.drawArc(roundBounds, 0, 180, false, paint);
+            paint.setColor(Color.WHITE); paint.setStyle(Paint.Style.FILL);
+            paint.setTextSize(5); canvas.drawText("DB", 16, 29, paint);
+        } else if (type == FileType.JAVA) {
             roundRect(canvas, 9, 13, 21, 22, 1.5f, 1.5f, paint);
             paint.setStyle(Paint.Style.STROKE); paint.setStrokeWidth(1.5f);
             roundRect(canvas, 19, 14, 25, 19, 2, 2, paint);

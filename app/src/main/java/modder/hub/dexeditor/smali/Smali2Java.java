@@ -73,12 +73,14 @@ public class Smali2Java {
             args.setSkipResources(true);
             args.setShowInconsistentCode(true);
             args.setInputFiles(ImmutableList.of(tmp));
-            JadxDecompiler decompiler = new JadxDecompiler(args);
+            args.setThreadsCount(1);
+            try (JadxDecompiler decompiler = new JadxDecompiler(args)) {
             decompiler.load();
             if (decompiler.getClasses().isEmpty()) return "// No classes found in decompiled DEX";
             JavaClass jcls = decompiler.getClasses().iterator().next();
             jcls.decompile();
             return jcls.getCode();
+            }
         } finally {
             tmp.delete();
         }

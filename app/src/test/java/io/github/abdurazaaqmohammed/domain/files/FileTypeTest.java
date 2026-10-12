@@ -5,6 +5,17 @@ import java.util.Locale;
 import static org.junit.Assert.*;
 
 public class FileTypeTest {
+    @Test public void compiledAndDatabaseFilesCannotBeOpenedAsSource() {
+        for (String path : new String[]{"classes.DEX", "code.class", "module.pyc", "libNative.so", "users.sqlite"}) {
+            assertNotNull(FileType.forPath(path));
+            assertFalse(path, FileType.forPath(path).isText());
+        }
+        for (String path : new String[]{"script.py", "Main.java", "query.sql", "run.sh", "Dockerfile", "icon.svg"}) {
+            assertTrue(path, FileType.forPath(path).isText());
+        }
+        assertNotEquals(FileType.forPath("query.sql"), FileType.forPath("users.db"));
+        assertNotEquals(FileType.forPath("Main.java"), FileType.forPath("Main.class"));
+    }
     @Test public void requestedTypesHaveDifferentIcons() {
         FileType[] types = {FileType.forPath("main.py"), FileType.forPath("layout.xml"),
                 FileType.forPath("Main.java"), FileType.forPath("notes.txt")};

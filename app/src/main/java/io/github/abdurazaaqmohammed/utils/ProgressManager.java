@@ -34,9 +34,10 @@ public class ProgressManager {
     private volatile boolean indeterminate;
     public AlertDialog dialog;
     private volatile String currentText;
-    private volatile int progressVal, maxVal;
+    private volatile long progressVal, maxVal;
     private boolean hidden;
     private volatile boolean dismissed;
+    private Runnable onCancelled;
     private NotificationManagerCompat nm;
     private View content;
     private final AtomicBoolean renderQueued = new AtomicBoolean();
@@ -52,6 +53,8 @@ public class ProgressManager {
         initChannel();
     }
 
+    public ProgressManager onCancel(Runnable action) { onCancelled=action; return this; }
+
     public ProgressManager show() {
         handler.post(() -> {
             if (dismissed || activity.isFinishing() || activity.isDestroyed() || (dialog != null && dialog.isShowing())) return;
@@ -60,6 +63,7 @@ public class ProgressManager {
             v.findViewById(R.id.hideButton).setOnClickListener(v1 -> hide());
             updateDialog(v);
             dialog = new MaterialAlertDialogBuilder(activity).setView(v).show();
+            if (onCancelled!=null) dialog.setOnCancelListener(d -> onCancelled.run());
         });
         return this;
     }
@@ -67,6 +71,8 @@ public class ProgressManager {
     public void setText(int id, String append) {
         setText(activity.getString(id, append));
     }
+
+    public ProgressManager setText(int id) { return setText(activity.getString(id)); }
 
     public ProgressManager setText(String text) {
         if (dismissed) return this;
@@ -76,6 +82,10 @@ public class ProgressManager {
     }
 
     public ProgressManager setProgress(int progress, int max) {
+        return setProgress((long) progress, (long) max);
+    }
+
+    public ProgressManager setProgress(long progress, long max) {
         if (dismissed || max <= 0) return this;
         this.progressVal = Math.max(0, Math.min(progress, max));
         this.maxVal = max;
@@ -101,13 +111,13 @@ public class ProgressManager {
         title.setText(currentText == null ? activity.getString(R.string.loading) : currentText);
         LinearProgressIndicator bar = view.findViewById(R.id.progressBar);
         TextView value = view.findViewById(R.id.progressValue);
-        int max = maxVal;
+        long max = maxVal;
         if (!indeterminate && max > 0) {
-            int progress = Math.max(0, Math.min(progressVal, max));
-            bar.setMax(max);
+            long progress = Math.max(0, Math.min(progressVal, max));
+            bar.setMax(10000);
             // Material completes the indeterminate cycle before animating real progress.
-            bar.setProgressCompat(progress, true);
-            value.setText(NumberFormat.getPercentInstance().format((double) progress / max));
+            bar.setProgressCompat((int) ((double) progress / max * 10000), true);
+            value.setText(progressLabel(progress, max));
             value.setVisibility(View.VISIBLE);
         } else {
             value.setVisibility(View.INVISIBLE);
@@ -171,9 +181,23 @@ public class ProgressManager {
                 .setSmallIcon(R.mipmap.ic_launcher)
                 .setOngoing(true)
                 .setContentIntent(PendingIntent.getActivity(activity, 0, new Intent(activity, activity.getClass()), PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT));
-        if (!indeterminate && maxVal > 0) b.setProgress(maxVal, progressVal, false);
+        if (!indeterminate && maxVal > 0) {
+            b.setProgress(10000, (int) Math.max(0, Math.min(10000, (double) progressVal / maxVal * 10000)), false);
+            b.setSubText(progressLabel(progressVal, maxVal));
+        }
         else b.setProgress(0, 0, true);
         return b;
+    }
+
+    private String progressLabel(long done, long total) {
+        double ratio = Math.max(0, Math.min(1, (double) done / total));
+        // Keep incomplete operations below 100 even when decimal formatting rounds up.
+        double shown = done >= total ? 1 : Math.floor(ratio * 10000) / 10000;
+        NumberFormat format = NumberFormat.getPercentInstance();
+        format.setMinimumFractionDigits(2);
+        format.setMaximumFractionDigits(2);
+        return activity.getString(R.string.progress_complete_remaining,
+                format.format(shown), format.format(1 - shown));
     }
 
     private void cancelNotification() {

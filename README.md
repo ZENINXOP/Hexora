@@ -9,10 +9,14 @@ based on the open-source [MP-Manager](https://github.com/AbdurazaaqMohammed/MP-M
 [Repository](https://github.com/ZENINXOP/Hexora) ·
 [Releases](https://github.com/ZENINXOP/Hexora/releases) ·
 [Report an issue](https://github.com/ZENINXOP/Hexora/issues) ·
-[Telegram channel](https://t.me/ZENINXYT)
+[Telegram channel](https://t.me/Hexora_x)
 
-**Latest release:** [Hexora 0.1.1](https://github.com/ZENINXOP/Hexora/releases/tag/v0.1.1) ·
-[Download APK](https://github.com/ZENINXOP/Hexora/releases/download/v0.1.1/Hexora.0.1.1.apk)
+**Latest release:** [Hexora 0.1.2](https://github.com/ZENINXOP/Hexora/releases/tag/v0.1.2) ·
+[Download signed APK](https://github.com/ZENINXOP/Hexora/releases/download/v0.1.2/Hexora.0.1.2.apk) ·
+[Changes from 0.1.1](docs/releases/0.1.2.md)
+
+Version 0.1.2 uses the new package `com.hexora.zenin` and installs alongside
+0.1.1. Private preferences, folder grants and editor sessions are separate.
 
 ## Screenshots
 
@@ -34,6 +38,12 @@ changes will appear after the next build and installation.
 - Built-in image viewing and audio/video playback.
 - Root and Shizuku support for locations requiring elevated access.
 - Light, dark, black, and system themes, with configurable file rows and menus.
+- Telegram/shared attachment imports, split-APK bundle merging, and a script
+  console with arguments, input, Stop and timeout controls.
+- Local file clipboard, password-protected ZIP browsing/editing, and archive
+  filename/content search.
+- DEX class import/rename, package rename and original/current comparisons;
+  JVM bytecode inspection and read-only Java decompilation.
 
 ## ZIP files
 
@@ -59,7 +69,7 @@ Set `sdk.dir` in an untracked `local.properties`, then run:
 ./gradlew :app:assembleDebug
 ```
 
-Application ID: `app.hexora.manager`. The upstream Java namespace is retained
+Application ID: `com.hexora.zenin`. The upstream Java namespace is retained
 for source and extension compatibility. Hexora uses its own preferences,
 provider authorities, and export directory.
 
@@ -72,8 +82,9 @@ they are separate from the published release linked above.
 
 Bundled LSPatch runtime provenance and its pinned recursive corresponding
 source are available in [third_party/lspatch](third_party/lspatch/README.md).
-The latest editor, UI and signature integration follow-ups have source checks
-recorded in the QA notes; they have not been rebuilt or tested on a device.
+Build and MuMu validation for the published release are recorded in
+[the release notes](docs/releases/0.1.2.md). Historical QA reports retain their
+original source-only status and failed attempts where applicable.
 
 The updater remains inactive until `UPDATE_REPOSITORY` in `app/build.gradle`
 is configured for Hexora. Release APK filenames must start with `Hexora.`.

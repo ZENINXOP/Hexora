@@ -27,7 +27,7 @@ public class FileUtils {
     public static final String[] IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".ico", ".tiff", ".tif", ".heic", ".heif"};
     public static final String[] VIDEO_EXTS = {".mp4", ".mkv", ".webm", ".avi", ".3gp", ".mov", ".ts", ".m4v", ".flv", ".wmv"};
     public static final String[] AUDIO_EXTS = {".mp3", ".wav", ".flac", ".ogg", ".m4a", ".aac", ".wma", ".opus"};
-    public static final String[] ARCHIVE_EXTS = {".zip", ".rar", ".7z", ".tar", ".gz", ".bz2"};
+    public static final String[] ARCHIVE_EXTS = {".zip", ".aar", ".jar", ".war", ".rar", ".7z", ".tar", ".gz", ".bz2"};
     public static final String[] TEXT_EXTS = {".txt", ".text", ".log", ".xml", ".xsd", ".xsl", ".xslt", ".json", ".jsonc", ".json5", ".html", ".htm", ".xhtml", ".vue", ".svelte", ".css", ".scss", ".sass", ".less", ".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".java", ".kt", ".kts", ".groovy", ".py", ".pyw", ".pyi", ".md", ".markdown", ".rst", ".smali", ".pro", ".gradle", ".properties", ".prop", ".ini", ".conf", ".cfg", ".toml", ".env", ".yaml", ".yml", ".sql", ".csv", ".tsv", ".c", ".h", ".cpp", ".cc", ".cxx", ".hpp", ".hxx", ".rs", ".go", ".php", ".rb", ".bash", ".zsh"};
 
     public static boolean areFilesDifferent(File[] files1, File[] files2) throws IOException {
@@ -54,6 +54,9 @@ public class FileUtils {
         return false;
     }
     public static boolean doesNotHaveStoragePerm(Context context) {
+        if (Build.VERSION.SDK_INT >= 23 && context.getApplicationInfo().targetSdkVersion <= 28
+                && (context.checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED
+                || context.checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED)) return true;
         return Build.VERSION.SDK_INT >= Build.VERSION_CODES.R ? !Environment.isExternalStorageManager() : Build.VERSION.SDK_INT > 22 && context.checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_DENIED;
     }
 
@@ -197,8 +200,9 @@ public class FileUtils {
     }
 
     public static InputStream getInputStream(File file) throws IOException {
+        if (file instanceof SafAccess.GrantedFile) return SafAccess.openInput(file);
         if (file instanceof ShizukuFile) {
-            file = ShizukuFileOps.materialize(null, file);
+            return io.github.abdurazaaqmohammed.MPManager.shizuku.ShizukuShell.openInputStream(file.getAbsolutePath());
         }
         return LegacyUtils.supportsFileChannel ?
                 Files.newInputStream(file.toPath(), StandardOpenOption.READ)

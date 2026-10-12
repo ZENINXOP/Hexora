@@ -21,7 +21,6 @@ import android.widget.TextView;
 
 import androidx.appcompat.app.AlertDialog;
 import androidx.core.content.ContextCompat;
-import androidx.recyclerview.widget.RecyclerView;
 
 import com.google.android.material.textfield.MaterialAutoCompleteTextView;
 import com.lilincpp.github.libezftp.EZFtpClient;
@@ -310,14 +309,11 @@ public class FtpController {
                                     files.add(new FTPFileWrapper(newPath, f));
                                 }
                             }
-                            RecyclerView pane = activity.findViewById(pane1 ? R.id.listViewPane1 : R.id.listViewPane2);
-                            pane.setAdapter(new FtpFilesArrayAdapter(activity, files.toArray(new FTPFileWrapper[0]), pane1, ftpClient));
-                            TextView currentFolderPath = activity.findViewById(R.id.currentFolderPath);
-                            currentFolderPath.setText(activity.rss.getString(R.string.ftp, path));
-                            activity.uiHelper.scrollTextView(currentFolderPath);
-
-                            activity.<TextView>findViewById(R.id.folderCount).setText(new StringBuilder("Folders: ").append(foldersCount).append(" Files: ").append(files.size() - 1 - foldersCount));
-                            activity.<TextView>findViewById(pane1 ? R.id.pane1Path : R.id.pane2Path).setText(activity.rss.getString(R.string.ftp, newPath));
+                            activity.replacePaneListing(pane1, "ftp:" + newPath,
+                                    new FtpFilesArrayAdapter(activity, files.toArray(new FTPFileWrapper[0]), pane1, ftpClient));
+                            if (activity.lastPaneSelected == (pane1 ? 1 : 2)) {
+                                activity.setCurrentPane(pane1 ? 1 : 2);
+                            }
                             activity.findViewById(pane1 ? R.id.pane1Empty : R.id.pane2Empty).setVisibility(files.size() == 1 ? View.VISIBLE : View.GONE);
                         });
                     }

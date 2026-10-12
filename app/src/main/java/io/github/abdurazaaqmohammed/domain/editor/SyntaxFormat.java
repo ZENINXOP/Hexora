@@ -9,6 +9,7 @@ import java.util.Set;
 /** Text syntax detection is separate from file icons and binary file handling. */
 public enum SyntaxFormat {
     TEXT("Plain Text", "", "txt", "text", "log", "csv", "tsv"),
+    JVM("JVM Bytecode", "public private protected static final abstract native synchronized volatile transient synthetic bridge enum interface class extends implements ALOAD ILOAD ASTORE ISTORE LDC GETFIELD PUTFIELD GETSTATIC PUTSTATIC INVOKEVIRTUAL INVOKESTATIC INVOKESPECIAL INVOKEINTERFACE INVOKEDYNAMIC NEW DUP RETURN ARETURN IRETURN LRETURN DRETURN FRETURN IADD ISUB IMUL IDIV GOTO IFEQ IFNE IFNULL IFNONNULL TABLESWITCH LOOKUPSWITCH LINENUMBER MAXSTACK MAXLOCALS FRAME TRYCATCHBLOCK ATHROW CHECKCAST INSTANCEOF", "jvmb"),
     JAVA("Java", "", "java"),
     PYTHON("Python", "and as assert async await break class continue def del elif else except False finally for from global if import in is lambda None nonlocal not or pass raise return True try while with yield match case", "py", "pyw", "pyi"),
     XML("XML", "", "xml", "xsd", "xsl", "xslt", "svg"),

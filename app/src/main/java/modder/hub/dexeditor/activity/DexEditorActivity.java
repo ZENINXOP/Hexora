@@ -969,6 +969,137 @@ public class DexEditorActivity extends BaseActivity {
         }
     }
 
+    private void withCommittedTabs(Runnable action) {
+        List<EditorTab> dirty = new ArrayList<>();
+        for (EditorTab tab : tabs) if (tab.isModified && tab.type == 0) dirty.add(tab);
+        boolean[] checked = new boolean[dirty.size()]; java.util.Arrays.fill(checked, true);
+        saveMultipleTabs(dirty, checked, action);
+    }
+
+    private interface ClassOperation { void run(ClassTree session) throws Exception; }
+    private void changeClasses(ClassOperation operation) {
+        changeClasses(operation, false);
+    }
+    private void changeClasses(ClassOperation operation, boolean closeRewrittenTabs) {
+        final ClassTree session=classTree;
+        AlertCircularProgress progress=new AlertCircularProgress(this);
+        progress.setMessage("Updating classes…"); progress.show();
+        new Thread(() -> {
+            try {
+                if (session==null || session!=classTree) throw new java.io.IOException("DEX session is unavailable.");
+                operation.run(session);
+                List<TreeNode> roots=session.buildFullTree();
+                runOnUiThread(() -> {
+                    progress.dismiss();
+                    if (isFinishing() || isDestroyed() || session!=classTree) return;
+                    if (closeRewrittenTabs) for (EditorTab tab:new ArrayList<>(tabs)) removeTabsForClass(tab.className,false);
+                    java.util.Iterator<TreeNode> history=historyNodes.iterator();
+                    while (history.hasNext()) if (!session.classMap.containsKey(history.next().getFullName())) history.remove();
+                    treeRoots.clear(); treeRoots.addAll(roots);
+                    isChanged=true; isSaved=false;
+                    needsExplorerRefresh=true; needsModifiedTreeRebuild=true;
+                    refreshExplorerPage(0); refreshExplorerPage(1);
+                    showTreeView();
+                });
+            } catch (Exception e) { runOnUiThread(() -> { progress.dismiss(); new io.github.abdurazaaqmohammed.utils.ErrorUtil(this).showError(e); }); }
+        },"hexora-dex-class-change").start();
+    }
+
+    public void addClass(TreeNode node) {
+        android.widget.EditText input=new android.widget.EditText(this);
+        input.setSingleLine(true); input.setHint(R.string.dex_class_name_hint);
+        String folder=node.isDirectory() ? node.getFullName() : node.getFullName().substring(0,Math.max(0,node.getFullName().lastIndexOf('/')));
+        input.setText((folder.isEmpty() ? "" : folder+"/")+"NewClass");
+        androidx.appcompat.app.AlertDialog dialog=new MaterialAlertDialogBuilder(this).setTitle(R.string.dex_add_class)
+                .setView(io.github.abdurazaaqmohammed.ui.UiFields.wrap(this,input,null,0))
+                .setNegativeButton(android.R.string.cancel,null).setPositiveButton(android.R.string.ok,null).create();
+        dialog.setOnShowListener(d -> dialog.getButton(-1).setOnClickListener(v -> {
+            try {
+                String name=io.github.abdurazaaqmohammed.domain.editor.DexClassActions.name(input.getText().toString());
+                String code=io.github.abdurazaaqmohammed.domain.editor.DexClassActions.template(name);
+                String target=classTree.targetDexFor(node.getFullName());
+                if (classTree.classMap.containsKey(name)) throw new java.io.IOException("Class already exists.");
+                dialog.dismiss();
+                withCommittedTabs(() -> changeClasses(session -> session.addClasses(java.util.Collections.singletonList(
+                        Smali.assemble(code,SharedSmaliUtils.ASSEMBLE_OPTIONS,dexVersion)),target)));
+            } catch (Exception e) { input.setError(e.getMessage()); }
+        })); dialog.show();
+    }
+
+    public void importClasses(TreeNode node) {
+        io.github.abdurazaaqmohammed.ui.dialogs.FilePickerDialog.Properties props=new io.github.abdurazaaqmohammed.ui.dialogs.FilePickerDialog.Properties();
+        props.selection_mode=io.github.abdurazaaqmohammed.ui.dialogs.FilePickerDialog.MULTI_MODE;
+        props.selection_type=io.github.abdurazaaqmohammed.ui.dialogs.FilePickerDialog.FILE_SELECT;
+        props.extensions=new String[]{"smali","dex"};
+        io.github.abdurazaaqmohammed.ui.dialogs.FilePickerDialog picker=new io.github.abdurazaaqmohammed.ui.dialogs.FilePickerDialog(this,props);
+        picker.setTitle(getString(R.string.dex_import_classes));
+        picker.setDialogSelectionListener(files -> {
+            if (files==null || files.length==0) return;
+            String target=classTree.targetDexFor(node.getFullName());
+            withCommittedTabs(() -> changeClasses(session -> {
+                List<ClassDef> definitions=new ArrayList<>();
+                for (String path:files) {
+                    try (java.io.InputStream input=io.github.abdurazaaqmohammed.utils.RootStaging.openInputStream(this,new File(path))) {
+                        if (path.toLowerCase(java.util.Locale.ROOT).endsWith(".dex")) {
+                            java.io.BufferedInputStream buffered=new java.io.BufferedInputStream(input);
+                            definitions.addAll(com.android.tools.smali.dexlib2.dexbacked.DexBackedDexFile.fromInputStream(
+                                    com.android.tools.smali.dexlib2.Opcodes.forDexVersion(dexVersion),buffered).getClasses());
+                        } else {
+                            io.github.abdurazaaqmohammed.domain.editor.EditorDocumentReader.Result document=
+                                    io.github.abdurazaaqmohammed.domain.editor.EditorDocumentReader.read(input,new File(path).length());
+                            if (document.isReadOnly()) throw new java.io.IOException("Smali file exceeds the import limit.");
+                            definitions.add(Smali.assemble(document.text,SharedSmaliUtils.ASSEMBLE_OPTIONS,dexVersion));
+                        }
+                    }
+                }
+                session.addClasses(definitions,target);
+            }));
+        }); picker.show();
+    }
+
+    public void renameClass(TreeNode node) {
+        boolean packageRename=node.isDirectory();
+        android.widget.EditText input=new android.widget.EditText(this); input.setSingleLine(true); input.setText(node.getFullName());
+        androidx.appcompat.app.AlertDialog dialog=new MaterialAlertDialogBuilder(this).setTitle(packageRename ? R.string.dex_rename_package : R.string.dex_rename_class)
+                .setMessage("DEX type references are updated. Manifest names and reflection strings are not rewritten.")
+                .setView(io.github.abdurazaaqmohammed.ui.UiFields.wrap(this,input,null,0))
+                .setNegativeButton(android.R.string.cancel,null).setPositiveButton(android.R.string.ok,null).create();
+        dialog.setOnShowListener(d -> dialog.getButton(-1).setOnClickListener(v -> {
+            try {
+                String name=io.github.abdurazaaqmohammed.domain.editor.DexClassActions.name(input.getText().toString());
+                if (name.equals(node.getFullName())) { dialog.dismiss(); return; }
+                if (!packageRename && classTree.classMap.containsKey(name)) throw new java.io.IOException("Class already exists.");
+                dialog.dismiss(); withCommittedTabs(() -> changeClasses(session -> {
+                    if (packageRename) session.renamePackage(node.getFullName(),name);
+                    else session.renameClass(node.getFullName(),name);
+                }, true));
+            } catch (Exception e) { input.setError(e.getMessage()); }
+        })); dialog.show();
+    }
+
+    public void compareClassChanges(TreeNode node) {
+        withCommittedTabs(() -> {
+            final ClassTree session=classTree;
+            new Thread(() -> {
+                try {
+                    File folder=new File(getCacheDir(),"class-diff-"+java.util.UUID.randomUUID());
+                    if (!folder.mkdirs()) throw new java.io.IOException("Cannot create comparison files.");
+                    File before=new File(folder,"Original.smali"), after=new File(folder,"Modified.smali");
+                    String original=session.originalSmali(node.getFullName());
+                    ClassDef definition=session.classMap.get(node.getFullName());
+                    String modified=definition==null ? "" : session.getPureSmaliFromClassDef(definition);
+                    try (java.io.FileOutputStream output=new java.io.FileOutputStream(before)) { output.write(original.getBytes(java.nio.charset.StandardCharsets.UTF_8)); }
+                    try (java.io.FileOutputStream output=new java.io.FileOutputStream(after)) { output.write(modified.getBytes(java.nio.charset.StandardCharsets.UTF_8)); }
+                    runOnUiThread(() -> {
+                        if (!isFinishing() && !isDestroyed()) startActivity(new Intent(this,
+                                io.github.abdurazaaqmohammed.ui.activities.CompareTextActivity.class)
+                                .putExtra("file1",before.getAbsolutePath()).putExtra("file2",after.getAbsolutePath()));
+                    });
+                } catch (Exception e) { runOnUiThread(() -> new io.github.abdurazaaqmohammed.utils.ErrorUtil(this).showError(e)); }
+            },"hexora-dex-class-diff").start();
+        });
+    }
+
     public void refreshExplorerPage(int position) {
         if (position == 1 && classTree != null && needsModifiedTreeRebuild) {
             modifiedNodes.clear();
@@ -1870,6 +2001,9 @@ public class DexEditorActivity extends BaseActivity {
             switch (position) {
                 case 0:
                     currentAdapter = new TreeAdapter(getContext(), activity.treeRoots, new TreeAdapter.OnNodeClickListener() {
+                        @Override public void onAdd(TreeNode node) { activity.addClass(node); }
+                        @Override public void onImport(TreeNode node) { activity.importClasses(node); }
+                        @Override public void onRename(TreeNode node) { activity.renameClass(node); }
                         @Override
                         public void onNodeClick(TreeNode node) {
                             activity.openClass(node.getFullName());
@@ -1980,7 +2114,7 @@ public class DexEditorActivity extends BaseActivity {
 
                             @Override
                             public void onCompare(TreeNode node) {
-                                // TODO: Implement compare the difference
+                                activity.compareClassChanges(node);
                             }
                         }, false, true));
                     }
@@ -2406,6 +2540,7 @@ public class DexEditorActivity extends BaseActivity {
 
                 runOnUiThread(() -> {
                     try {
+                        dexVersion = classTree.getOpenedDexVersion();
                         treeRoots.clear();
                         treeRoots.addAll(roots);
                         modifiedNodes.clear();
@@ -2495,6 +2630,20 @@ public class DexEditorActivity extends BaseActivity {
                             Intent resultIntent = new Intent();
                             List<String> dexPaths = getIntent().getStringArrayListExtra("SelectedDexFiles");
                             resultIntent.setData(Uri.fromFile(new File(dexPaths.get(0))));
+                            resultIntent.putExtra("zipFilePath", getIntent().getStringExtra("zipFilePath"));
+                            resultIntent.putExtra("zipEntryPath", getIntent().getStringExtra("zipEntryPath"));
+                            String archivePath = getIntent().getStringExtra("zipFilePath");
+                            if (archivePath != null && getIntent().getStringExtra("zipEntryPath") == null) {
+                                // Only publish the selected DEX files, leaving other staged siblings alone.
+                                ArrayList<Intent> edits = new ArrayList<>();
+                                for (String path : dexPaths) {
+                                    File dex = new File(path);
+                                    edits.add(new Intent().setData(Uri.fromFile(dex))
+                                            .putExtra("zipFilePath", archivePath)
+                                            .putExtra("zipEntryPath", dex.getName()));
+                                }
+                                resultIntent.putParcelableArrayListExtra("modifiedArchiveFiles", edits);
+                            }
                             resultIntent.setFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
                             setResult(757, resultIntent);
                             finish();

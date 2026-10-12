@@ -15,6 +15,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Locale;
 
 import io.github.abdurazaaqmohammed.domain.files.ZipEntryInfo;
+import io.github.abdurazaaqmohammed.domain.editor.EditorDocumentReader;
 
 public class MimeUtil {
 
@@ -82,6 +83,10 @@ public class MimeUtil {
                 default -> {}
             }
         }
+        // UTF-16LE's FF FE BOM also resembles an MPEG frame header.
+        if (len >= 2 && (((data[0] & 255) == 255 && (data[1] & 255) == 254)
+                || ((data[0] & 255) == 254 && (data[1] & 255) == 255))
+                && EditorDocumentReader.isTextSample(data, len)) return "text/plain";
         if (startsWith(data, "ID3".getBytes(StandardCharsets.US_ASCII))) return "audio/mpeg";
         if ((data[0] & 0xFF) == 0xFF && (data[1] & 0xE0) == 0xE0 && !startsWith(data, JPEG_MAGIC)) return "audio/mpeg";
         if (len > 11 && ascii(data, 4, 4).equals("ftyp")) {
@@ -106,7 +111,7 @@ public class MimeUtil {
         if (startsWith(data, ELF_MAGIC)) return "application/x-executable";
         if (startsWith(data, EXE_MAGIC)) return "application/x-msdownload";
         if (isBinaryXml(file)) return "text/xml";
-        if (looksLikeText(data, len)) return "text/plain";
+        if (EditorDocumentReader.isTextSample(data, len)) return "text/plain";
         return guessFromExtension(ext);
     }
 
@@ -116,6 +121,11 @@ public class MimeUtil {
             return reported;
         String real = getRealMimeType(file);
         return real != null ? real : reported;
+    }
+
+    /** Filename MIME for known document containers and uppercase extensions. */
+    public static String getMimeTypeByName(String name) {
+        return guessFromExtension(name);
     }
 
     private static String zipFamilyMimeType(String ext) {
@@ -145,15 +155,6 @@ public class MimeUtil {
         } catch (Exception e) {
             return false;
         }
-    }
-
-    private static boolean looksLikeText(byte[] data, int len) {
-        for (int i = 0; i < len; i++) {
-            byte b = data[i];
-            if (b == 0) return false;
-            if (b < 9 || (b > 13 && b < 32) || b == 27) return false;
-        }
-        return true;
     }
 
     private static boolean startsWith(byte[] data, byte[] prefix) {

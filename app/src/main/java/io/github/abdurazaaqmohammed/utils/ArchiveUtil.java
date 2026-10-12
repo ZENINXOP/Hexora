@@ -28,6 +28,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.List;
 import java.util.Locale;
+import io.github.abdurazaaqmohammed.domain.files.FileWorkProgress;
 
 public class ArchiveUtil {
 
@@ -70,6 +71,81 @@ public class ArchiveUtil {
         else throw new IOException("Unsupported archive format: " + archive.getName());
     }
 
+    public static void extract(File archive, File destDir, boolean preserveTime, ProgressManager progress) throws IOException {
+        progress.setText(io.github.abdurazaaqmohammed.MPManager.R.string.progress_counting);
+        long total = Math.max(1, extractionUnits(archive));
+        progress.setText(io.github.abdurazaaqmohammed.MPManager.R.string.extracting_to_folder, destDir.getName());
+        long[] done = {0};
+        progress.setProgress(0L, total);
+        try (FileWorkProgress.Scope scope = FileWorkProgress.track(units -> {
+            done[0] += units;
+            progress.setProgress(Math.min(done[0], Math.max(0, total - 1)), total);
+        })) {
+            extract(archive, destDir, preserveTime);
+        }
+        progress.setProgress(total, total);
+    }
+
+    /** Count actual decoded bytes/entries before extracting; no percentage based on elapsed time. */
+    private static long extractionUnits(File archive) throws IOException {
+        String lower = archive.getName().toLowerCase(Locale.ROOT);
+        long total = 0;
+        if (lower.endsWith(".zip")) {
+            try (net.lingala.zip4j.ZipFile zip = new net.lingala.zip4j.ZipFile(archive)) {
+                for (net.lingala.zip4j.model.FileHeader header : zip.getFileHeaders())
+                    total = Math.addExact(total, header.isDirectory() ? 1 : Math.max(0, header.getUncompressedSize()) + 1);
+            }
+        } else if (lower.endsWith(".7z")) {
+            try (SevenZFile seven = new SevenZFile(archive)) {
+                for (SevenZArchiveEntry entry : seven.getEntries()) total = Math.addExact(total, entry.isDirectory() ? 1 : Math.max(0, entry.getSize()) + 1);
+            }
+        } else if (lower.endsWith(".rar")) {
+            try (Archive rar = new Archive(archive)) {
+                FileHeader header;
+                while ((header = rar.nextFileHeader()) != null)
+                    total = Math.addExact(total, header.isDirectory() ? 1 : Math.max(0, header.getFullUnpackSize()) + 1);
+            } catch (RarException e) { throw new IOException("Cannot count archive", e); }
+        } else {
+            boolean tar = lower.endsWith(".tar") || lower.endsWith(".tgz") || lower.endsWith(".tbz2") || lower.endsWith(".txz")
+                    || lower.endsWith(".tar.gz") || lower.endsWith(".tar.bz2") || lower.endsWith(".tar.xz");
+            try (InputStream decoded = decodedArchiveInput(archive)) {
+                if (tar) {
+                    try (TarArchiveInputStream input = new TarArchiveInputStream(decoded)) {
+                        TarArchiveEntry entry;
+                        while ((entry = input.getNextTarEntry()) != null) {
+                            checkExtractionCancelled();
+                            total = Math.addExact(total, entry.isDirectory() ? 1 : Math.max(0, entry.getSize()) + 1);
+                        }
+                    }
+                } else {
+                    byte[] buffer = new byte[64 * 1024];
+                    int count;
+                    total = 1;
+                    while ((count = decoded.read(buffer)) != -1) {
+                        checkExtractionCancelled();
+                        total = Math.addExact(total, count);
+                    }
+                }
+            }
+        }
+        return total;
+    }
+
+    private static InputStream decodedArchiveInput(File archive) throws IOException {
+        InputStream raw = new BufferedInputStream(new FileInputStream(archive));
+        String name = archive.getName().toLowerCase(Locale.ROOT);
+        try {
+            if (name.endsWith(".gz") || name.endsWith(".tgz")) return new GzipCompressorInputStream(raw, true);
+            if (name.endsWith(".bz2") || name.endsWith(".tbz2")) return new BZip2CompressorInputStream(raw, true);
+            if (name.endsWith(".xz") || name.endsWith(".txz")) return new XZCompressorInputStream(raw, true);
+            return raw;
+        } catch (IOException e) { raw.close(); throw e; }
+    }
+
+    private static void checkExtractionCancelled() throws IOException {
+        if (Thread.currentThread().isInterrupted()) throw new java.io.InterruptedIOException("Extraction cancelled");
+    }
+
     public static void create(File output, List<File> sources) throws IOException {
         if (output.exists()) throw new IOException("Destination already exists: " + output);
         for (File source : sources) io.github.abdurazaaqmohammed.domain.files.SafeFileOperations.validateDestination(source, output);
@@ -95,9 +171,9 @@ public class ArchiveUtil {
     }
 
     private static void extractZip(File archive, File destDir, boolean preserveTime) throws IOException {
-        try (net.lingala.zip4j.ZipFile zip = new net.lingala.zip4j.ZipFile(archive)) {
+        try (net.lingala.zip4j.ZipFile zip = io.github.abdurazaaqmohammed.domain.files.ArchivePasswords.open(archive)) {
             // zip4j handles ZIP64, split archives and rejects paths outside destDir.
-            zip.extractAll(destDir.getAbsolutePath());
+            ZipTaskProgress.run(zip, () -> zip.extractAll(destDir.getAbsolutePath()), Math.max(1, extractionUnits(archive)));
             if (!preserveTime) {
                 long now = System.currentTimeMillis();
                 String root = destDir.getCanonicalPath() + File.separator;
@@ -113,6 +189,7 @@ public class ArchiveUtil {
         try (SevenZFile sevenZFile = new SevenZFile(archive)) {
             SevenZArchiveEntry entry;
             while ((entry = sevenZFile.getNextEntry()) != null) {
+                checkExtractionCancelled();
                 File out = resolveEntry(destDir, entry.getName());
                 if (entry.isDirectory()) out.mkdirs();
                 else {
@@ -126,6 +203,7 @@ public class ArchiveUtil {
                         out.setLastModified(entry.getLastModifiedDate().getTime());
                     }
                 }
+                FileWorkProgress.advance(1);
             }
         }
     }
@@ -134,12 +212,18 @@ public class ArchiveUtil {
         try (Archive rar = new Archive(archive)) {
             FileHeader fh;
             while ((fh = rar.nextFileHeader()) != null) {
+                checkExtractionCancelled();
                 File out = resolveEntry(destDir, fh.getFileName());
                 if (fh.isDirectory()) out.mkdirs();
                 else {
                     File parent = out.getParentFile();
                     if (parent != null) parent.mkdirs();
-                    try (OutputStream os = new BufferedOutputStream(new FileOutputStream(out))) {
+                    try (OutputStream os = new java.io.FilterOutputStream(new BufferedOutputStream(new FileOutputStream(out))) {
+                        @Override public void write(int value) throws IOException { this.out.write(value); FileWorkProgress.advance(1); }
+                        @Override public void write(byte[] bytes, int offset, int length) throws IOException {
+                            checkExtractionCancelled(); this.out.write(bytes, offset, length); FileWorkProgress.advance(length);
+                        }
+                    }) {
                         rar.extractFile(fh, os);
                     }
                     if (preserveTime && fh.getMTime() != null) {
@@ -147,6 +231,7 @@ public class ArchiveUtil {
                         out.setLastModified(fh.getMTime().getTime());
                     }
                 }
+                FileWorkProgress.advance(1);
             }
         } catch (RarException e) {
             throw new IOException("Failed to extract RAR archive", e);
@@ -157,6 +242,7 @@ public class ArchiveUtil {
         try (TarArchiveInputStream tais = new TarArchiveInputStream(tarInput)) {
             TarArchiveEntry entry;
             while ((entry = tais.getNextTarEntry()) != null) {
+                checkExtractionCancelled();
                 File out = resolveEntry(destDir, entry.getName());
                 if (entry.isSymbolicLink() || entry.isLink()) throw new IOException("Archive links are not supported: " + entry.getName());
                 if (entry.isDirectory()) out.mkdirs();
@@ -171,6 +257,7 @@ public class ArchiveUtil {
                         out.setLastModified(entry.getLastModifiedDate().getTime());
                     }
                 }
+                FileWorkProgress.advance(1);
             }
         }
     }
@@ -182,6 +269,7 @@ public class ArchiveUtil {
             try (OutputStream os = new BufferedOutputStream(new FileOutputStream(out))) {
                 copy(is, os);
             }
+            FileWorkProgress.advance(1);
         }
     }
 
@@ -218,7 +306,11 @@ public class ArchiveUtil {
     private static void copySevenZ(InputStream is, SevenZOutputFile os) throws IOException {
         byte[] buffer = new byte[BUFFER_SIZE];
         int length;
-        while ((length = is.read(buffer)) > 0) os.write(buffer, 0, length);
+        while ((length = is.read(buffer)) > 0) {
+            checkExtractionCancelled();
+            os.write(buffer, 0, length);
+            FileWorkProgress.advance(length);
+        }
     }
 
     private static void createTar(OutputStream tarOutput, List<File> sources) throws IOException {
@@ -263,6 +355,10 @@ public class ArchiveUtil {
     private static void copy(InputStream is, OutputStream os) throws IOException {
         byte[] buffer = new byte[BUFFER_SIZE];
         int length;
-        while ((length = is.read(buffer)) > 0) os.write(buffer, 0, length);
+        while ((length = is.read(buffer)) > 0) {
+            checkExtractionCancelled();
+            os.write(buffer, 0, length);
+            FileWorkProgress.advance(length);
+        }
     }
 }

@@ -1,210 +1,139 @@
 package io.github.abdurazaaqmohammed.player;
 
-import android.content.ContentUris;
 import android.content.Intent;
 import android.database.Cursor;
 import android.net.Uri;
-import android.os.Build;
 import android.os.Bundle;
-import android.os.Environment;
-import android.provider.DocumentsContract;
-import android.provider.MediaStore;
-import android.util.Log;
-import android.view.ViewGroup;
+import android.provider.OpenableColumns;
+import android.webkit.MimeTypeMap;
 import android.widget.LinearLayout;
 import android.widget.TextView;
-
+import com.google.android.material.button.MaterialButton;
 import io.github.abdurazaaqmohammed.core.ui.base.BaseActivity;
 import io.github.abdurazaaqmohammed.MPManager.MainActivity;
 import io.github.abdurazaaqmohammed.MPManager.R;
-
-import com.google.android.material.button.MaterialButton;
-
+import io.github.abdurazaaqmohammed.domain.files.SharedFileCopy;
 import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
+/** Receives granted content URIs while the sender's temporary permission is alive. */
 public class LocateActivity extends BaseActivity {
-
     private TextView statusView;
+    private final ExecutorService worker = Executors.newSingleThreadExecutor();
+    private Future<?> receiveTask;
 
-    @Override
-    protected void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
+    @Override protected void onCreate(Bundle state) {
+        super.onCreate(state);
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         int pad = (int) (16 * getResources().getDisplayMetrics().density + 0.5f);
         root.setPadding(pad, pad, pad, pad);
         statusView = new TextView(this);
         statusView.setTextSize(15);
-        statusView.setText(getString(R.string.locate_resolving));
-        root.addView(statusView, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        MaterialButton cancelBtn = new MaterialButton(this);
-        cancelBtn.setText(android.R.string.cancel);
-        cancelBtn.setOnClickListener(v -> finish());
-        root.addView(cancelBtn, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        statusView.setText(R.string.locate_resolving);
+        root.addView(statusView, new LinearLayout.LayoutParams(-1, -2));
+        MaterialButton cancel = new MaterialButton(this);
+        cancel.setText(android.R.string.cancel);
+        cancel.setOnClickListener(v -> finish());
+        root.addView(cancel, new LinearLayout.LayoutParams(-1, -2));
         setContentView(root);
-        new Thread(() -> {
-            String path = null;
-            Uri failedUri = null;
-            try {
-                for (Uri uri : collectUris(getIntent())) {
-                    failedUri = uri;
-                    path = resolvePath(uri);
-                    if (path != null && !path.isEmpty()) break;
-                }
-            } catch (Exception e) {
-                Log.e("LocateActivity", "resolve failed", e);
+        receiveTask = worker.submit(() -> receive(getIntent()));
+    }
+
+    private void receive(Intent intent) {
+        List<File> received = new ArrayList<>();
+        List<File> copies = new ArrayList<>();
+        try {
+            List<Uri> uris = collectUris(intent);
+            if (uris.isEmpty()) throw new IOException(getString(R.string.shared_no_file));
+            for (Uri uri : uris) {
+                if (Thread.currentThread().isInterrupted()) throw new IOException("Receiving cancelled.");
+                if ("file".equalsIgnoreCase(uri.getScheme())) {
+                    File file = new File(uri.getPath());
+                    if (!file.isFile() || !file.canRead()) throw new IOException(getString(R.string.shared_read_failed));
+                    received.add(file);
+                } else if ("content".equalsIgnoreCase(uri.getScheme())) {
+                    File file = importContent(uri, intent == null ? null : intent.getType());
+                    copies.add(file);
+                    received.add(file);
+                } else throw new IOException(getString(R.string.shared_read_failed));
             }
-            final String found = path;
-            final Uri last = failedUri;
             runOnUiThread(() -> {
-                if (found != null && !found.isEmpty()) {
-                    openManager(found);
-                } else {
-                    String detail = last == null ? "no file shared"
-                            : ("not a local file: " + last);
-                    statusView.setText(getString(R.string.locate_failed) + "\n" + detail);
+                if (isFinishing() || isDestroyed()) { for (File file : copies) file.delete(); return; }
+                try {
+                    startActivity(new Intent(this, MainActivity.class)
+                            .putExtra("locatePath", received.get(0).getAbsolutePath())
+                            .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP));
+                    finish();
+                } catch (Exception e) {
+                    for (File file : copies) file.delete();
+                    statusView.setText(getString(R.string.locate_failed) + "\n" + getString(R.string.shared_read_failed));
                 }
             });
-        }).start();
+        } catch (Exception e) {
+            for (File file : copies) file.delete();
+            runOnUiThread(() -> {
+                if (!isFinishing() && !isDestroyed()) statusView.setText(getString(R.string.locate_failed)
+                        + "\n" + getString(R.string.shared_read_failed));
+            });
+        } finally { worker.shutdown(); }
     }
 
-    private void openManager(String path) {
-        try {
-            Intent open = new Intent(this, MainActivity.class);
-            open.putExtra("locatePath", path);
-            open.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
-            startActivity(open);
-        } catch (Exception e) {
-            Log.e("LocateActivity", "open manager failed", e);
-            statusView.setText(getString(R.string.locate_failed) + "\n" + e);
-            return;
-        }
-        finish();
-    }
-
-    private ArrayList<Uri> collectUris(Intent intent) {
-        ArrayList<Uri> uris = new ArrayList<>();
-        try {
-            if (intent == null) return uris;
-            String action = intent.getAction();
-            if (Intent.ACTION_SEND.equals(action)) {
-                Uri uri = null;
-                try {
-                    uri = intent.getParcelableExtra(Intent.EXTRA_STREAM);
-                } catch (Exception ignored) {
-                }
-                if (uri == null) uri = intent.getData();
-                if (uri != null) uris.add(uri);
-            } else if (Intent.ACTION_SEND_MULTIPLE.equals(action)) {
-                try {
-                    ArrayList<Uri> multi = intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM);
-                    if (multi != null) uris.addAll(multi);
-                } catch (Exception ignored) {
-                }
-                if (uris.isEmpty() && intent.getData() != null) uris.add(intent.getData());
-            } else if (intent.getData() != null) {
-                uris.add(intent.getData());
-            }
-        } catch (Exception e) {
-            Log.e("LocateActivity", "collect failed", e);
-        }
-        return uris;
-    }
-
-    private String resolvePath(Uri uri) {
-        if (uri == null) return null;
-        try {
-            if ("file".equalsIgnoreCase(uri.getScheme())) {
-                String p = uri.getPath();
-                if (p != null && new File(p).exists()) return p;
-            }
-        } catch (Exception ignored) {
-        }
-        try {
-            if (DocumentsContract.isDocumentUri(this, uri)) {
-                String doc = DocumentsContract.getDocumentId(uri);
-                String authority = uri.getAuthority();
-                if ("com.android.externalstorage.documents".equals(authority) && doc != null) {
-                    int colon = doc.indexOf(':');
-                    String volume = colon < 0 ? "primary" : doc.substring(0, colon);
-                    String rel = colon < 0 ? "" : doc.substring(colon + 1);
-                    File base = "primary".equalsIgnoreCase(volume)
-                            ? Environment.getExternalStorageDirectory()
-                            : new File("/storage/" + volume);
-                    File f = new File(base, rel);
-                    if (f.exists()) return f.getAbsolutePath();
-                } else if ("com.android.providers.downloads.documents".equals(authority)
-                        && doc != null) {
-                    if (doc.startsWith("raw:")) {
-                        String p = doc.substring(4);
-                        if (new File(p).exists()) return p;
-                    } else {
-                        try {
-                            long id = Long.parseLong(doc);
-                            Uri content = ContentUris.withAppendedId(
-                                    Uri.parse("content://downloads/public_downloads"), id);
-                            String p = queryData(content);
-                            if (p != null) return p;
-                        } catch (NumberFormatException ignored) {
-                        }
-                    }
-                } else if ("com.android.providers.media.documents".equals(authority)
-                        && doc != null) {
-                    int colon = doc.indexOf(':');
-                    if (colon > 0) {
-                        String type = doc.substring(0, colon);
-                        String id = doc.substring(colon + 1);
-                        Uri content = null;
-                        if ("image".equals(type)) {
-                            content = MediaStore.Images.Media.EXTERNAL_CONTENT_URI;
-                        } else if ("video".equals(type)) {
-                            content = MediaStore.Video.Media.EXTERNAL_CONTENT_URI;
-                        } else if ("audio".equals(type)) {
-                            content = MediaStore.Audio.Media.EXTERNAL_CONTENT_URI;
-                        } else if ("document".equals(type)
-                                && Build.VERSION.SDK_INT >= 29) {
-                            content = MediaStore.Downloads.EXTERNAL_CONTENT_URI;
-                        }
-                        if (content != null) {
-                            String p = queryData(ContentUris.withAppendedId(content,
-                                    Long.parseLong(id)));
-                            if (p != null) return p;
-                        }
-                    }
-                }
-            }
-        } catch (Exception e) {
-            Log.e("LocateActivity", "document resolve failed", e);
-        }
-        try {
-            String p = queryData(uri);
-            if (p != null) return p;
-        } catch (Exception e) {
-            Log.e("LocateActivity", "media resolve failed", e);
-        }
-        try {
-            String last = uri.getLastPathSegment();
-            if (last != null && new File(last).exists()) return last;
-        } catch (Exception ignored) {
-        }
-        return null;
-    }
-
-    private String queryData(Uri uri) {
-        String[] projection = new String[]{MediaStore.MediaColumns.DATA};
-        try (Cursor cursor = getContentResolver().query(uri, projection, null, null, null)) {
+    private File importContent(Uri uri, String intentMime) throws IOException {
+        String name = null;
+        try (Cursor cursor = getContentResolver().query(uri,
+                new String[]{OpenableColumns.DISPLAY_NAME}, null, null, null)) {
             if (cursor != null && cursor.moveToFirst()) {
-                int idx = cursor.getColumnIndex(MediaStore.MediaColumns.DATA);
-                if (idx >= 0) {
-                    String p = cursor.getString(idx);
-                    if (p != null && !p.isEmpty() && new File(p).exists()) return p;
+                int column = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME);
+                if (column >= 0) name = cursor.getString(column);
+            }
+        } catch (Exception ignored) { }
+        String mime = intentMime;
+        try { String type = getContentResolver().getType(uri); if (type != null) mime = type; }
+        catch (Exception ignored) { }
+        String extension = mime == null ? null : MimeTypeMap.getSingleton().getExtensionFromMimeType(mime);
+        if (name == null || name.trim().isEmpty()) name = uri.getLastPathSegment();
+        File directory = new File(getFilesDir(), "Shared files");
+        long available = getFilesDir().getUsableSpace();
+        long budget = available > 0 ? Math.max(0, available - 16L * 1024 * 1024) : Long.MAX_VALUE;
+        try (InputStream input = getContentResolver().openInputStream(uri)) {
+            return SharedFileCopy.copy(input, directory, SharedFileCopy.safeName(name, extension), budget);
+        } catch (SecurityException e) {
+            throw new IOException(getString(R.string.shared_read_failed), e);
+        }
+    }
+
+    private List<Uri> collectUris(Intent intent) {
+        LinkedHashSet<Uri> uris = new LinkedHashSet<>();
+        if (intent != null) {
+            if (Intent.ACTION_SEND_MULTIPLE.equals(intent.getAction())) {
+                ArrayList<Uri> multiple = intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM);
+                if (multiple != null) for (Uri uri : multiple) if (uri != null) uris.add(uri);
+            } else if (Intent.ACTION_SEND.equals(intent.getAction())) {
+                Uri uri = intent.getParcelableExtra(Intent.EXTRA_STREAM);
+                if (uri != null) uris.add(uri);
+            }
+            if (intent.getData() != null) uris.add(intent.getData());
+            if (intent.getClipData() != null) {
+                for (int i = 0; i < intent.getClipData().getItemCount(); i++) {
+                    Uri uri = intent.getClipData().getItemAt(i).getUri();
+                    if (uri != null) uris.add(uri);
                 }
             }
-        } catch (Exception ignored) {
         }
-        return null;
+        return new ArrayList<>(uris);
+    }
+
+    @Override protected void onDestroy() {
+        if (receiveTask != null) receiveTask.cancel(true);
+        worker.shutdownNow();
+        super.onDestroy();
     }
 }

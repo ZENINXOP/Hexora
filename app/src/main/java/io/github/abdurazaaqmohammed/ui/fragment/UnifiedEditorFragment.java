@@ -180,10 +180,11 @@ public class UnifiedEditorFragment extends Fragment implements SmaliMethodFieldL
     private String syntaxDocumentKey = "";
     private SyntaxFormat detectedSyntax = SyntaxFormat.TEXT;
     private SyntaxFormat appliedSyntax;
-    private boolean lightweightDocument, documentReadOnly;
+    private boolean lightweightDocument, documentReadOnly, manualTextReadOnly;
     private View documentNotice;
     private TextView documentNoticeText;
     private View openHexButton;
+    private boolean binaryTextPresentation;
     private final java.util.Map<String, SyntaxFormat> syntaxOverrides = new java.util.HashMap<>();
 
     public interface EditorCallback {
@@ -197,6 +198,9 @@ public class UnifiedEditorFragment extends Fragment implements SmaliMethodFieldL
         default void onSaveAsPlainRequested() { }
         default void onSaveAsAxmlRequested() { }
         default void onOpenHexRequested() { }
+        default void onCaretChanged(int line, int column) { }
+        default boolean canShowJavaPreview() { return false; }
+        default void onJavaPreviewRequested() { }
     }
     private EditorCallback callback;
 
@@ -233,9 +237,9 @@ public class UnifiedEditorFragment extends Fragment implements SmaliMethodFieldL
     public View onCreateView(@NonNull LayoutInflater inflater, @Nullable ViewGroup container, @Nullable Bundle savedInstanceState) {
         View view = inflater.inflate(R.layout.fragment_unified_editor, container, false);
         initViews(view);
-        if (isSmali) {
+        if (isSmali || type == TYPE_JAVA) {
             EditorColorScheme initialScheme = new EditorColorScheme();
-            applySmaliChrome(initialScheme);
+            applyDexChrome(initialScheme);
             editor.setColorScheme(initialScheme);
         }
         return view;
@@ -434,6 +438,8 @@ public class UnifiedEditorFragment extends Fragment implements SmaliMethodFieldL
                 recordPosition(editor.getCursor().getLeftLine(), editor.getCursor().getLeftColumn());
             }
             if (isSmali) updateSmaliCursorInfo();
+            if (callback != null) callback.onCaretChanged(editor.getCursor().getLeftLine() + 1,
+                    editor.getCursor().getLeftColumn() + 1);
         });
 
         isInitializing = true;
@@ -564,6 +570,7 @@ public class UnifiedEditorFragment extends Fragment implements SmaliMethodFieldL
         editor.setTextSize(SettingsFragment.getFontSize(requireContext()));
         editor.setLineNumberEnabled(SettingsFragment.showLineNumbers(requireContext()));
         editor.setLineSpacing(2.0f, 1.1f);
+        if (type == TYPE_TEXT) editor.setLineSpacing(0f, 1.15f);
         editor.setLineNumberMarginLeft(2f);
         editor.setWordwrap(editorPrefs.getBoolean("wrap_text", false));
         if (loadTypeface) {
@@ -620,7 +627,7 @@ public class UnifiedEditorFragment extends Fragment implements SmaliMethodFieldL
                         TextMateLanguage.create("source.smali", true)));
                 TextMateColorScheme scheme = TextMateColorScheme.create(registry);
                 editor.setColorScheme(scheme);
-                applySmaliChrome(scheme);
+                applyDexChrome(scheme);
             } catch (Exception e) {
                 Log.e("UnifiedEditor", "Error setting smali language", e);
                 editor.setEditorLanguage(new EmptyLanguage());
@@ -664,10 +671,20 @@ public class UnifiedEditorFragment extends Fragment implements SmaliMethodFieldL
 
     public void applyPreferences() {
         SharedPreferences editorPrefs = requireContext().getSharedPreferences("editor_prefs", Context.MODE_PRIVATE);
-        if (!isSmali) {
+        if (type == TYPE_JAVA) {
+            // A converted DEX tab belongs to the same themed workspace as Smali.
+            // The standalone Text editor palette must not replace its appearance.
+            boolean dark = ColorUtils.calculateLuminance(MaterialColors.getColor(
+                    editor, com.google.android.material.R.attr.colorSurface)) < .5;
+            EditorColorScheme scheme = dark ? new SchemeDarcula() : new SchemeEclipse();
+            applyDexChrome(scheme);
+            editor.setColorScheme(scheme);
+        } else if (!isSmali) {
             String colorScheme = editorPrefs.getString("pref_theme", "drac");
             EditorColorScheme ecs = switch (colorScheme) {
-                case "drac" -> new SchemeDarcula();
+                case "drac" -> type == TYPE_TEXT && ColorUtils.calculateLuminance(MaterialColors.getColor(
+                        editor, com.google.android.material.R.attr.colorSurface)) >= .5
+                        ? new SchemeEclipse() : new SchemeDarcula();
                 case "ecl" -> new SchemeEclipse();
                 case "vs" -> new SchemeVS2019();
                 case "gh" -> new SchemeGitHub();
@@ -675,6 +692,7 @@ public class UnifiedEditorFragment extends Fragment implements SmaliMethodFieldL
                 default -> null;
             };
             if (ecs != null) editor.setColorScheme(ecs);
+            if (type == TYPE_TEXT && colorScheme.equals("drac")) applyTextChrome(editor.getColorScheme());
             FormatLanguage.configureColors(editor.getColorScheme());
             applyFileSyntax();
         }
@@ -692,7 +710,7 @@ public class UnifiedEditorFragment extends Fragment implements SmaliMethodFieldL
         // The options-menu toggle stores "wrap_text"; fall back to the legacy
         // "pref_word_wrap" key so either one sticks across onResume/minimize.
         boolean wordWrap = editorPrefs.getBoolean("wrap_text", editorPrefs.getBoolean("pref_word_wrap", false));
-        editor.setWordwrap(wordWrap && !lightweightDocument);
+        editor.setWordwrap(binaryTextPresentation || (wordWrap && !lightweightDocument));
     }
 
     public CodeEditor getEditor() { return editor; }
@@ -726,9 +744,11 @@ public class UnifiedEditorFragment extends Fragment implements SmaliMethodFieldL
         isInitializing = true;
         lightweightDocument = lightweight;
         documentReadOnly = readOnly;
+        manualTextReadOnly = false;
+        binaryTextPresentation = type == TYPE_TEXT && notice == R.string.editor_binary_preview;
         applyFileSyntax();
-        editor.setWordwrap(!lightweight && editorPrefs.getBoolean("wrap_text",
-                editorPrefs.getBoolean("pref_word_wrap", false)));
+        editor.setWordwrap(binaryTextPresentation || notice == R.string.editor_class_preview || (!lightweight && editorPrefs.getBoolean("wrap_text",
+                editorPrefs.getBoolean("pref_word_wrap", false))));
         editor.getComponent(EditorAutoCompletion.class).setEnabled(!lightweight);
         editor.setHighlightBracketPair(!lightweight);
         editor.setHighlightCurrentBlock(!lightweight);
@@ -743,21 +763,24 @@ public class UnifiedEditorFragment extends Fragment implements SmaliMethodFieldL
         isInitializing = false;
         loadingProgress.setVisibility(View.GONE);
         editor.setVisibility(View.VISIBLE);
-        documentNotice.setVisibility(notice == 0 ? View.GONE : View.VISIBLE);
+        documentNotice.setVisibility(notice == 0 || binaryTextPresentation ? View.GONE : View.VISIBLE);
         if (notice != 0) documentNoticeText.setText(notice);
         openHexButton.setVisibility(canOpenHex ? View.VISIBLE : View.GONE);
+        loadBottomBarFunctions();
         if (callback != null) callback.onUndoRedoChanged(editor.canUndo(), editor.canRedo());
     }
 
     public void showDocumentLoading() {
         if (editor == null) return;
         isInitializing = true;
+        binaryTextPresentation = false;
         editor.getSearcher().stopSearch();
         editor.setEditable(false);
         editor.setText("");
         editor.setVisibility(View.INVISIBLE);
         documentNotice.setVisibility(View.GONE);
         loadingProgress.setVisibility(View.VISIBLE);
+        loadBottomBarFunctions();
     }
 
     public void showDocumentLoadFailed() {
@@ -770,6 +793,7 @@ public class UnifiedEditorFragment extends Fragment implements SmaliMethodFieldL
         documentNotice.setVisibility(View.VISIBLE);
         documentNoticeText.setText(R.string.editor_load_failed);
         openHexButton.setVisibility(View.GONE);
+        loadBottomBarFunctions();
     }
 
     public void setAxml(boolean axml) { this.axml = axml; }
@@ -937,7 +961,49 @@ public class UnifiedEditorFragment extends Fragment implements SmaliMethodFieldL
         } catch (Exception e) {
             if (getContext() != null) new ErrorUtil(getActivity()).showError(e);
         }
+        if (type == TYPE_TEXT && bottomBarLayout.getChildCount() == 0) addTextSymbols();
         bottomBarScroll.setVisibility(bottomBarLayout.getChildCount() == 0 ? View.GONE : View.VISIBLE);
+    }
+
+    private void addTextSymbols() {
+        String[] symbols = {"→", "/", "+", "-", "*", "=", "<", ">", "\"", "'", ";", "|"};
+        float density = getResources().getDisplayMetrics().density;
+        // isEditable() is temporarily false while Sora lays out newly attached
+        // text. Shortcut availability must follow document policy, not that transient state.
+        boolean writable = !documentReadOnly && !manualTextReadOnly && !isInitializing;
+        bottomBarLayout.setPadding(0, 0, 0, 0);
+        for (String symbol : symbols) {
+            TextView button = new TextView(requireContext());
+            button.setText(symbol);
+            button.setTextSize(15);
+            button.setGravity(android.view.Gravity.CENTER);
+            button.setTextColor(editor.getColorScheme().getColor(EditorColorScheme.TEXT_NORMAL));
+            button.setLayoutParams(new LinearLayout.LayoutParams((int) (50 * density), (int) (38 * density)));
+            button.setEnabled(writable);
+            button.setAlpha(writable ? 1f : .6f);
+            button.setOnClickListener(v -> {
+                if (!editor.isEditable()) return;
+                String value = symbol.equals("→") ? "\t" : symbol;
+                Cursor cursor = editor.getCursor();
+                int line = cursor.getLeftLine(), column = cursor.getLeftColumn();
+                editor.getText().replace(line, column, cursor.getRightLine(), cursor.getRightColumn(), value);
+                editor.setSelection(line, column + value.length());
+                editor.requestFocus();
+            });
+            bottomBarLayout.addView(button);
+        }
+    }
+
+    public void showDocumentInfo() {
+        if (documentReadOnly) {
+            MaterialAlertDialogBuilder builder = new MaterialAlertDialogBuilder(requireContext()).setTitle(R.string.editor_preview_short)
+                    .setMessage(documentNoticeText.getText())
+                    .setPositiveButton(android.R.string.ok, null);
+            if (openHexButton.getVisibility() == View.VISIBLE) builder.setNeutralButton(R.string.hex_editor, (dialog, which) -> {
+                        if (callback != null) callback.onOpenHexRequested();
+                    });
+            builder.show();
+        } else showStatistics();
     }
 
     private String resolveBottomBarLabel(String label) {
@@ -977,6 +1043,7 @@ public class UnifiedEditorFragment extends Fragment implements SmaliMethodFieldL
         try {
             switch (action) {
                 case "Insert text":
+                    if (!editor.isEditable()) return;
                     String text = obj.optString(data1Key);
                     content.insert(cursor.getLeftLine(), cursor.getLeftColumn(), text);
                     break;
@@ -1179,6 +1246,10 @@ public class UnifiedEditorFragment extends Fragment implements SmaliMethodFieldL
         int smaliOffset = isSmali ? 3 : 0;
         int prefIndex = 10 + smaliOffset;
         int closeIndex = 11 + smaliOffset;
+        if (callback != null && callback.canShowJavaPreview()) {
+            popupMenu.getMenu().add(0, R.id.action_java_preview, 99, R.string.view_as_java)
+                    .setIcon(R.drawable.ic_java_mt);
+        }
         popupMenu.getMenu().add(0, R.id.action_minimize, 100, R.string.hexora_minimize)
                 .setIcon(R.drawable.ic_minimize);
         // A decompiled Java preview must remain read-only.
@@ -1187,7 +1258,9 @@ public class UnifiedEditorFragment extends Fragment implements SmaliMethodFieldL
         if (isSmali) popupMenu.getMenu().findItem(10).setEnabled(Build.VERSION.SDK_INT > 23);
         popupMenu.setOnMenuItemClickListener(item -> {
             int id = item.getItemId();
-            if (id == R.id.action_minimize) {
+            if (id == R.id.action_java_preview) {
+                if (callback != null) callback.onJavaPreviewRequested();
+            } else if (id == R.id.action_minimize) {
                 io.github.abdurazaaqmohammed.ui.EditorMinimizer.minimize(requireActivity());
             } else if (id == 0) { showSubFileMenu(anchor); }
             else if (id == 1) { searchPanel.setVisibility(View.VISIBLE); }
@@ -1211,7 +1284,11 @@ public class UnifiedEditorFragment extends Fragment implements SmaliMethodFieldL
                         .putBoolean("pref_word_wrap", ww)
                         .apply();
             } else if (id == 9) {
-                editor.setEditable(!editor.isEditable());
+                if (type == TYPE_TEXT) {
+                    manualTextReadOnly = !manualTextReadOnly;
+                    editor.setEditable(!manualTextReadOnly);
+                    loadBottomBarFunctions();
+                } else editor.setEditable(!editor.isEditable());
             } else if (isSmali && id == 10) {
                 smali2java();
             } else if (isSmali && id == 11) {
@@ -1631,7 +1708,7 @@ public class UnifiedEditorFragment extends Fragment implements SmaliMethodFieldL
         }
     }
 
-    private void applySmaliChrome(EditorColorScheme scheme) {
+    private void applyDexChrome(EditorColorScheme scheme) {
         int surface = MaterialColors.getColor(editor, com.google.android.material.R.attr.colorSurface);
         int foreground = MaterialColors.getColor(editor, com.google.android.material.R.attr.colorOnSurface);
         int muted = MaterialColors.getColor(editor, com.google.android.material.R.attr.colorOnSurfaceVariant);
@@ -1656,6 +1733,19 @@ public class UnifiedEditorFragment extends Fragment implements SmaliMethodFieldL
         scheme.setColor(EditorColorScheme.COMPLETION_WND_ITEM_CURRENT, currentLine);
         scheme.setColor(EditorColorScheme.TEXT_ACTION_WINDOW_BACKGROUND, surface);
         scheme.setColor(EditorColorScheme.TEXT_ACTION_WINDOW_ICON_COLOR, foreground);
+    }
+
+    private void applyTextChrome(EditorColorScheme scheme) {
+        int surface = MaterialColors.getColor(editor, com.google.android.material.R.attr.colorSurface);
+        boolean dark = ColorUtils.calculateLuminance(surface) < .5;
+        scheme.setColor(EditorColorScheme.WHOLE_BACKGROUND, dark ? 0xff282828 : 0xfffafafa);
+        scheme.setColor(EditorColorScheme.TEXT_NORMAL, dark ? 0xffb0bec9 : 0xff37474f);
+        scheme.setColor(EditorColorScheme.LINE_NUMBER_BACKGROUND, dark ? 0xff343636 : 0xffeeeeee);
+        scheme.setColor(EditorColorScheme.LINE_NUMBER, dark ? 0xff909694 : 0xff8a9295);
+        scheme.setColor(EditorColorScheme.LINE_NUMBER_CURRENT, dark ? 0xffbbc2c5 : 0xff455a64);
+        scheme.setColor(EditorColorScheme.LINE_DIVIDER, dark ? 0xff404444 : 0xffdddddd);
+        scheme.setColor(EditorColorScheme.CURRENT_LINE, dark ? 0xff363636 : 0xffeff3f5);
+        if (bottomBarScroll != null) bottomBarScroll.setBackgroundColor(dark ? 0xff282828 : 0xffeeeeee);
     }
 
     @Override

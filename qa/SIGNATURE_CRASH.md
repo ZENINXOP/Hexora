@@ -1,5 +1,9 @@
 # Xian Esp startup crash investigation — 2026-10-10
 
+> Follow-up: [October 11 runtime checks](RUNTIME_20261011.md) compare the original
+> APK with advanced and experimental outputs on MuMu. The phone diagnosis below
+> is retained as the historical failure record.
+
 AI-assisted contribution: OpenAI Codex. Diagnosis used read-only access to the connected phone and local APK inspection. No build, compilation, packaging, installation or app launch was performed.
 
 ## Observed failure

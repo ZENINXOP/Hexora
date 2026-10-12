@@ -1,5 +1,8 @@
 # Loading UI — 2026-10-10
 
+> Updated runtime evidence: [October 11 build and MuMu checks](RUNTIME_20261011.md).
+> The source-only status below records October 10.
+
 Source-only update, implemented and reviewed with OpenAI Codex. No builds, compilation, packaging, installation or native runtime testing were run.
 
 - Replaced the shared progress dialog's rainbow GIF with a native Material linear indicator, using one theme accent and a neutral track. Removed the unused GIF.

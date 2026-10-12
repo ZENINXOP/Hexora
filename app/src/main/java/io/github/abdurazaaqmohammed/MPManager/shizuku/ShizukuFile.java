@@ -75,7 +75,7 @@ public class ShizukuFile extends File {
             }
             return out.toArray(new ShizukuFile[0]);
         }
-        ShizukuShell.Result r = ShizukuShell.exec("ls -lA " + RootManager.escapeShellArg(path));
+        ShizukuShell.Result r = ShizukuShell.exec("ls -lAL " + RootManager.escapeShellArg(path));
         if (!r.success) return null;
         for (String line : r.stdout.split("\n")) {
             ShizukuFile f = parseLsLine(path, line);
@@ -144,7 +144,8 @@ public class ShizukuFile extends File {
 
     @Override
     public boolean canRead() {
-        return true;
+        // FileInputStream/Files use the app UID, regardless of this wrapper's metadata.
+        return super.canRead();
     }
 
     @Override
@@ -172,10 +173,28 @@ public class ShizukuFile extends File {
     }
 
     @Override
+    public File[] listFiles(java.io.FileFilter filter) {
+        File[] files = listFiles();
+        if (files == null || filter == null) return files;
+        List<File> selected = new ArrayList<>();
+        for (File file : files) if (filter.accept(file)) selected.add(file);
+        return selected.toArray(new File[0]);
+    }
+
+    @Override
+    public File[] listFiles(java.io.FilenameFilter filter) {
+        File[] files = listFiles();
+        if (files == null || filter == null) return files;
+        List<File> selected = new ArrayList<>();
+        for (File file : files) if (filter.accept(this, file.getName())) selected.add(file);
+        return selected.toArray(new File[0]);
+    }
+
+    @Override
     public File getParentFile() {
         String p = getParent();
         if (p == null) return null;
-        if (isAndroidDataPath(p)) return new ShizukuFile(p);
+        if (isAndroidDataPath(p)) return new ShizukuFile(p, true, 0);
         return super.getParentFile();
     }
 
@@ -206,12 +225,24 @@ public class ShizukuFile extends File {
      * Used before opening/sharing files that the app process cannot read directly.
      */
     public File materializeTo(Context context) throws IOException {
+        if (context == null) throw new IOException("No context for Shizuku staging");
         File cacheDir = new File(context.getCacheDir(), "shizuku");
-        File out = new File(cacheDir, getName());
-        if (out.exists()) out.delete();
-        cacheDir.mkdirs();
-        ShizukuShell.Result r = ShizukuShell.exec("cat " + RootManager.escapeShellArg(getAbsolutePath()) + " > " + RootManager.escapeShellArg(out.getAbsolutePath()));
-        if (!r.success) throw new IOException("Shizuku copy failed: " + r.stderr);
+        if (!cacheDir.isDirectory() && !cacheDir.mkdirs()) throw new IOException("Cannot create Shizuku cache");
+        File out = File.createTempFile("read-", "-" + getName(), cacheDir);
+        try (java.io.InputStream input = ShizukuShell.openInputStream(getAbsolutePath());
+             java.io.OutputStream output = new java.io.FileOutputStream(out)) {
+            byte[] buffer = new byte[65536];
+            long total = 0;
+            int count;
+            while ((count = input.read(buffer)) != -1) {
+                total += count;
+                if (total > RootManager.MAX_STAGE_BYTES) throw new IOException("File too large to stage");
+                output.write(buffer, 0, count);
+            }
+        } catch (IOException e) {
+            out.delete();
+            throw e;
+        }
         return out;
     }
 

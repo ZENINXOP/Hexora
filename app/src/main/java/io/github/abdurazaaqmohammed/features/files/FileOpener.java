@@ -18,6 +18,8 @@ import android.view.WindowManager;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.ArrayAdapter;
 import android.widget.CheckBox;
+import android.widget.RadioButton;
+import android.widget.RadioGroup;
 import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -69,6 +71,7 @@ import io.github.abdurazaaqmohammed.adapters.main.ApkToolsHandler;
 import io.github.abdurazaaqmohammed.adapters.main.ChecksumDialogs;
 import io.github.abdurazaaqmohammed.adapters.main.FileOperationsHelper;
 import io.github.abdurazaaqmohammed.domain.files.ZipEntryInfo;
+import io.github.abdurazaaqmohammed.domain.files.FileType;
 import io.github.abdurazaaqmohammed.arsc.ArscEditorPlusActivity;
 import io.github.abdurazaaqmohammed.arsc.ArscEditorActivity;
 import io.github.abdurazaaqmohammed.ui.activities.HexEditorActivity;
@@ -149,18 +152,18 @@ public class FileOpener {
                 R.drawable.ic_open_archive, 0xFF8A563F, () -> {
                     String lowerName = fileName.toLowerCase(Locale.ROOT);
                     boolean zipBased = lowerName.endsWith(".zip") || lowerName.endsWith(".apk")
-                            || lowerName.endsWith(".jar") || lowerName.endsWith(".apks") || lowerName.endsWith(".xapk");
+                            || lowerName.endsWith(".jar") || lowerName.endsWith(".aar") || lowerName.endsWith(".war") || lowerName.endsWith(".apks") || lowerName.endsWith(".xapk");
                     if (!file.isFile() || !zipBased) {
                         Extensions.showMessage(context, R.string.not_supported_archive);
                         return;
                     }
-                    withReadableCopy(file, readable -> context.loadZipFolderInPane(readable, "", pane1, true));
+                    withReadableCopy(file, readable -> context.openArchiveInPane(readable, file, zipFile, zipEntryPath, pane1));
                 }));
         actions.add(new OpenWithDialog.Action(context.getString(R.string.image_viewer),
                 R.drawable.image_24px, 0xFF008C99,
                 () -> withReadableCopy(file, readable -> context.openImageViewer(readable.getAbsolutePath()))));
         actions.add(new OpenWithDialog.Action(context.getString(R.string.hex_editor),
-                R.drawable.ic_open_binary, 0xFF416B7D, () -> openHexEditorRootAware(file)));
+                R.drawable.ic_open_binary, 0xFF416B7D, () -> openHexEditor(file, zipFile, zipEntryPath)));
         actions.add(new OpenWithDialog.Action(context.getString(R.string.open_with_music_player),
                 R.drawable.music_24px, 0xFFD60935,
                 () -> withReadableCopy(file, readable -> context.playMediaFile(readable.getAbsolutePath()))));
@@ -168,13 +171,22 @@ public class FileOpener {
                 R.drawable.video_24px, 0xFFE45B00,
                 () -> withReadableCopy(file, readable -> context.playMediaFile(readable.getAbsolutePath()))));
         String lower = fileName.toLowerCase(Locale.ROOT);
+        if (MergeUtil.isSplitBundle(fileName)) {
+            actions.add(new OpenWithDialog.Action(context.getString(R.string.merge_single_apk),
+                    R.drawable.apk_document_24px, 0xFF15930C,
+                    () -> withReadableCopy(file, readable -> MergeUtil.showAntisplitDialog(readable, context))));
+        }
         if (lower.endsWith(".xml")) {
             actions.add(new OpenWithDialog.Action(context.getString(R.string.xml_functions),
                     R.drawable.ic_open_xml, 0xFF315CBC, () -> showXmlFunctions(file, fileName)));
         }
+        if (lower.endsWith(".class")) {
+            actions.add(new OpenWithDialog.Action(context.getString(R.string.class_viewer),
+                    R.drawable.ic_java_mt, 0xFF855A47, () -> openClassViewer(file, zipFile, zipEntryPath)));
+        }
         if (lower.endsWith(".dex")) {
             actions.add(new OpenWithDialog.Action(context.getString(R.string.open_with_dex_functions),
-                    R.drawable.ic_open_binary, 0xFF008E87,
+                    R.drawable.ic_open_dex, 0xFF008E87,
                     () -> withReadableCopy(file, readable -> fileOps.showDexOptionsDialog(readable, zipFile, zipEntryPath, fileName))));
         }
         if (lower.endsWith(".arsc")) {
@@ -194,7 +206,7 @@ public class FileOpener {
         if (lower.endsWith(".sh")) {
             actions.add(new OpenWithDialog.Action(context.getString(R.string.open_with_script_executor),
                     R.drawable.terminal_24px, 0xFF315CBC,
-                    () -> withReadableCopy(file, readable -> showShellScriptDialog(readable, file, fileName))));
+                    () -> withReadableCopy(file, readable -> showShellScriptDialog(readable, file, fileName, zipFile, zipEntryPath))));
         }
         if (lower.endsWith(".ttf") || lower.endsWith(".otf") || lower.endsWith(".woff") || lower.endsWith(".woff2")) {
             actions.add(new OpenWithDialog.Action(context.getString(R.string.font_preview),
@@ -282,6 +294,10 @@ public class FileOpener {
     }
 
     private void openWithDefaultOrDialog(File file, String fileName) {
+        openWithDefaultOrDialog(file, fileName, null);
+    }
+
+    private void openWithDefaultOrDialog(File file, String fileName, String knownMime) {
         withReadableCopy(file, readable -> {
             Uri uri;
             try {
@@ -290,15 +306,117 @@ public class FileOpener {
                 showOpenWithDialog(readable, fileName);
                 return;
             }
-            String actionMime = MimeUtil.getMimeTypeForAction(context, readable);
+            String actionMime = knownMime != null ? knownMime : MimeUtil.getMimeTypeForAction(context, readable);
             if (actionMime == null) actionMime = "application/octet-stream";
             if (tryLaunchDefaultApp(uri, actionMime)) return;
             String real = MimeUtil.getRealMimeType(readable);
-            if (real != null && !real.equals(actionMime) && tryLaunchDefaultApp(uri, real)) return;
+            if (knownMime == null && real != null && !real.equals(actionMime) && tryLaunchDefaultApp(uri, real)) return;
             String reported = MimeUtil.getReportedMimeType(context, readable);
-            if (reported != null && !reported.equals(actionMime) && (real == null || !reported.equals(real)) && tryLaunchDefaultApp(uri, reported)) return;
-            showOpenWithDialog(readable, fileName);
+            if (knownMime == null && reported != null && !reported.equals(actionMime) && (real == null || !reported.equals(real)) && tryLaunchDefaultApp(uri, reported)) return;
+            // Let Android use an installed preferred viewer without presenting our tool grid.
+            String mime = knownMime != null ? knownMime
+                    : real != null && !"application/octet-stream".equals(real) ? real : actionMime;
+            if (!"application/octet-stream".equals(mime)) {
+                Intent probe = new Intent(Intent.ACTION_VIEW).setDataAndType(uri, mime);
+                PackageManager pm = context.getPackageManager();
+                ResolveInfo preferred = pm.resolveActivity(probe, PackageManager.MATCH_DEFAULT_ONLY);
+                List<ResolveInfo> apps = pm.queryIntentActivities(probe,
+                        PackageManager.MATCH_DEFAULT_ONLY | PackageManager.GET_RESOLVED_FILTER);
+                apps.removeIf(app -> context.getPackageName().equals(app.activityInfo.packageName));
+                apps.sort((a, b) -> String.CASE_INSENSITIVE_ORDER.compare(
+                        String.valueOf(a.loadLabel(pm)), String.valueOf(b.loadLabel(pm))));
+                if (preferred != null && preferred.activityInfo != null) {
+                    for (ResolveInfo app : apps) {
+                        if (app.activityInfo.packageName.equals(preferred.activityInfo.packageName)
+                                && app.activityInfo.name.equals(preferred.activityInfo.name)) {
+                            launchAppForMime(app, uri, mime); return;
+                        }
+                    }
+                }
+                // Generic file managers also register */*. Without a chosen
+                // default, handing a PDF to one just opens another tool chooser.
+                apps.removeIf(app -> !explicitlyHandlesMime(app, mime));
+                if (!apps.isEmpty()) { launchAppForMime(apps.get(0), uri, mime); return; }
+                Extensions.showMessage(context, R.string.no_apps_found);
+            } else showOpenWithDialog(readable, fileName);
         });
+    }
+
+    private static boolean explicitlyHandlesMime(ResolveInfo app, String mime) {
+        if (app.filter == null) return false;
+        java.util.Iterator<String> types = app.filter.typesIterator();
+        if (types != null) while (types.hasNext()) {
+            if (mime.equalsIgnoreCase(types.next())) return true;
+        }
+        return false;
+    }
+
+    /** Shared routing for local files and staged archive entries; manual Open with is separate. */
+    public void openAutomatically(File file, String name, File zip, String entry) {
+        FileType type = FileType.forPath(name);
+        String ext = '.' + FilenameUtils.getExtension(name).toLowerCase(Locale.ROOT);
+        if (MergeUtil.isSplitBundle(name)) {
+            withReadableCopy(file, readable -> showSplitApkMenu(readable, name));
+            return;
+        }
+        if (".sh".equals(ext)) {
+            withReadableCopy(file, readable -> showShellScriptDialog(readable, file, name, zip, entry));
+            return;
+        }
+        if (type != null && type.isText()) { openTextEditor(file, zip, entry); return; }
+        if (".dex".equals(ext)) {
+            withReadableCopy(file, readable -> fileOps.openDexEditor(readable, zip, entry)); return;
+        }
+        if (type == FileType.ARSC) {
+            withReadableCopy(file, readable -> {
+                Intent intent = new Intent(context, ArscEditorPlusActivity.class)
+                        .putExtra("path", readable.getPath()).putExtra("arscMode", ArscEditorPlusActivity.MODE_PLUS)
+                        .putExtra("apkPath", zip == null ? null : zip.getPath()).putExtra("zipEntryPath", entry);
+                if (zip != null) context.startActivityForResult(intent, 757); else context.startActivity(intent);
+            }); return;
+        }
+        if (type == FileType.FONT && (".ttf".equals(ext) || ".otf".equals(ext))) {
+            showFontPreview(file, name); return;
+        }
+        if (type == FileType.PDF || type == FileType.WORD || type == FileType.SHEET
+                || type == FileType.SLIDES || type == FileType.FONT) {
+            openWithDefaultOrDialog(file, name, MimeUtil.getMimeTypeByName(name)); return;
+        }
+        if (type == FileType.LIBRARY) {
+            // Libraries can be viewed as text or bytes; let the user choose each time.
+            showOpenWithDialog(file, name, zip, entry);
+            return;
+        }
+        if (type == FileType.CLASS) { openClassViewer(file, zip, entry); return; }
+        if (type == FileType.BINARY
+                || type == FileType.PYTHON_BYTECODE || type == FileType.DATABASE || type == FileType.DEX) {
+            openHexEditor(file, zip, entry); return;
+        }
+        if (FileUtils.matchExt(ext, FileUtils.IMAGE_EXTS)) {
+            withReadableCopy(file, readable -> context.openImageViewer(readable.getPath())); return;
+        }
+        if (FileUtils.matchExt(ext, FileUtils.AUDIO_EXTS) || FileUtils.matchExt(ext, FileUtils.VIDEO_EXTS)) {
+            withReadableCopy(file, readable -> context.playMediaFile(readable.getPath())); return;
+        }
+        if (".apk".equals(ext)) { withReadableCopy(file, readable -> apkTools.showApkInfoDialog(readable, name)); return; }
+        if (".zip".equals(ext) || ".jar".equals(ext) || ".war".equals(ext) || ".aar".equals(ext)) {
+            withReadableCopy(file, readable -> context.openArchiveInPane(readable, file, zip, entry, pane1)); return;
+        }
+        // A bounded signature sniff also recognizes extensionless or renamed text/image/media.
+        withReadableCopy(file, readable -> new Thread(() -> {
+            String mime = MimeUtil.getRealMimeType(readable);
+            context.handler.post(() -> {
+                if (context.isFinishing() || context.isDestroyed()) return;
+                if ("text/xml".equals(mime)) openCompiledXml(readable, file, zip, entry);
+                else if (mime != null && mime.startsWith("text/")) openTextEditor(file, zip, entry);
+                else if (mime != null && mime.startsWith("image/")) context.openImageViewer(readable.getPath());
+                else if (mime != null && (mime.startsWith("audio/") || mime.startsWith("video/"))) context.playMediaFile(readable.getPath());
+                else if ("application/vnd.android.dex".equals(mime)) fileOps.openDexEditor(readable, zip, entry);
+                else if ("application/x-executable".equals(mime) || "application/x-msdownload".equals(mime)) openHexEditor(file, zip, entry);
+                else if ("application/zip".equals(mime)) context.openArchiveInPane(readable, file, zip, entry, pane1);
+                else openWithDefaultOrDialog(file, name);
+            });
+        }, "hexora-file-type").start());
     }
 
     private void showAppsForMime(File file, String fileName, boolean useActual) {
@@ -458,11 +576,11 @@ public class FileOpener {
                     .setSingleChoiceItems(items, -1, (dialog, which) -> {
                         dialog.dismiss();
                         if (which == 0) {
-                            context.startActivity(rootAwareEditorIntent(readable, file)
+                            startTextEditor(rootAwareEditorIntent(readable, file)
                                     .putExtra("path", readable.getPath()));
                         } else if (isBinary) {
                             try (InputStream is2 = FileUtils.getInputStream(readable)) {
-                                context.startActivity(rootAwareEditorIntent(readable, file)
+                                startTextEditor(rootAwareEditorIntent(readable, file)
                                         .putExtra(Intent.EXTRA_TEXT, new aXMLDecoder(is2).decodeAsString().trim())
                                         .putExtra("axml", true)
                                         .putExtra("path", readable.getPath()));
@@ -515,6 +633,10 @@ public class FileOpener {
     }
 
     private void showShellScriptDialog(File readable, File original, String fileName) {
+        showShellScriptDialog(readable, original, fileName, null, null);
+    }
+
+    private void showShellScriptDialog(File readable, File original, String fileName, File zip, String entry) {
         boolean rootMode = false;
         try {
             rootMode = RootManager.getInstance(context).isRootMode();
@@ -529,129 +651,56 @@ public class FileOpener {
         warning.setText(context.getString(R.string.sh_warning));
         root.addView(warning);
 
-        CheckBox rootBox = null;
+        RadioGroup modes = new RadioGroup(context);
+        RadioButton appMode = new RadioButton(context);
+        appMode.setId(View.generateViewId());
+        appMode.setText(R.string.sh_run_as_app);
+        modes.addView(appMode);
+        RadioButton shizukuMode = new RadioButton(context);
+        shizukuMode.setId(View.generateViewId());
+        shizukuMode.setText(R.string.sh_run_with_shizuku);
+        shizukuMode.setEnabled(io.github.abdurazaaqmohammed.MPManager.shizuku.ShizukuShell.isGranted());
+        modes.addView(shizukuMode);
+        RadioButton rootModeButton = new RadioButton(context);
+        rootModeButton.setId(View.generateViewId());
+        rootModeButton.setText(R.string.sh_run_as_root);
         if (rootMode) {
-            rootBox = new CheckBox(context);
-            rootBox.setText(R.string.sh_run_as_root);
-            root.addView(rootBox);
+            modes.addView(rootModeButton);
         }
-        final CheckBox runAsRootBox = rootBox;
+        modes.check(AccessManager.active(context) == AccessManager.Backend.SHIZUKU && shizukuMode.isEnabled()
+                ? shizukuMode.getId() : appMode.getId());
+        root.addView(modes);
+        EditText arguments = new EditText(context);
+        arguments.setSingleLine(true); arguments.setHint(R.string.sh_arguments);
+        root.addView(io.github.abdurazaaqmohammed.ui.UiFields.wrap(context, arguments, null, 0));
+        EditText timeout = new EditText(context);
+        timeout.setSingleLine(true); timeout.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+        timeout.setHint(R.string.sh_timeout); timeout.setText("120");
+        root.addView(io.github.abdurazaaqmohammed.ui.UiFields.wrap(context, timeout, null, 0));
+        ScrollView settingsScroll = new ScrollView(context); settingsScroll.addView(root);
 
-        dialogUtil.styleAlertDialog(dialogUtil.getDialogBuilder()
+        AlertDialog actionDialog = dialogUtil.getDialogBuilder()
                 .setTitle(context.getString(R.string.sh_select_action) + ": " + fileName)
-                .setView(root)
+                .setView(settingsScroll)
                 .setNegativeButton(android.R.string.cancel, null)
-                .setNeutralButton(R.string.sh_edit, (dialog, which) -> context.startActivity(
-                        rootAwareEditorIntent(readable, original).putExtra("path", readable.getPath())))
-                .setPositiveButton(R.string.sh_execute, (dialog, which) -> executeShellScript(
-                        readable, runAsRootBox != null && runAsRootBox.isChecked()))
-                .create());
-    }
-
-    private void executeShellScript(File script, boolean asRoot) {
-        boolean rootMode = false;
-        try {
-            rootMode = RootManager.getInstance(context).isRootMode();
-        } catch (Exception ignored) {
-        }
-        if (asRoot && !rootMode) {
-            Extensions.showMessage(context, R.string.sh_root_unavailable);
-            return;
-        }
-        ProgressManager pm = new ProgressManager(context, true);
-        pm.show();
-        try {
-            pm.setText(context.getString(R.string.sh_executing));
-        } catch (Exception ignored) {
-        }
-        new Thread(() -> {
-            int exitCode = -1;
-            String out = "";
-            String err = "";
+                .setNeutralButton(R.string.sh_edit, (dialog, which) -> {
+                    Intent intent = rootAwareEditorIntent(readable, original).putExtra("path", readable.getPath());
+                    if (zip != null) intent.putExtra("zf", zip.getPath()).putExtra("zipEntryPath", entry);
+                    startTextEditor(intent);
+                })
+                .setPositiveButton(R.string.sh_execute, null).create();
+        actionDialog.setOnShowListener(d -> actionDialog.getButton(-1).setOnClickListener(v -> {
             try {
-                if (asRoot) {
-                    RootManager.ShellResult r = RootManager.getInstance(context).execute(
-                            "sh " + RootManager.escapeShellArg(script.getAbsolutePath()), 120);
-                    exitCode = r.exitCode();
-                    out = r.output();
-                    err = r.error();
-                } else {
-                    Process process = new ProcessBuilder("sh", script.getAbsolutePath()).start();
-                    StringBuilder outSb = new StringBuilder();
-                    StringBuilder errSb = new StringBuilder();
-                    Thread drainOut = new Thread(() -> {
-                        try (BufferedReader br = new BufferedReader(
-                                new InputStreamReader(process.getInputStream()))) {
-                            String line;
-                            while ((line = br.readLine()) != null) {
-                                if (outSb.length() > 0) outSb.append('\n');
-                                outSb.append(line);
-                            }
-                        } catch (Exception ignored) {
-                        }
-                    });
-                    Thread drainErr = new Thread(() -> {
-                        try (BufferedReader br = new BufferedReader(
-                                new InputStreamReader(process.getErrorStream()))) {
-                            String line;
-                            while ((line = br.readLine()) != null) {
-                                if (errSb.length() > 0) errSb.append('\n');
-                                errSb.append(line);
-                            }
-                        } catch (Exception ignored) {
-                        }
-                    });
-                    drainOut.start();
-                    drainErr.start();
-                    boolean finished = process.waitFor(120, TimeUnit.SECONDS);
-                    if (!finished) {
-                        process.destroyForcibly();
-                        errSb.append("Command timed out");
-                    } else {
-                        exitCode = process.exitValue();
-                    }
-                    try {
-                        drainOut.join(2000);
-                        drainErr.join(2000);
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                    }
-                    out = outSb.toString();
-                    err = errSb.toString();
-                }
-            } catch (Exception e) {
-                err = String.valueOf(e.getMessage());
-            }
-            pm.dismiss();
-            final int code = exitCode;
-            final String stdout = out;
-            final String stderr = err;
-            context.handler.post(() -> showShellOutputDialog(code, stdout, stderr));
-        }).start();
-    }
-
-    private void showShellOutputDialog(int exitCode, String stdout, String stderr) {
-        StringBuilder sb = new StringBuilder();
-        sb.append(context.getString(R.string.sh_exit_code, exitCode)).append("\n\n");
-        if (stderr != null && !stderr.isEmpty()) {
-            sb.append("STDERR:\n").append(stderr).append("\n\n");
-        }
-        sb.append("STDOUT:\n");
-        sb.append((stdout == null || stdout.isEmpty())
-                ? context.getString(R.string.sh_no_output) : stdout);
-        TextView tv = new TextView(context);
-        tv.setText(sb.toString());
-        tv.setTextIsSelectable(true);
-        tv.setTypeface(Typeface.MONOSPACE);
-        int pad = (int) (16 * context.getResources().getDisplayMetrics().density + 0.5f);
-        tv.setPadding(pad, pad / 2, pad, pad / 2);
-        ScrollView sv = new ScrollView(context);
-        sv.addView(tv);
-        dialogUtil.styleAlertDialog(dialogUtil.getDialogBuilder()
-                .setTitle(R.string.sh_output)
-                .setView(sv)
-                .setPositiveButton(android.R.string.ok, null)
-                .create());
+                List<String> values=io.github.abdurazaaqmohammed.domain.files.ShellWords.parse(arguments.getText().toString());
+                long seconds=Long.parseLong(timeout.getText().toString());
+                if (seconds<0 || seconds>86400) { timeout.setError("Use 0 to 86400 seconds."); return; }
+                actionDialog.dismiss();
+                io.github.abdurazaaqmohammed.utils.ScriptConsole.show(context, readable, original,
+                        modes.getCheckedRadioButtonId()==rootModeButton.getId(),
+                        modes.getCheckedRadioButtonId()==shizukuMode.getId(), values, seconds);
+            } catch (Exception e) { arguments.setError(e.getMessage()); }
+        }));
+        dialogUtil.styleAlertDialog(actionDialog);
     }
 
     private void importSignature(File file, String fileName) {
@@ -682,20 +731,19 @@ public class FileOpener {
 
     public void handleFileClick(File file, String fileName) {
         String ext = '.' + FilenameUtils.getExtension(fileName).toLowerCase(java.util.Locale.ROOT);
-        if (FileUtils.matchExt(ext, FileUtils.TEXT_EXTS) && !".xml".equals(ext)) {
+        if (MergeUtil.isSplitBundle(fileName)) {
+            withReadableCopy(file, readable -> showSplitApkMenu(readable, fileName));
+        } else if (".sh".equals(ext)) {
+            withReadableCopy(file, readable -> showShellScriptDialog(readable, file, fileName));
+        } else if (FileUtils.matchExt(ext, FileUtils.TEXT_EXTS) && !".xml".equals(ext)) {
             openTextEditorRootAware(file);
         } else if(HashUtil.isChecksumFile(fileName)) {
             withReadableCopy(file, checksumDialogs::showHashVerifyDialog);
         } else if(".xml".equals(ext)) {
             withReadableCopy(file, readable -> {
                 try (InputStream is = FileUtils.getInputStream(readable)) {
-                    if (FileUtils.isAxml(is)) try (InputStream is2 = FileUtils.getInputStream(readable)) {
-                        context.startActivity(rootAwareEditorIntent(readable, file)
-                                .putExtra(Intent.EXTRA_TEXT, new aXMLDecoder(is2).decodeAsString().trim())
-                                .putExtra("axml", true)
-                                .putExtra("path", readable.getPath()));
-                    }
-                    else context.startActivity(rootAwareEditorIntent(readable, file)
+                    if (FileUtils.isAxml(is)) openCompiledXml(readable, file, null, null);
+                    else startTextEditor(rootAwareEditorIntent(readable, file)
                             .putExtra("path", readable.getPath()));
                 } catch (Exception e) {
                     new ErrorUtil(context).showError(e);
@@ -733,25 +781,16 @@ public class FileOpener {
                     } catch (IOException e) { new ErrorUtil(context).showError(e); }
                 })
                 .setNegativeButton(android.R.string.cancel, null).show();
-            } else if (fileName.endsWith(".zip")) {
-                withReadableCopy(file, readable -> context.loadZipFolderInPane(readable, "", pane1, true));
-            } else if (fileName.endsWith(".arsc")) {
-                withReadableCopy(file, readable -> showArscOpenWith(readable, null, "resources.arsc"));
+            } else if (ext.equals(".zip") || ext.equals(".jar") || ext.equals(".war") || ext.equals(".aar")) {
+                withReadableCopy(file, readable -> context.openArchiveInPane(readable, file, null, null, pane1));
+            } else if (ext.equals(".arsc")) {
+                openAutomatically(file, fileName, null, null);
             } else if (ArchiveUtil.isSupportedArchive(fileName)) {
-                dialogUtil.styleAlertDialog(
-                        dialogUtil.getDialogBuilder().setSingleChoiceItems(new CharSequence[] { context.rss.getString(R.string.extract), context.rss.getString(R.string.open_with) }, -1, (dialog, which) -> {
-                            dialog.dismiss();
-                            if (which == 0) withReadableCopy(file, fileOps::extractArchive);
-                            else showOpenWithDialog(file, fileName);
-                        }).create());
-            } else if (fileName.endsWith(".apks") || fileName.endsWith(".xapk") || fileName.endsWith(".aspk") || fileName.endsWith(".apkm")) {
+                withReadableCopy(file, fileOps::extractArchive);
+            } else if (ext.equals(".apks") || ext.equals(".xapk") || ext.equals(".aspk") || ext.equals(".apkm")) {
                 withReadableCopy(file, readable -> showSplitApkMenu(readable, fileName));
-            } else if (fileName.endsWith(".dex")) {
-                fileOps.showDexOptionsDialog(file, null, null, fileName);
-            } else if (fileName.endsWith(".sh")) {
-                withReadableCopy(file, readable -> showShellScriptDialog(readable, file, fileName));
             } else {
-                openWithDefaultOrDialog(file, fileName);
+                openAutomatically(file, fileName, null, null);
             }
         }
     }
@@ -808,9 +847,47 @@ public class FileOpener {
         }).start();
     }
 
-    public void withReadableCopy(File file, ReadableCallback cb) {
+    public void withReadableCopy(File file, ReadableCallback callback) {
+        ReadableCallback cb = readable -> io.github.abdurazaaqmohammed.utils.ArchiveAccess.withAccess(
+                context, readable, () -> callback.onReady(readable));
         if (file == null) {
             Extensions.showMessage(context, R.string.cannot_open_item);
+            return;
+        }
+        if (file instanceof io.github.abdurazaaqmohammed.MPManager.shizuku.ShizukuFile) {
+            ProgressManager progress = new ProgressManager(context, true)
+                    .setText(context.getString(R.string.reading_with_elevated_access)).show();
+            new Thread(() -> {
+                try {
+                    File staged = ((io.github.abdurazaaqmohammed.MPManager.shizuku.ShizukuFile) file).materializeTo(context);
+                    context.handler.post(() -> {
+                        progress.dismiss();
+                        if (file.getName().toLowerCase(Locale.ROOT).endsWith(".apk")) context.rememberArchiveOrigin(staged, file);
+                        try { cb.onReady(staged); } catch (Exception e) { new ErrorUtil(context).showError(e); }
+                    });
+                } catch (Exception e) {
+                    context.handler.post(() -> { progress.dismiss(); new ErrorUtil(context).showError(e); });
+                }
+            }, "hexora-shizuku-read").start();
+            return;
+        }
+        if (file instanceof io.github.abdurazaaqmohammed.utils.SafAccess.GrantedFile
+                || (!file.canRead() && io.github.abdurazaaqmohammed.utils.SafAccess.resolve(file, false) != null)) {
+            ProgressManager progress = new ProgressManager(context, true).setText(context.getString(R.string.folder_access_reading)).show();
+            new Thread(() -> {
+                try {
+                    File staged = io.github.abdurazaaqmohammed.utils.SafAccess.stage(context, file);
+                    context.handler.post(() -> {
+                        progress.dismiss();
+                        if (file.getName().toLowerCase(Locale.ROOT).endsWith(".apk")) context.rememberArchiveOrigin(staged, file);
+                        try { cb.onReady(staged); }
+                        catch (Exception e) { new ErrorUtil(context).showError(e); }
+                    });
+                } catch (Exception e) {
+                    progress.dismiss();
+                    context.handler.post(() -> new ErrorUtil(context).showError(e));
+                }
+            }, "hexora-folder-read").start();
             return;
         }
         try {
@@ -831,6 +908,7 @@ public class FileOpener {
             try {
                 File staged = RootStaging.stageForRead(context, file.getAbsolutePath());
                 context.handler.post(() -> {
+                    if (file.getName().toLowerCase(Locale.ROOT).endsWith(".apk")) context.rememberArchiveOrigin(staged, file);
                     try {
                         cb.onReady(staged);
                     } catch (Exception e) {
@@ -843,20 +921,36 @@ public class FileOpener {
         }).start();
     }
 
+    private void startTextEditor(Intent intent) {
+        // A local or read-only file can resume a minimized session containing
+        // saved archive edits. Always retain a result path to this browser.
+        context.startActivityForResult(intent.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT), 757);
+    }
+
     private Intent rootAwareEditorIntent(File readable, File original) {
         Intent i = new Intent(context, TextEditorActivity.class);
         if (readable != null && original != null
                 && !readable.getAbsolutePath().equals(original.getAbsolutePath())) {
             i.putExtra("rootOriginalPath", original.getAbsolutePath());
-            Extensions.showMessage(context, R.string.opened_with_root);
+            Extensions.showMessage(context, io.github.abdurazaaqmohammed.utils.SafAccess.resolve(original, false) != null
+                    ? R.string.opened_with_folder_access : R.string.opened_with_root);
         }
         return i;
     }
 
     private void openTextEditorRootAware(File file) {
         withReadableCopy(file, readable ->
-                context.startActivity(rootAwareEditorIntent(readable, file)
+                startTextEditor(rootAwareEditorIntent(readable, file)
                         .putExtra("path", readable.getAbsolutePath())));
+    }
+
+    private void openCompiledXml(File readable, File original, File zip, String entry) {
+        // The editor decodes in its document worker and enforces its byte limit.
+        // Do not materialize large XML strings on the file browser's UI thread.
+        Intent intent = rootAwareEditorIntent(readable, original)
+                .putExtra("path", readable.getPath()).putExtra("axml", true);
+        if (zip != null) intent.putExtra("zf", zip.getPath()).putExtra("zipEntryPath", entry);
+        startTextEditor(intent);
     }
 
     /**
@@ -865,26 +959,41 @@ public class FileOpener {
      * editor returns through {@code handleModifiedFileResult} and MainActivity can offer to
      * add the edit back to the archive.
      */
+    private void openClassViewer(File file, File zipFile, String entry) {
+        withReadableCopy(file, readable -> {
+            Intent intent = new Intent(context, TextEditorActivity.class)
+                    .putExtra("path", readable.getPath()).putExtra("jvmClass", true);
+            if (zipFile != null) intent.putExtra("zf", zipFile.getPath()).putExtra("zipEntryPath", entry);
+            startTextEditor(intent);
+        });
+    }
+
     private void openTextEditor(File file, File zipFile, String zipEntryPath) {
         if (zipFile != null && zipEntryPath != null && !zipEntryPath.isEmpty()) {
-            context.startActivityForResult(new Intent(context, TextEditorActivity.class)
+            startTextEditor(new Intent(context, TextEditorActivity.class)
                     .putExtra("zf", zipFile.getPath())
                     .putExtra("zipEntryPath", zipEntryPath)
-                    .putExtra("path", file.getAbsolutePath()), 757);
+                    .putExtra("path", file.getAbsolutePath()));
             return;
         }
         openTextEditorRootAware(file);
     }
 
     private void openHexEditorRootAware(File file) {
+        openHexEditor(file, null, null);
+    }
+
+    private void openHexEditor(File file, File zip, String entry) {
         withReadableCopy(file, readable -> {
             Intent i = new Intent(context, HexEditorActivity.class)
                     .putExtra("path", readable.getAbsolutePath());
+            if (zip != null) i.putExtra("zipFilePath", zip.getPath()).putExtra("zipEntryPath", entry);
             if (!readable.getAbsolutePath().equals(file.getAbsolutePath())) {
                 i.putExtra("rootOriginalPath", file.getAbsolutePath());
-                Extensions.showMessage(context, R.string.opened_with_root);
+                Extensions.showMessage(context, io.github.abdurazaaqmohammed.utils.SafAccess.resolve(file, false) != null
+                        ? R.string.opened_with_folder_access : R.string.opened_with_root);
             }
-            context.startActivity(i);
+            if (zip != null) context.startActivityForResult(i, 757); else context.startActivity(i);
         });
     }
 
@@ -932,7 +1041,7 @@ public class FileOpener {
     }
 
     private void showSplitApkMenu(File readable, String displayName) {
-        String[] items = new String[] { context.rss.getString(R.string.install), context.rss.getString(R.string.view), context.rss.getString(R.string.sign), context.rss.getString(R.string.antisplit_merge_to_apk) };
+        String[] items = new String[] { context.rss.getString(R.string.install), context.rss.getString(R.string.view), context.rss.getString(R.string.sign), context.rss.getString(R.string.merge_single_apk) };
         dialogUtil.styleAlertDialog(
                 dialogUtil.getDialogBuilder().setSingleChoiceItems(items, -1, (dialog, which) -> {
                     dialog.dismiss();

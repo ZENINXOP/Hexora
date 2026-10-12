@@ -5,15 +5,19 @@ plugins {
 android {
     compileSdk 36
     lint {
-        baseline = file("lint.xml")
+        baseline = file("lint-baseline.xml")
+        // GitHub sideload releases intentionally retain the owner's SDK 28 choice.
+        disable 'ExpiredTargetSdkVersion'
     }
     defaultConfig {
-        applicationId "app.hexora.manager"
+        applicationId "com.hexora.zenin"
         minSdk 19
-        targetSdk 37
+        // Match MT Manager's sideloaded legacy-storage compatibility mode.
+        // Compile against current APIs while retaining system folder grants.
+        targetSdk 28
         multiDexEnabled true
-        versionCode 12
-        versionName "0.1.1"
+        versionCode 13
+        versionName "0.1.2"
         // Set to the Hexora owner/repository once its releases are published.
         buildConfigField "String", "UPDATE_REPOSITORY", '""'
     }
@@ -67,7 +71,8 @@ dependencies {
     implementation files('libs/JCommand.jar')
     implementation files('libs/bin-zip.jar')
     implementation files('libs/arsc-parser.jar')
-    implementation files('libs/commons-compress-1.21.jar')
+    // 1.21 overreads ZIP extras above 8 KiB, breaking 16 KiB-aligned APKs.
+    implementation 'org.apache.commons:commons-compress:1.28.0'
     implementation files('libs/xz-1.9.jar')
     implementation files('libs/junrar-7.5.5.jar')
     implementation("com.google.android.material:material:1.12.0")
@@ -80,6 +85,8 @@ dependencies {
     implementation 'io.github.skylot:jadx-core:1.4.7'
     implementation 'io.github.skylot:jadx-plugins-api:1.4.7'
     implementation 'io.github.skylot:jadx-dex-input:1.4.7'
+    implementation 'io.github.skylot:jadx-java-input:1.4.7'
+    implementation 'org.ow2.asm:asm-util:9.7.1'
     implementation 'org.slf4j:slf4j-android:1.7.36'
     implementation "androidx.preference:preference:1.2.1"
     implementation "androidx.collection:collection:1.6.0"

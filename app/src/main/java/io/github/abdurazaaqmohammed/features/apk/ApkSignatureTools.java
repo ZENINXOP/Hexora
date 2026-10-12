@@ -15,6 +15,7 @@ import io.github.abdurazaaqmohammed.utils.CertUtil;
 import io.github.abdurazaaqmohammed.utils.CopyUtil;
 import io.github.abdurazaaqmohammed.utils.DialogUtil;
 import io.github.abdurazaaqmohammed.utils.ErrorUtil;
+import io.github.abdurazaaqmohammed.utils.InstallUtil;
 import io.github.abdurazaaqmohammed.utils.ProgressManager;
 import io.github.abdurazaaqmohammed.utils.SignWrapper;
 import io.github.abdurazaaqmohammed.utils.SignatureKeyDialog;
@@ -154,8 +155,10 @@ public class ApkSignatureTools {
                                                 .setTitle(R.string.sigkill_saved)
                                                 .setMessage(message)
                                                 .setNegativeButton(android.R.string.ok, null)
-                                                .setPositiveButton(R.string.open_location, (d, w) ->
+                                                .setNeutralButton(R.string.open_location, (d, w) ->
                                                         context.loadFolderInPane(output.getParentFile(), pane1, false))
+                                                .setPositiveButton(R.string.install, (d, w) ->
+                                                        InstallUtil.installApkWithDialog(context, output))
                                                 .show();
                                     });
                                 } catch (Exception error) {

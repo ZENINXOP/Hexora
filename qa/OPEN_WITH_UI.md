@@ -1,5 +1,8 @@
 # Open with and file icon update — 2026-10-10
 
+> Updated runtime evidence: [October 11 build and MuMu checks](RUNTIME_20261011.md).
+> The source-only status below records October 10.
+
 Status: source changes only. No Gradle builds, Java compilation, packaging, installation, or Android runtime tests were run for this update, per the user's instruction.
 
 The supplied MT Manager screenshots establish the reference: white symbols in colored rounded tiles, captions beneath, three columns, Search/Info in the header, and a Type popup above the footer. The new chooser follows that visual structure while keeping Hexora's light/dark theme colors and supported handlers. It does not add unavailable MT-specific tools.
@@ -43,3 +46,33 @@ cannot overwrite a PDF icon after scrolling.
 
 Java syntax parsing and whitespace checks passed for this source-only change.
 No build, compilation, packaging or device UI verification was performed.
+
+## October 11 direct-opening follow-up
+
+Normal taps now open recognized files directly. DEX opens the class browser,
+ARSC opens Editor Plus, source/script/SVG files open Text editor, compiled
+bytecode/databases open Hex editor, and TTF/OTF open Font preview. Libraries show
+the Open with chooser on every tap, including archive entries.
+Recognized images/media use their viewers; ZIP/JAR/WAR open the archive browser.
+Unknown names receive a bounded background MIME check. Manual Open with keeps
+the chooser and advanced tools; scripts execute only from the explicit executor.
+External formats use the saved/default installed viewer, otherwise an installed
+matching viewer. PDF/Office/WOFF require a compatible installed app; the no-apps
+message applies when none exists. Original certificates and file bytes are not
+altered by choosing a viewer.
+
+Own vector icons distinguish DEX bytecode, JVM classes, Python bytecode, native
+libraries, ARSC resource stacks and databases. Real APK icons, image thumbnails
+and the red PDF document mark are retained. No MT Manager assets were extracted.
+Current build and MuMu outcomes: [runtime report](RUNTIME_20261011.md).
+
+Following the owner's correction, `.lib`/`.so` files ask whether to open in Text
+editor, Hex editor or another tool. Text editor displays decoded text with
+readable strings and line breaks; it does not generate hexadecimal rows. Binary
+contents stay bounded and read-only. Following comparison with the installed MT
+editor, binary control bytes are hidden and undecodable bytes retain replacement
+characters. The wrapped preview uses a compact filename/encoding row, gutter and
+symbol strip; tapping its Preview status explains the limit and offers Hex editor
+for eligible direct files. Readable text libraries remain editable and retain their
+UTF-8/UTF-16 encoding. Archive titles use the actual entry name. Office container MIME comes
+from its known filename type, so DOCX's ZIP header cannot route to an archive app.

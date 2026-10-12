@@ -18,6 +18,8 @@ public final class FileMenuOrder {
 
     public static final String COPY = "copy";
     public static final String MOVE = "move";
+    public static final String CLIP_COPY = "clipboard_copy";
+    public static final String CLIP_CUT = "clipboard_cut";
     public static final String RENAME = "rename";
     public static final String DELETE = "delete";
     public static final String COMPRESS = "compress";
@@ -30,6 +32,7 @@ public final class FileMenuOrder {
     public static final String BATCH_SIGN = "batch_sign";
     public static final String BATCH_OPT = "batch_opt";
     public static final String BATCH_INSTALL = "batch_install";
+    public static final String MERGE_SPLITS = "merge_splits";
     public static final String EXTRACT = "extract";
     public static final String CMP_ZIP = "cmp_zip";
     public static final String CMP_ARSC = "cmp_arsc";
@@ -42,8 +45,8 @@ public final class FileMenuOrder {
     public static final String BATCH_STRIP_META = "batch_strip_meta";
 
     public static final String[] DEFAULT_ORDER = {
-            COPY, MOVE, RENAME, DELETE, COMPRESS, PROPERTIES, SHARE, OPEN_WITH,
-            BOOKMARK, CMD, CHECK, EXTRACT, BATCH_SIGN, BATCH_OPT, BATCH_INSTALL,
+            COPY, MOVE, CLIP_COPY, CLIP_CUT, RENAME, DELETE, COMPRESS, PROPERTIES, SHARE, OPEN_WITH,
+            BOOKMARK, CMD, CHECK, EXTRACT, MERGE_SPLITS, BATCH_SIGN, BATCH_OPT, BATCH_INSTALL,
             CMP_ZIP, CMP_ARSC, CMP_TEXT, CMP_HASH, CMP_APK, CMP_DEX,
             BATCH_CROP, BATCH_EXIF, BATCH_STRIP_META
     };
@@ -131,6 +134,8 @@ public final class FileMenuOrder {
         return switch (id) {
             case COPY -> context.getString(android.R.string.copy) + ' ' + direction;
             case MOVE -> context.getString(R.string.move) + ' ' + direction;
+            case CLIP_COPY -> context.getString(R.string.clipboard_copy);
+            case CLIP_CUT -> context.getString(android.R.string.cut);
             case RENAME -> context.getString(R.string.rename);
             case DELETE -> context.getString(R.string.delete);
             case COMPRESS -> context.getString(R.string.compress);
@@ -143,6 +148,7 @@ public final class FileMenuOrder {
             case BATCH_SIGN -> context.getString(R.string.batch_sign);
             case BATCH_OPT -> context.getString(R.string.batch_optimize);
             case BATCH_INSTALL -> context.getString(R.string.batch_install);
+            case MERGE_SPLITS -> context.getString(R.string.merge_single_apk);
             case EXTRACT -> context.getString(R.string.extract);
             case CMP_ZIP -> context.getString(R.string.compare_zip);
             case CMP_ARSC -> context.getString(R.string.compare_arsc);
@@ -175,6 +181,8 @@ public final class FileMenuOrder {
         return switch (id) {
             case COPY -> R.drawable.baseline_content_copy_24;
             case MOVE -> R.drawable.baseline_content_cut_24;
+            case CLIP_COPY -> R.drawable.baseline_content_copy_24;
+            case CLIP_CUT -> R.drawable.baseline_content_cut_24;
             case RENAME -> R.drawable.baseline_drive_file_rename_outline_24;
             case DELETE -> R.drawable.baseline_delete_24;
             case COMPRESS -> R.drawable.archive_24px;
@@ -184,7 +192,7 @@ public final class FileMenuOrder {
             case BOOKMARK -> R.drawable.baseline_bookmark_24;
             case CMD -> R.drawable.terminal_24px;
             case CHECK -> R.drawable.tag_24px;
-            case BATCH_SIGN, BATCH_OPT, BATCH_INSTALL -> R.drawable.apk_document_24px;
+            case BATCH_SIGN, BATCH_OPT, BATCH_INSTALL, MERGE_SPLITS -> R.drawable.apk_document_24px;
             case EXTRACT -> R.drawable.inventory_2_24px;
             case CMP_ZIP, CMP_ARSC -> R.drawable.baseline_swap_horiz_24;
             case CMP_TEXT, CMP_HASH, CMP_APK, CMP_DEX -> R.drawable.baseline_swap_horiz_24;

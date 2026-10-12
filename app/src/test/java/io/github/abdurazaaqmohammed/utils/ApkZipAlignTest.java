@@ -90,6 +90,84 @@ public class ApkZipAlignTest {
 
     // ---------- helpers ----------
 
+    @Test
+    public void legacyLocalZeroPaddingDoesNotCorruptCentralMetadata() throws Exception {
+        assertLegacyPaddingRebuild(false);
+    }
+
+    @Test
+    public void preservesMetadataBeforeLegacyLocalZeroPadding() throws Exception {
+        assertLegacyPaddingRebuild(true);
+    }
+
+    private void assertLegacyPaddingRebuild(boolean withMetadata) throws Exception {
+        Map<String, byte[]> payloads = new LinkedHashMap<>();
+        payloads.put("AndroidManifest.xml", bytes(100, 1));
+        payloads.put("resources.arsc", bytes(1000, 2));
+        payloads.put("classes.dex", bytes(5000, 3));
+        File apk = writeTestApk(payloads, false);
+        byte[] metadata = withMetadata ? new byte[]{(byte)0xfe, (byte)0xca, 3, 0, 11, 12, 13} : new byte[0];
+        insertLegacyLocalPadding(apk, metadata);
+        assertNotNull(ApkZipAlignUtil.installIssue(apk));
+        assertTrue(ApkZipAlignUtil.ensureInstallable(apk));
+        assertNull(ApkZipAlignUtil.installIssue(apk));
+        assertPayloads(apk, payloads);
+        assertLocalNamesMatchCentralDirectory(apk);
+        try (ZipFile zip = new ZipFile(apk); RandomAccessFile input = new RandomAccessFile(apk, "r")) {
+            byte[] central = zip.getEntry("resources.arsc").getExtra();
+            assertValidExtraRecords(central);
+            for (int i=0; i<metadata.length; i++) assertEquals(metadata[i], central[i]);
+            long offset = localOffsetOf(input, apk, "resources.arsc");
+            input.seek(offset + 26); int nameLength=input.readUnsignedByte() | input.readUnsignedByte()<<8;
+            int extraLength=input.readUnsignedByte() | input.readUnsignedByte()<<8;
+            input.seek(offset+30+nameLength); byte[] local=new byte[extraLength]; input.readFully(local);
+            assertValidExtraRecords(local);
+        } finally { apk.delete(); }
+    }
+
+    /** Own fixture with a valid central directory and legacy local-only padding. */
+    private static void insertLegacyLocalPadding(File apk, byte[] metadata) throws Exception {
+        byte[] original;
+        long resourceOffset;
+        try (RandomAccessFile input = new RandomAccessFile(apk, "r")) {
+            resourceOffset=localOffsetOf(input, apk, "resources.arsc");
+            original=new byte[(int)input.length()]; input.seek(0); input.readFully(original);
+        }
+        int insertion=(int)resourceOffset+30+u16(original,(int)resourceOffset+26);
+        int extraLength=metadata.length+1;
+        byte[] changed=new byte[original.length+extraLength];
+        System.arraycopy(original,0,changed,0,insertion);
+        System.arraycopy(metadata,0,changed,insertion,metadata.length);
+        System.arraycopy(original,insertion,changed,insertion+extraLength,original.length-insertion);
+        put16(changed,(int)resourceOffset+28,extraLength);
+        int end=changed.length-22; int central=(int)u32(changed,end+16)+extraLength;
+        put32(changed,end+16,central);
+        int count=u16(changed,end+10), position=central;
+        for (int i=0;i<count;i++) {
+            long local=u32(changed,position+42);
+            if (local>=insertion) put32(changed,position+42,local+extraLength);
+            position+=46+u16(changed,position+28)+u16(changed,position+30)+u16(changed,position+32);
+        }
+        try (FileOutputStream output=new FileOutputStream(apk)) { output.write(changed); }
+    }
+
+    private static void assertValidExtraRecords(byte[] extra) {
+        if (extra==null) return;
+        int pos=0;
+        while (pos<extra.length) {
+            assertTrue("Incomplete extra header",pos+4<=extra.length);
+            pos+=4+u16(extra,pos+2);
+            assertTrue("Extra field exceeds available bytes",pos<=extra.length);
+        }
+    }
+
+    private static void put16(byte[] bytes, int offset, int value) {
+        bytes[offset]=(byte)value; bytes[offset+1]=(byte)(value>>8);
+    }
+    private static void put32(byte[] bytes, int offset, long value) {
+        for (int i=0;i<4;i++) bytes[offset+i]=(byte)(value>>(8*i));
+    }
+
     private static byte[] bytes(int len, int seed) {
         byte[] b = new byte[len];
         for (int i = 0; i < len; i++) b[i] = (byte) ((seed * 31 + i * 7) & 0xFF);

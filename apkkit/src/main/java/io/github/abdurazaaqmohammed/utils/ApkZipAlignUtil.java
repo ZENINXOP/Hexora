@@ -475,20 +475,35 @@ public final class ApkZipAlignUtil {
     }
 
     private static byte[] stripAlignBlocks(byte[] extra) {
-        if (extra == null || extra.length < 4) return extra == null ? new byte[0] : extra;
+        if (extra == null) return new byte[0];
         try {
             ByteArrayOutputStream bos = new ByteArrayOutputStream(extra.length);
             int pos = 0;
             while (pos + 4 <= extra.length) {
                 int id = readU16(extra, pos);
                 int size = readU16(extra, pos + 2);
-                if (pos + 4 + size > extra.length) return extra; // malformed: keep as is
+                if (pos + 4 + size > extra.length) {
+                    // Older zipalign versions use raw zero padding in local
+                    // headers. It is not a ZIP extra-field record and must not
+                    // precede a new alignment block in the central directory.
+                    int aligned = pos;
+                    while (aligned < extra.length && extra[aligned] == 0) aligned++;
+                    if (aligned > pos && aligned + 4 <= extra.length
+                            && readU16(extra, aligned) == ALIGN_EXTRA_ID
+                            && aligned + 4 + readU16(extra, aligned + 2) <= extra.length) {
+                        pos = aligned;
+                        continue;
+                    }
+                    return extra; // Preserve unrecognized metadata.
+                }
                 if (id != ALIGN_EXTRA_ID) {
                     bos.write(extra, pos, 4 + size);
                 }
                 pos += 4 + size;
             }
-            if (pos != extra.length) return extra; // trailing garbage: keep as is
+            // Local-only zero padding is legal in APKs, but not a structured
+            // central extra field. Keep real records and recompute alignment.
+            for (int i = pos; i < extra.length; i++) if (extra[i] != 0) return extra;
             return bos.toByteArray();
         } catch (Exception ex) {
             return extra;

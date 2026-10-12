@@ -56,10 +56,11 @@ public class FileSearchController {
         if (searchWorker != null) searchWorker.interrupt();
     }
 
-    private void startSearch(Runnable operation) {
+    private Thread startSearch(Runnable operation) {
         cancel();
         searchWorker = new Thread(operation, "hexora-file-search");
         searchWorker.start();
+        return searchWorker;
     }
 
     public FileSearchController(MainActivity activity) {
@@ -163,10 +164,6 @@ public class FileSearchController {
             Extensions.showMessage(activity, R.string.search_ftp_unsupported);
             return;
         }
-        if (adapter.isInZip) {
-            Extensions.showMessage(activity, R.string.search_zip_unsupported);
-            return;
-        }
         if (regex) {
             try {
                 Pattern.compile(query, mCase ? 0 : Pattern.CASE_INSENSITIVE);
@@ -174,6 +171,11 @@ public class FileSearchController {
                 Extensions.showMessage(activity, R.string.invalid_regex);
                 return;
             }
+        }
+
+        if (adapter.isInZip) {
+            runArchiveSearch(adapter,startDir,query,subfolders,mCase,regex,textInside,minSize,maxSize,false);
+            return;
         }
 
         ProgressManager pm = new ProgressManager(activity, true).show();
@@ -214,11 +216,7 @@ public class FileSearchController {
     public void showFindInFilesDialog() {
         boolean isPane1 = activity.lastPaneSelected == 1;
         RecyclerView.Adapter a = activity.getCurrentPane().getAdapter();
-        if (!(a instanceof MainFilesArrayAdapter)) {
-            Extensions.showMessage(activity, R.string.find_needs_folder);
-            return;
-        }
-        if (((MainFilesArrayAdapter) a).isInZip) {
+        if (!(a instanceof MainFilesArrayAdapter adapter)) {
             Extensions.showMessage(activity, R.string.find_needs_folder);
             return;
         }
@@ -237,7 +235,8 @@ public class FileSearchController {
         root.addView(cbCase);
         root.addView(cbRegex);
         TextView scope = new TextView(activity);
-        scope.setText(startDir.getPath());
+        scope.setText(adapter.isInZip ? activity.archiveDisplayPath(startDir)+"!"+adapter.currentZipPath
+                +"\n"+activity.getString(R.string.archive_search_limits) : startDir.getPath());
         scope.setTextSize(12);
         root.addView(scope);
         new MaterialAlertDialogBuilder(activity)
@@ -250,8 +249,79 @@ public class FileSearchController {
                         Extensions.showMessage(activity, R.string.search_query_needed);
                         return;
                     }
-                    runFindInFiles(startDir, q, cbCase.isChecked(), cbRegex.isChecked());
+                    if (adapter.isInZip) runArchiveSearch(adapter,startDir,q,true,cbCase.isChecked(),cbRegex.isChecked(),"",-1,-1,true);
+                    else runFindInFiles(startDir, q, cbCase.isChecked(), cbRegex.isChecked());
                 }).show();
+    }
+
+    private void runArchiveSearch(MainFilesArrayAdapter adapter,File archive,String query,boolean recursive,
+            boolean matchCase,boolean regex,String content,long minSize,long maxSize,boolean findContent) {
+        if (regex) try { Pattern.compile(query,matchCase ? 0 : Pattern.CASE_INSENSITIVE); }
+        catch (Exception e) { Extensions.showMessage(activity,R.string.invalid_regex); return; }
+        boolean pane1=adapter.pane1; String scope=adapter.currentZipPath;
+        int request=activity.beginPaneTask(pane1);
+        java.util.concurrent.atomic.AtomicBoolean cancelled=new java.util.concurrent.atomic.AtomicBoolean();
+        java.util.concurrent.atomic.AtomicReference<Thread> worker=new java.util.concurrent.atomic.AtomicReference<>();
+        ProgressManager progress=new ProgressManager(activity,true).onCancel(() -> {
+            cancelled.set(true); Thread thread=worker.get(); if (thread!=null) thread.interrupt();
+        }).show();
+        progress.setText(activity.getString(R.string.searching));
+        worker.set(startSearch(() -> {
+            try {
+                List<io.github.abdurazaaqmohammed.domain.files.ArchiveSearch.Hit> rows=new ArrayList<>();
+                boolean limited;
+                if (findContent) {
+                    var result=io.github.abdurazaaqmohammed.domain.files.ArchiveSearch.contents(archive,scope,query,matchCase,regex);
+                    rows.addAll(result.hits()); limited=result.limited();
+                } else {
+                    var result=io.github.abdurazaaqmohammed.domain.files.ArchiveSearch.names(archive,scope,query,recursive,matchCase,regex,content,minSize,maxSize);
+                    for (var entry:result.hits()) rows.add(new io.github.abdurazaaqmohammed.domain.files.ArchiveSearch.Hit(entry,0,""));
+                    limited=result.limited();
+                }
+                activity.handler.post(() -> {
+                    if (cancelled.get() || activity.isFinishing() || activity.isDestroyed() || !activity.isPaneTaskCurrent(pane1,request)) return;
+                    if (limited) Extensions.showMessage(activity,R.string.archive_search_limited);
+                    if (rows.isEmpty()) { Extensions.showMessage(activity,R.string.no_files_found); return; }
+                    String[] labels=new String[rows.size()];
+                    for (int i=0;i<labels.length;i++) {
+                        var hit=rows.get(i);
+                        labels[i]=hit.entry().getFullPath()+(hit.line()>0 ? " :"+hit.line()+"\n"+hit.snippet() : "");
+                    }
+                    new MaterialAlertDialogBuilder(activity).setTitle(activity.getString(R.string.matches_x,rows.size()))
+                            .setItems(labels,(d,which) -> {
+                                if (!activity.isPaneTaskCurrent(pane1,request)) return;
+                                var hit=rows.get(which);
+                                if (findContent) openArchiveContent(hit,query,regex,matchCase);
+                                else adapter.openArchiveEntry(hit.entry());
+                            }).setNegativeButton(android.R.string.cancel,null).show();
+                });
+            } catch (java.io.InterruptedIOException ignored) { }
+            catch (Exception e) { activity.handler.post(() -> {
+                if (!cancelled.get() && !activity.isFinishing() && !activity.isDestroyed() && activity.isPaneTaskCurrent(pane1,request))
+                    new io.github.abdurazaaqmohammed.utils.ErrorUtil(activity).showError(e);
+            }); }
+            finally { progress.dismiss(); }
+        }));
+    }
+
+    private void openArchiveContent(io.github.abdurazaaqmohammed.domain.files.ArchiveSearch.Hit hit,
+            String query,boolean regex,boolean matchCase) {
+        ProgressManager progress=new ProgressManager(activity,true).show();
+        new Thread(() -> {
+            File directory=new File(activity.getCacheDir(),"archive-search-"+java.util.UUID.randomUUID());
+            try {
+                if (!directory.mkdirs()) throw new java.io.IOException("Cannot prepare archive entry.");
+                File file=new File(directory,hit.entry().getName());
+                io.github.abdurazaaqmohammed.utils.ZipArchiveCache.get(hit.entry().getZipFile()).copyEntry(hit.entry().getFullPath(),file);
+                activity.handler.post(() -> {
+                    if (activity.isFinishing() || activity.isDestroyed()) return;
+                    activity.startActivityForResult(new Intent(activity,TextEditorActivity.class).putExtra("path",file.getAbsolutePath())
+                            .putExtra("zf",hit.entry().getZipFile().getAbsolutePath()).putExtra("zipEntryPath",hit.entry().getFullPath())
+                            .putExtra("search",query).putExtra("searchRegex",regex).putExtra("searchMatchCase",matchCase),757);
+                });
+            } catch (Exception e) { activity.handler.post(() -> new io.github.abdurazaaqmohammed.utils.ErrorUtil(activity).showError(e)); }
+            finally { progress.dismiss(); }
+        },"hexora-archive-search-open").start();
     }
 
     private void runFindInFiles(File startDir, String query, boolean matchCase, boolean regex) {

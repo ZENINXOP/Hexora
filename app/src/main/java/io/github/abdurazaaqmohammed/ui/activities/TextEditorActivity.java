@@ -14,6 +14,7 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import io.github.abdurazaaqmohammed.core.ui.base.BaseActivity;
 import androidx.appcompat.widget.Toolbar;
+import androidx.appcompat.app.AlertDialog;
 import androidx.core.view.GravityCompat;
 import androidx.drawerlayout.widget.DrawerLayout;
 import androidx.fragment.app.FragmentManager;
@@ -47,6 +48,7 @@ import java.io.InterruptedIOException;
 import io.github.abdurazaaqmohammed.MPManager.R;
 import io.github.abdurazaaqmohammed.ui.fragment.UnifiedEditorFragment;
 import io.github.abdurazaaqmohammed.domain.editor.EditorDocumentReader;
+import io.github.abdurazaaqmohammed.domain.editor.BinaryTextDocument;
 import io.github.rosemoe.sora.text.Content;
 import io.github.abdurazaaqmohammed.utils.ErrorUtil;
 import io.github.abdurazaaqmohammed.utils.AccessManager;
@@ -69,6 +71,8 @@ public class TextEditorActivity extends BaseActivity implements UnifiedEditorFra
         String zipFilePath;
         String zipEntryPath;
         boolean axml;
+        boolean jvmClass;
+        boolean javaPreview;
         boolean savedAxml;
         List<ResEntry> resEntries;
         String resourceTablePath;
@@ -81,6 +85,8 @@ public class TextEditorActivity extends BaseActivity implements UnifiedEditorFra
         boolean loadFailed;
         boolean saving;
         EditorDocumentReader.Mode mode = EditorDocumentReader.Mode.EDIT;
+        volatile BinaryTextDocument binaryDocument;
+        int binaryPage;
         Charset charset = StandardCharsets.UTF_8;
         byte[] bom = new byte[0];
         int loadGeneration;
@@ -96,10 +102,12 @@ public class TextEditorActivity extends BaseActivity implements UnifiedEditorFra
 
     private static class RetainedSession {
         final List<EditorTab> tabs;
+        final ArrayList<Intent> archiveEdits;
         final int currentIndex;
         final boolean minimized;
-        RetainedSession(List<EditorTab> tabs, int currentIndex, boolean minimized) {
+        RetainedSession(List<EditorTab> tabs, int currentIndex, boolean minimized, ArrayList<Intent> archiveEdits) {
             this.tabs = tabs;
+            this.archiveEdits = archiveEdits;
             this.currentIndex = currentIndex;
             this.minimized = minimized;
         }
@@ -125,7 +133,10 @@ public class TextEditorActivity extends BaseActivity implements UnifiedEditorFra
     private final android.os.Handler dirtyHandler = new android.os.Handler(android.os.Looper.getMainLooper());
     private final Runnable checkDirty = this::checkCurrentDocumentDirty;
     private final List<Intent> pendingIntents = new ArrayList<>();
+    private final ArrayList<Intent> savedArchiveEdits = new ArrayList<>();
 
+    private Future<?> javaPreviewTask;
+    private androidx.appcompat.app.AlertDialog javaPreviewDialog;
     private UnifiedEditorFragment editorFragment;
     private EditorTab displayedTab;
     private final ExecutorService documentLoader = Executors.newSingleThreadExecutor(r -> new Thread(r, "hexora-document-load"));
@@ -134,6 +145,10 @@ public class TextEditorActivity extends BaseActivity implements UnifiedEditorFra
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        if (savedInstanceState != null) {
+            ArrayList<Intent> edits = savedInstanceState.getParcelableArrayList("savedArchiveEdits");
+            if (edits != null) for (Intent edit : edits) rememberArchiveEdit(edit);
+        }
         restoreForRecreation = savedInstanceState != null;
         retainSession = getSharedPreferences("text_editor_session_state", MODE_PRIVATE).getBoolean("minimized", false);
         getSharedPreferences("text_editor_session_state", MODE_PRIVATE).edit().putString("owner", sessionId).apply();
@@ -146,6 +161,7 @@ public class TextEditorActivity extends BaseActivity implements UnifiedEditorFra
         if (previous instanceof RetainedSession) {
             RetainedSession retained = (RetainedSession) previous;
             tabs.addAll(retained.tabs);
+            for (Intent edit : retained.archiveEdits) rememberArchiveEdit(edit);
             retainSession = retained.minimized;
             if (!tabs.isEmpty()) selectTab(Math.max(0, Math.min(retained.currentIndex, tabs.size() - 1)));
             handleIntent(getIntent());
@@ -159,7 +175,28 @@ public class TextEditorActivity extends BaseActivity implements UnifiedEditorFra
     public Object onRetainCustomNonConfigurationInstance() {
         EditorTab tab = getCurrentTab();
         if (tab != null) captureTabContent(tab, getFragment());
-        return new RetainedSession(new ArrayList<>(tabs), currentIndex, retainSession);
+        return new RetainedSession(new ArrayList<>(tabs), currentIndex, retainSession, new ArrayList<>(savedArchiveEdits));
+    }
+
+    @Override
+    protected void onSaveInstanceState(@NonNull Bundle state) {
+        state.putParcelableArrayList("savedArchiveEdits", new ArrayList<>(savedArchiveEdits));
+        super.onSaveInstanceState(state);
+    }
+
+    private void rememberArchiveEdit(Intent edit) {
+        String archive = edit.getStringExtra("zipFilePath");
+        String entry = edit.getStringExtra("zipEntryPath");
+        savedArchiveEdits.removeIf(previous -> java.util.Objects.equals(archive, previous.getStringExtra("zipFilePath"))
+                && java.util.Objects.equals(entry, previous.getStringExtra("zipEntryPath")));
+        savedArchiveEdits.add(edit);
+    }
+
+    private void publishArchiveEdits() {
+        if (savedArchiveEdits.isEmpty()) return;
+        Intent result = new Intent(savedArchiveEdits.get(savedArchiveEdits.size() - 1));
+        result.putParcelableArrayListExtra("modifiedArchiveFiles", new ArrayList<>(savedArchiveEdits));
+        setResult(757, result);
     }
 
     @Override
@@ -216,6 +253,10 @@ public class TextEditorActivity extends BaseActivity implements UnifiedEditorFra
                 if (t.zipEntryPath != null && !t.zipEntryPath.isEmpty()) {
                     o.put("zipEntry", t.zipEntryPath);
                 }
+                o.put("jvmClass", t.jvmClass);
+                o.put("javaPreview", t.javaPreview);
+                o.put("binaryPage", t.binaryPage);
+                if (t.javaPreview && t.pendingDecoded != null) o.put("content", t.pendingDecoded);
                 o.put("modified", t.modified);
                 o.put("charset", t.charset.name());
                 o.put("bom", android.util.Base64.encodeToString(t.bom, android.util.Base64.NO_WRAP));
@@ -233,6 +274,15 @@ public class TextEditorActivity extends BaseActivity implements UnifiedEditorFra
             JSONObject root = new JSONObject();
             root.put("tabs", arr);
             root.put("current", savedCurrent);
+            JSONArray edits = new JSONArray();
+            for (Intent edit : savedArchiveEdits) {
+                JSONObject item = new JSONObject();
+                item.put("file", edit.getData().getPath());
+                item.put("archive", edit.getStringExtra("zipFilePath"));
+                item.put("entry", edit.getStringExtra("zipEntryPath"));
+                edits.put(item);
+            }
+            root.put("archiveEdits", edits);
             File file = sessionFile();
             File parent = file.getParentFile();
             if (parent != null && !parent.exists()) parent.mkdirs();
@@ -257,6 +307,7 @@ public class TextEditorActivity extends BaseActivity implements UnifiedEditorFra
         documentLoader.submit(() -> {
             File file = sessionFile();
             List<EditorTab> restored = new ArrayList<>();
+            ArrayList<Intent> restoredEdits = new ArrayList<>();
             int restoredIndex = 0;
             String restoreError = null;
             if ((retainSession || restoreForRecreation) && file.exists()) try (InputStream input = FileUtils.getInputStream(file);
@@ -272,6 +323,13 @@ public class TextEditorActivity extends BaseActivity implements UnifiedEditorFra
                     json.append(buffer, 0, count);
                 }
                 JSONObject root = new JSONObject(json.toString());
+                JSONArray edits = root.optJSONArray("archiveEdits");
+                if (edits != null) for (int i = 0; i < edits.length(); i++) {
+                    JSONObject edit = edits.getJSONObject(i);
+                    restoredEdits.add(new Intent().setData(Uri.fromFile(new File(edit.getString("file"))))
+                            .putExtra("zipFilePath", edit.getString("archive"))
+                            .putExtra("zipEntryPath", edit.optString("entry", null)));
+                }
                 JSONArray arr = root.optJSONArray("tabs");
                 if (arr != null) {
                     for (int i = 0; i < arr.length(); i++) {
@@ -289,14 +347,15 @@ public class TextEditorActivity extends BaseActivity implements UnifiedEditorFra
                         String savedRootOriginal = o.optString("rootOriginal", null);
                         if (savedRootOriginal != null && !savedRootOriginal.isEmpty()) {
                             t.rootOriginalPath = savedRootOriginal;
-                            if (t.title == null || !t.title.endsWith(" (root)")) {
-                                t.title = new File(savedRootOriginal).getName() + " (root)";
-                            }
+                            t.title = originalFileTitle(savedRootOriginal);
                         }
                         String savedZipFile = o.optString("zipFile", null);
                         if (savedZipFile != null && !savedZipFile.isEmpty()) t.zipFilePath = savedZipFile;
                         String savedZipEntry = o.optString("zipEntry", null);
                         if (savedZipEntry != null && !savedZipEntry.isEmpty()) t.zipEntryPath = savedZipEntry;
+                        t.jvmClass = o.optBoolean("jvmClass", false);
+                        t.javaPreview = o.optBoolean("javaPreview", false);
+                        t.binaryPage = Math.max(0, o.optInt("binaryPage", 0));
                         t.modified = o.optBoolean("modified", false);
                         try {
                             t.charset = Charset.forName(o.optString("charset", "UTF-8"));
@@ -306,8 +365,8 @@ public class TextEditorActivity extends BaseActivity implements UnifiedEditorFra
                             t.bom = new byte[0];
                         }
                         if (o.has("content")) {
-                            t.content = o.getString("content");
-                            t.loaded = true;
+                            if (t.javaPreview) t.pendingDecoded = o.getString("content");
+                            else { t.content = o.getString("content"); t.loaded = true; }
                         } else if (t.file == null && t.fileUri == null) {
                             continue; // nothing restorable for this tab
                         }
@@ -317,6 +376,7 @@ public class TextEditorActivity extends BaseActivity implements UnifiedEditorFra
                 }
             } catch (Exception | OutOfMemoryError e) {
                 restored.clear();
+                restoredEdits.clear();
                 // Preserve recovery data instead of repeatedly parsing an oversized/corrupt session.
                 File recovery = new File(getCacheDir(), "text_editor_session.recovery-" + System.currentTimeMillis() + ".json");
                 boolean preserved = file.renameTo(recovery);
@@ -328,6 +388,7 @@ public class TextEditorActivity extends BaseActivity implements UnifiedEditorFra
             runOnUiThread(() -> {
                 if (isFinishing() || isDestroyed()) return;
                 sessionRestoring = false;
+                for (Intent edit : restoredEdits) rememberArchiveEdit(edit);
                 tabs.addAll(restored);
                 sessionRestored = !tabs.isEmpty();
                 if (sessionRestored) {
@@ -344,6 +405,11 @@ public class TextEditorActivity extends BaseActivity implements UnifiedEditorFra
 
     private void initViews() {
         drawerLayout = findViewById(R.id.drawer_layout);
+        findViewById(R.id.btn_minimize).setOnClickListener(v -> EditorMinimizer.minimize(this));
+        findViewById(R.id.editor_file_status).setOnClickListener(v -> {
+            UnifiedEditorFragment f = getFragment();
+            if (f != null) f.showDocumentInfo();
+        });
         findViewById(R.id.action_minimize).setOnClickListener(v -> {
             drawerLayout.closeDrawer(GravityCompat.START);
             EditorMinimizer.minimize(this);
@@ -353,6 +419,9 @@ public class TextEditorActivity extends BaseActivity implements UnifiedEditorFra
         btnSave = findViewById(R.id.btn_save);
         btnEdit = findViewById(R.id.btn_edit);
         btnFile = findViewById(R.id.btn_file);
+        findViewById(R.id.editor_text_previous).setOnClickListener(v -> changeBinaryPage(-1));
+        findViewById(R.id.editor_text_next).setOnClickListener(v -> changeBinaryPage(1));
+        findViewById(R.id.editor_text_page).setOnClickListener(v -> chooseBinaryPage());
 
         tabsRecyclerView = findViewById(R.id.tabs_recycler_view);
         tabsRecyclerView.setLayoutManager(new LinearLayoutManager(this));
@@ -360,6 +429,10 @@ public class TextEditorActivity extends BaseActivity implements UnifiedEditorFra
         tabsRecyclerView.setAdapter(tabAdapter);
 
         Toolbar toolbar = findViewById(R.id.toolbar);
+        int surface = MaterialColors.getColor(toolbar, com.google.android.material.R.attr.colorSurface);
+        boolean dark = androidx.core.graphics.ColorUtils.calculateLuminance(surface) < .5;
+        toolbar.setBackgroundColor(dark ? 0xff151515 : 0xfffafafa);
+        findViewById(R.id.editor_file_info).setBackgroundColor(dark ? 0xff181818 : 0xfff1f1f1);
         toolbar.setNavigationContentDescription(R.string.opened_files);
         toolbar.setNavigationOnClickListener(v -> drawerLayout.openDrawer(GravityCompat.START));
     }
@@ -467,6 +540,8 @@ public class TextEditorActivity extends BaseActivity implements UnifiedEditorFra
 
     private void updateTabsList() {
         if (tabAdapter != null) tabAdapter.notifyDataSetChanged();
+        EditorTab tab = getCurrentTab();
+        if (tab != null) ((TextView) findViewById(R.id.editor_file_name)).setText(getTabLabel(tab));
     }
 
     private String getTabLabel(EditorTab tab) {
@@ -482,8 +557,21 @@ public class TextEditorActivity extends BaseActivity implements UnifiedEditorFra
     private void updateTitleBar() {
         EditorTab t = getCurrentTab();
         Toolbar toolbar = findViewById(R.id.toolbar);
-        toolbar.setSubtitle(t != null ? t.title : null);
+        toolbar.setTitle(null);
+        toolbar.setSubtitle(null);
+        ((TextView) findViewById(R.id.editor_file_name)).setText(t != null ? getTabLabel(t) : "");
+        updateFileStatus(1, 1);
     }
+
+    private void updateFileStatus(int line, int column) {
+        EditorTab tab = getCurrentTab();
+        if (tab == null) return;
+        String value = line + ":" + column + "   " + tab.charset.name();
+        if (tab.isPreview()) value += " · " + getString(R.string.editor_preview_short);
+        ((TextView) findViewById(R.id.editor_file_status)).setText(value);
+    }
+
+    @Override public void onCaretChanged(int line, int column) { updateFileStatus(line, column); }
 
     private void selectTab(int index) {
         if (index < 0 || index >= tabs.size()) return;
@@ -621,6 +709,7 @@ public class TextEditorActivity extends BaseActivity implements UnifiedEditorFra
         tab.file = file;
         tab.fileUri = uri;
         tab.axml = isAxml;
+        tab.jvmClass = intent.getBooleanExtra("jvmClass", false);
         tab.resEntries = entries;
         tab.resourceTablePath = intent.getStringExtra("rssPath");
         String zipFileExtra = intent.getStringExtra("zf");
@@ -638,8 +727,9 @@ public class TextEditorActivity extends BaseActivity implements UnifiedEditorFra
             tab.rootOriginalPath = rootOriginal;
         }
         tab.title = tab.rootOriginalPath != null
-                ? new File(tab.rootOriginalPath).getName() + " (root)"
-                : resolveTitle(file, uri);
+                ? originalFileTitle(tab.rootOriginalPath)
+                : tab.zipEntryPath != null && !tab.zipEntryPath.isEmpty()
+                ? new File(tab.zipEntryPath).getName() : resolveTitle(file, uri);
         // Decoded axml / shared text is applied asynchronously via loadTabContent, exactly
         // like regular files — setting editor text synchronously during onCreate gets wiped
         // by the fragment's deferred initialization. If no text arrived with the intent
@@ -679,12 +769,17 @@ public class TextEditorActivity extends BaseActivity implements UnifiedEditorFra
         return null;
     }
 
+    private String originalFileTitle(String path) {
+        File original = new File(path);
+        return original.getName() + (io.github.abdurazaaqmohammed.utils.SafAccess.resolve(original, false) != null ? "" : " (root)");
+    }
+
     private void loadTabContent(EditorTab tab) {
         if (!tab.loading && !tab.loaded) queueDocumentLoad(tab, false, true, null);
     }
 
     private void cancelLoad(EditorTab tab) {
-        tab.loadGeneration++;
+        synchronized (tab) { tab.loadGeneration++; }
         if (tab.loadTask != null) tab.loadTask.cancel(true);
         tab.loadTask = null;
         tab.loading = false;
@@ -740,7 +835,28 @@ public class TextEditorActivity extends BaseActivity implements UnifiedEditorFra
                 EditorDocumentReader.Result result;
                 if (cachedText != null) result = EditorDocumentReader.fromText(cachedText);
                 else if (tab.pendingDecoded != null) result = EditorDocumentReader.fromText(tab.pendingDecoded);
-                else result = readTabText(tab);
+                else if (tab.binaryDocument != null) result = tab.binaryDocument.readPage(tab.binaryPage);
+                else {
+                    result = readTabText(tab);
+                    if (result.mode == EditorDocumentReader.Mode.BINARY
+                            || io.github.abdurazaaqmohammed.domain.files.FileType.forPath(
+                            tab.file == null ? tab.title : tab.file.getName()) == io.github.abdurazaaqmohammed.domain.files.FileType.LIBRARY) {
+                        try (InputStream input = openTabStream(tab)) {
+                            BinaryTextDocument document = BinaryTextDocument.create(input, result.charset, result.bom, getCacheDir());
+                            synchronized (tab) {
+                                if (Thread.currentThread().isInterrupted() || tab.loadGeneration != generation) {
+                                    document.close();
+                                    return;
+                                }
+                                tab.binaryDocument = document;
+                            }
+                            tab.binaryPage = Math.min(tab.binaryPage, document.pageCount() - 1);
+                            result = document.readPage(tab.binaryPage);
+                        }
+                    }
+                }
+                if (tab.javaPreview) result = EditorDocumentReader.readOnlyText(result.text);
+                final EditorDocumentReader.Result loadedResult = result;
                 if (Thread.currentThread().isInterrupted()) return;
                 Content prepared = new Content(result.text);
                 // Construction normally records the initial insert in the undo stack.
@@ -752,20 +868,20 @@ public class TextEditorActivity extends BaseActivity implements UnifiedEditorFra
                     tab.loading = false;
                     tab.loaded = true;
                     tab.loadFailed = false;
-                    tab.mode = result.mode;
+                    tab.mode = loadedResult.mode;
                     if (cachedText == null || !tab.modified) {
-                        tab.savedContent = result.isReadOnly() ? null : result.text;
+                        tab.savedContent = loadedResult.isReadOnly() ? null : loadedResult.text;
                         tab.savedAxml = tab.axml;
                         if (cachedText == null) tab.modified = false;
                     }
                     if (cachedText == null) {
-                        tab.charset = result.charset;
-                        tab.bom = result.bom;
+                        tab.charset = loadedResult.charset;
+                        tab.bom = loadedResult.bom;
                     }
                     // Never replace unsaved content with a shortened preview in session recovery.
-                    if (!result.isReadOnly()) tab.content = result.text;
+                    if (!loadedResult.isReadOnly()) tab.content = loadedResult.text;
                     else if (!tab.modified) tab.content = null;
-                    if (!result.isReadOnly() || tab.file != null || tab.fileUri != null) tab.pendingDecoded = null;
+                    if (!loadedResult.isReadOnly() || tab.file != null || tab.fileUri != null) tab.pendingDecoded = null;
                     if (getCurrentTab() != tab) {
                         prepared.release();
                         if (!tab.modified) { tab.content = null; tab.savedContent = null; tab.loaded = false; }
@@ -775,15 +891,15 @@ public class TextEditorActivity extends BaseActivity implements UnifiedEditorFra
                     UnifiedEditorFragment f = getFragment();
                     if (f != null) {
                         displayedTab = tab;
-                        f.setSyntaxForFilename(tab.title, getSyntaxDocumentKey(tab));
-                        int notice = switch (result.mode) {
+                        f.setSyntaxForFilename(tab.jvmClass ? "preview.jvmb" : tab.javaPreview ? "preview.java" : tab.title, getSyntaxDocumentKey(tab));
+                        int notice = tab.jvmClass ? R.string.editor_class_preview : tab.javaPreview ? R.string.hexora_java_preview : switch (loadedResult.mode) {
                             case EDIT -> 0;
                             case LARGE -> R.string.editor_large_mode;
                             case PREVIEW -> R.string.editor_large_preview;
                             case BINARY -> R.string.editor_binary_preview;
                         };
-                        f.setPreparedDocument(prepared, result.isLightweight(), result.isReadOnly(), notice,
-                                result.isReadOnly() && tab.file != null && tab.zipFilePath == null);
+                        f.setPreparedDocument(prepared, (tab.jvmClass || tab.javaPreview) ? loadedResult.text.length() > 65536 : loadedResult.isLightweight(), loadedResult.isReadOnly(), notice,
+                                loadedResult.isReadOnly() && tab.file != null && tab.zipFilePath == null);
                         tab.snapshotVersion = prepared.getDocumentVersion();
                         if (tab.pendingSearch != null && !tab.pendingSearch.isEmpty()) {
                             f.searchFor(tab.pendingSearch, tab.pendingSearchRegex, tab.pendingSearchMatchCase);
@@ -792,6 +908,7 @@ public class TextEditorActivity extends BaseActivity implements UnifiedEditorFra
                     } else prepared.release();
                     updateDocumentActions();
                     updateTabsList();
+                    updateTitleBar();
                 });
             } catch (InterruptedIOException ignored) {
                 // A tab switch, reload or activity destruction cancelled this generation.
@@ -812,9 +929,10 @@ public class TextEditorActivity extends BaseActivity implements UnifiedEditorFra
     }
 
     private EditorDocumentReader.Result readTabText(EditorTab tab) throws IOException {
-        try (InputStream is = tab.file != null ? FileUtils.getInputStream(tab.file)
-                : tab.fileUri != null ? getContentResolver().openInputStream(tab.fileUri)
-                : new java.io.ByteArrayInputStream(new byte[0])) {
+        try (InputStream is = openTabStream(tab)) {
+            if (tab.jvmClass) {
+                return EditorDocumentReader.readOnlyText(io.github.abdurazaaqmohammed.domain.editor.ClassDocumentReader.read(is));
+            }
             if (tab.axml) {
                 if (tab.file != null && tab.file.length() > EditorDocumentReader.MAX_BYTES) {
                     throw new IOException("Compiled XML is too large to decode safely in the text editor");
@@ -834,8 +952,66 @@ public class TextEditorActivity extends BaseActivity implements UnifiedEditorFra
         }
     }
 
+    private InputStream openTabStream(EditorTab tab) throws IOException {
+        InputStream input = tab.file != null ? io.github.abdurazaaqmohammed.utils.RootStaging.openInputStream(this, tab.file)
+                : tab.fileUri != null ? getContentResolver().openInputStream(tab.fileUri)
+                : new java.io.ByteArrayInputStream(new byte[0]);
+        if (input == null) throw new IOException("Cannot open document");
+        return input;
+    }
+
+    private void changeBinaryPage(int delta) {
+        EditorTab tab = getCurrentTab();
+        if (tab == null || tab.loading || tab.binaryDocument == null) return;
+        int page = tab.binaryPage + delta;
+        if (page < 0 || page >= tab.binaryDocument.pageCount()) return;
+        tab.binaryPage = page;
+        queueDocumentLoad(tab, false, false, null);
+    }
+
+    private void chooseBinaryPage() {
+        EditorTab tab = getCurrentTab();
+        if (tab == null || tab.loading || tab.binaryDocument == null) return;
+        android.widget.EditText input = new android.widget.EditText(this);
+        input.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+        input.setText(String.valueOf(tab.binaryPage + 1));
+        input.selectAll();
+        AlertDialog dialog = new MaterialAlertDialogBuilder(this).setTitle(R.string.editor_text_go_to_page)
+                .setView(input).setPositiveButton(android.R.string.ok, null)
+                .setNegativeButton(android.R.string.cancel, null).create();
+        dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+            try {
+                int page = Integer.parseInt(input.getText().toString()) - 1;
+                if (page < 0 || tab.binaryDocument == null || page >= tab.binaryDocument.pageCount()) throw new NumberFormatException();
+                if (getCurrentTab() != tab || tab.loading) return;
+                tab.binaryPage = page;
+                queueDocumentLoad(tab, false, false, null);
+                dialog.dismiss();
+            } catch (NumberFormatException e) { input.setError(getString(R.string.editor_text_invalid_page)); }
+        }));
+        dialog.show();
+    }
+
+    private void reloadDocument(EditorTab tab) {
+        if (tab.binaryDocument != null) {
+            tab.binaryDocument.close();
+            tab.binaryDocument = null;
+        }
+        tab.binaryPage = 0;
+        queueDocumentLoad(tab, false, false, null);
+    }
+
     private void updateDocumentActions() {
         EditorTab tab = getCurrentTab();
+        boolean paged = tab != null && tab.binaryDocument != null && tab.binaryDocument.pageCount() > 1;
+        findViewById(R.id.editor_text_pages).setVisibility(paged ? View.VISIBLE : View.GONE);
+        if (paged) {
+            ((android.widget.TextView) findViewById(R.id.editor_text_page)).setText(
+                    getString(R.string.editor_text_page_count, tab.binaryPage + 1, tab.binaryDocument.pageCount()));
+            findViewById(R.id.editor_text_previous).setEnabled(!tab.loading && tab.binaryPage > 0);
+            findViewById(R.id.editor_text_next).setEnabled(!tab.loading && tab.binaryPage + 1 < tab.binaryDocument.pageCount());
+            findViewById(R.id.editor_text_page).setEnabled(!tab.loading);
+        }
         boolean ready = tab != null && tab.loaded && !tab.loading && !tab.loadFailed && !tab.isPreview();
         boolean canSave = ready && tab.modified && !tab.saving;
         btnSave.setEnabled(canSave);
@@ -890,6 +1066,7 @@ public class TextEditorActivity extends BaseActivity implements UnifiedEditorFra
 
     @Override
     public void finish() {
+        publishArchiveEdits();
         if (!sessionClosed) {
             sessionClosed = true;
             manualFinish = true;
@@ -1022,6 +1199,15 @@ public class TextEditorActivity extends BaseActivity implements UnifiedEditorFra
                     tab.savedAxml = tab.axml;
                     if (unchanged) tab.content = text;
                     tab.modified = !unchanged;
+                    // Keep the saved archive copy available to the caller even
+                    // when Back closes an already-clean tab after toolbar Save.
+                    if (tab.zipFilePath != null && tab.file != null) {
+                        rememberArchiveEdit(new Intent().setData(Uri.fromFile(tab.file))
+                                .putExtra("zipFilePath", tab.zipFilePath)
+                                .putExtra("zipEntryPath", tab.zipEntryPath)
+                                .setFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION));
+                        publishArchiveEdits();
+                    }
                     updateDocumentActions();
                     updateTabsList();
                     persistSession();
@@ -1137,6 +1323,7 @@ public class TextEditorActivity extends BaseActivity implements UnifiedEditorFra
         if (position < 0 || position >= tabs.size()) return;
         boolean closingCurrent = position == currentIndex;
         cancelLoad(tabs.get(position));
+        if (tabs.get(position).binaryDocument != null) tabs.get(position).binaryDocument.close();
         tabs.remove(position);
 
         if (tabs.isEmpty()) {
@@ -1178,6 +1365,66 @@ public class TextEditorActivity extends BaseActivity implements UnifiedEditorFra
     @Override
     public void onUndoRedoChanged(boolean canUndo, boolean canRedo) {
         updateDocumentActions();
+        UnifiedEditorFragment f = getFragment();
+        if (f != null && f.getEditor() != null) updateFileStatus(
+                f.getEditor().getCursor().getLeftLine() + 1, f.getEditor().getCursor().getLeftColumn() + 1);
+    }
+
+    @Override
+    public boolean canShowJavaPreview() {
+        EditorTab tab = getCurrentTab();
+        return tab != null && tab.loaded && !tab.loading && !tab.loadFailed && !tab.javaPreview
+                && (tab.jvmClass || (!tab.isPreview() && tab.title.toLowerCase(java.util.Locale.ROOT).endsWith(".smali")));
+    }
+
+    @Override
+    public void onJavaPreviewRequested() {
+        if (!canShowJavaPreview() || (javaPreviewTask != null && !javaPreviewTask.isDone())) return;
+        EditorTab source = getCurrentTab();
+        UnifiedEditorFragment fragment = getFragment();
+        String smali = source.jvmClass ? null : fragment.getEditor().getText().toString();
+        if (smali != null && smali.length() > 512 * 1024) {
+            new ErrorUtil(this).showError(new IOException("Smali file is too large for Java conversion"));
+            return;
+        }
+        javaPreviewDialog = new MaterialAlertDialogBuilder(this).setTitle(R.string.view_as_java)
+                .setMessage(R.string.converting_java).setNegativeButton(android.R.string.cancel, (dialog, which) -> {
+                    if (javaPreviewTask != null) javaPreviewTask.cancel(true);
+                }).create();
+        javaPreviewDialog.setOnCancelListener(dialog -> {
+            if (javaPreviewTask != null) javaPreviewTask.cancel(true);
+        });
+        javaPreviewDialog.show();
+        javaPreviewTask = documentLoader.submit(() -> {
+            try {
+                String code;
+                if (source.jvmClass) {
+                    try (InputStream input = FileUtils.getInputStream(source.file)) {
+                        code = io.github.abdurazaaqmohammed.domain.editor.ClassJavaDecompiler.read(input);
+                    }
+                } else code = modder.hub.dexeditor.smali.Smali2Java.translate(smali, 39);
+                if (Thread.currentThread().isInterrupted()) return;
+                String java = code;
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed() || getCurrentTab() != source || !javaPreviewDialog.isShowing()) return;
+                    javaPreviewDialog.dismiss();
+                    EditorTab preview = new EditorTab();
+                    int dot = source.title.lastIndexOf('.');
+                    preview.title = (dot < 0 ? source.title : source.title.substring(0, dot)) + ".java";
+                    preview.javaPreview = true;
+                    preview.pendingDecoded = java;
+                    addTabAndOpen(preview);
+                });
+            } catch (Exception | OutOfMemoryError error) {
+                if (Thread.currentThread().isInterrupted()) return;
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed() || !javaPreviewDialog.isShowing()) return;
+                    javaPreviewDialog.dismiss();
+                    new ErrorUtil(this).showError(error instanceof Exception ? (Exception) error
+                            : new IOException("Not enough memory to convert this file"));
+                });
+            }
+        });
     }
 
     @Override
@@ -1216,8 +1463,14 @@ public class TextEditorActivity extends BaseActivity implements UnifiedEditorFra
     public void onSaveRequested() {
         // Mapped from the fragment's "Reload file" item: re-read the file from disk
         EditorTab t = getCurrentTab();
-        if (t == null || t.axml) return;
-        if (!t.loading) queueDocumentLoad(t, false, false, null);
+        if (t == null || t.axml || t.loading || t.saving) return;
+        if (t.modified) {
+            new MaterialAlertDialogBuilder(this).setTitle(R.string.reload_file)
+                    .setMessage(R.string.editor_reload_discard)
+                    .setPositiveButton(R.string.reload_file, (dialog, which) -> {
+                        if (tabs.contains(t) && !t.saving) reloadDocument(t);
+                    }).setNegativeButton(android.R.string.cancel, null).show();
+        } else reloadDocument(t);
     }
 
     @Override
@@ -1250,7 +1503,7 @@ public class TextEditorActivity extends BaseActivity implements UnifiedEditorFra
         if (isFinishing() || isDestroyed()) return;
         if (index == modified.size()) {
             EditorTab tab = getCurrentTab();
-            if (tab != null && (tab.fileUri != null || tab.file != null)) {
+            if (savedArchiveEdits.isEmpty() && tab != null && tab.zipFilePath != null && (tab.fileUri != null || tab.file != null)) {
                 Uri uri = tab.fileUri != null ? tab.fileUri : Uri.fromFile(tab.file);
                 Intent result = new Intent().setData(uri).setFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
                 if (tab.zipFilePath != null) result.putExtra("zipFilePath", tab.zipFilePath);
@@ -1286,8 +1539,18 @@ public class TextEditorActivity extends BaseActivity implements UnifiedEditorFra
             });
         }
         dirtyHandler.removeCallbacks(checkDirty);
+        if (javaPreviewTask != null) javaPreviewTask.cancel(true);
+        if (javaPreviewDialog != null) javaPreviewDialog.dismiss();
         for (EditorTab t : tabs) cancelLoad(t);
         documentLoader.shutdownNow();
+        if (!isChangingConfigurations()) {
+            for (EditorTab t : tabs) {
+                if (t.binaryDocument != null) {
+                    t.binaryDocument.close();
+                    t.binaryDocument = null;
+                }
+            }
+        }
         sessionWriter.shutdown(); // Drain the last session/recovery write; Fragment owns editor.release().
         super.onDestroy();
     }

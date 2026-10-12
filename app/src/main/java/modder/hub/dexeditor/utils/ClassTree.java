@@ -133,6 +133,8 @@ public class ClassTree {
     private final Map<String, String> pendingSmaliMap = new HashMap<>();
     public Tree tree;
     public HashMap<String, ClassDef> classMap;
+    private final Map<String, ClassDef> originalDefinitions = new HashMap<>();
+    private final Map<String, String> renamedOrigins = new HashMap<>();
     public List<DexBackedDexFile> dexFiles;
     public DexBackedDexFile dexFile;
     public String Path;
@@ -213,6 +215,7 @@ public class ClassTree {
         this.workDir = cacheDir;
         initPaths();
         initMultiDex();
+        originalDefinitions.putAll(classMap);
         loadDeletedClasses();
     }
 
@@ -535,7 +538,7 @@ public class ClassTree {
     }
 
     // save class def to the main node o the dex and record the changes classes
-    public void saveClassDef(ClassDef classDef) {
+    public synchronized void saveClassDef(ClassDef classDef) {
         String type = classDef.getType().substring(1, classDef.getType().length() - 1);
         pendingSmaliMap.remove(type);
         pureSmaliCache.remove(type);
@@ -563,6 +566,82 @@ public class ClassTree {
         recordEditedClass(type);
         DexEditorActivity.isChanged = true;
         DexEditorActivity.isSaved = false;
+    }
+
+    public synchronized void addClasses(List<? extends ClassDef> definitions, String targetDex) throws IOException {
+        if (!dexClassMap.containsKey(targetDex)) throw new IOException("Choose an existing DEX file.");
+        Set<String> names = new HashSet<>();
+        for (ClassDef definition : definitions) {
+            String type = definition.getType();
+            String name = type.substring(1, type.length()-1);
+            if (!names.add(name) || classMap.containsKey(name)) throw new IOException("Class already exists: " + name);
+        }
+        for (ClassDef definition : definitions) {
+            String type=definition.getType(), name=type.substring(1,type.length()-1);
+            String dex=typeToDexMap.containsKey(type) ? typeToDexMap.get(type) : targetDex;
+            typeToDexMap.put(type,dex);
+            if (!dexClassMap.get(dex).contains(type)) dexClassMap.get(dex).add(type);
+            if (deletedClassJson.containsKey(dex)) deletedClassJson.get(dex).remove(name);
+            if (!classDefIndex.containsKey(type)) {
+                classDefIndex.put(type,classDefList.size()); classDefList.add(definition);
+            }
+            saveClassDef(definition);
+        }
+        tree=new Tree(classMap);
+    }
+
+    public synchronized void renameClass(String oldName, String newName) throws Exception {
+        renameClasses(java.util.Collections.singletonMap(oldName,
+                io.github.abdurazaaqmohammed.domain.editor.DexClassActions.name(newName)));
+    }
+
+    public synchronized void renamePackage(String oldName,String newName) throws Exception {
+        renameClasses(io.github.abdurazaaqmohammed.domain.editor.DexClassActions.packageNames(classMap,oldName,newName));
+    }
+
+    private void renameClasses(Map<String,String> names) throws Exception {
+        // Assemble every pending edit before committing any rename, so malformed Smali
+        // cannot partially rewrite a session.
+        Map<String,ClassDef> snapshot=new HashMap<>(classMap);
+        for (Map.Entry<String,String> entry:pendingSmaliMap.entrySet()) snapshot.put(entry.getKey(),
+                Smali.assemble(entry.getValue(),SharedSmaliUtils.ASSEMBLE_OPTIONS,dexVersion));
+        for (String destination:names.values()) if (typeToDexMap.containsKey("L"+destination+";") && !names.containsKey(destination))
+            throw new IOException("Class name already exists in this DEX session: "+destination);
+        Map<String,ClassDef> rewritten=io.github.abdurazaaqmohammed.domain.editor.DexClassActions.renameTypes(snapshot,names);
+        Map<String,String> origins=new HashMap<>(renamedOrigins);
+        Map<String,Integer> indexes=new HashMap<>(classDefIndex);
+        Map<String,String> memberships=new HashMap<>(typeToDexMap);
+        for (String name:names.keySet()) {
+            renamedOrigins.remove(name); typeToDexMap.remove("L"+name+";"); classDefIndex.remove("L"+name+";");
+        }
+        for (Map.Entry<String,String> rename:names.entrySet()) {
+            String oldName=rename.getKey(), destination=rename.getValue();
+            renamedOrigins.put(destination,origins.containsKey(oldName) ? origins.get(oldName) : oldName);
+            String oldType="L"+oldName+";", newType="L"+destination+";";
+            typeToDexMap.put(newType,memberships.get(oldType));
+            if (indexes.containsKey(oldType)) classDefIndex.put(newType,indexes.get(oldType));
+        }
+        for (List<String> members:dexClassMap.values()) for (int i=0;i<members.size();i++) {
+            String type=members.get(i), name=type.substring(1,type.length()-1);
+            if (names.containsKey(name)) members.set(i,"L"+names.get(name)+";");
+        }
+        classMap.clear(); classMap.putAll(rewritten);
+        for (HashSet<String> edited : editedClassMap.values()) edited.removeAll(names.keySet());
+        pendingSmaliMap.clear(); pureSmaliCache.clear();
+        for (ClassDef definition:rewritten.values()) saveClassDef(definition);
+        tree=new Tree(classMap);
+    }
+
+    public String targetDexFor(String name) {
+        ClassDef definition=classMap.get(name);
+        if (definition!=null) return findDexFileNameForClass(definition);
+        for (Map.Entry<String,ClassDef> entry:classMap.entrySet()) if (entry.getKey().startsWith(name+"/")) return findDexFileNameForClass(entry.getValue());
+        return dexClassMap.keySet().iterator().next();
+    }
+
+    public String originalSmali(String name) throws Exception {
+        ClassDef original=originalDefinitions.get(renamedOrigins.containsKey(name) ? renamedOrigins.get(name) : name);
+        return original==null ? "" : getPureSmaliFromClassDef(original);
     }
 
     // save class def without invalidating caches when the code text did not change
@@ -706,8 +785,11 @@ public class ClassTree {
             AtomicInteger processed = new AtomicInteger(0);
             final Exception[] threadException = {null};
 
-            DexBuilder dexBuilder = new DexBuilder(opcodes);
-            dexBuilder.setIgnoreMethodAndFieldError(true);
+            // DexPool re-interns all instruction references, including the lazy
+            // wrappers produced by a typed rename. Builder-only copies can retain
+            // indexes belonging to the assembler's previous builder.
+            com.android.tools.smali.dexlib2.writer.pool.DexPool dexBuilder =
+                    new com.android.tools.smali.dexlib2.writer.pool.DexPool(opcodes);
 
             final Map<String, ClassDef> assembledDefs = new ConcurrentHashMap<>();
             HashSet<String> deleted = deletedClassJson.get(fileName);
@@ -765,7 +847,7 @@ public class ClassTree {
                                 strippedDef = new DebugInfoStripper(defToIntern, compilationOptions);
                             }
 
-                            dexBuilder.internClassDef(strippedDef);
+                            synchronized (dexBuilder) { dexBuilder.internClass(strippedDef); }
 
                             int p = processed.incrementAndGet();
                             if (p % 200 == 0 || p == classCount) {
@@ -841,23 +923,18 @@ public class ClassTree {
                     outputDir = "/sdcard";
                 }
                 File outFile = new File(outputDir, fileName);
-                File bakFile = new File(outFile.getAbsolutePath() + ".bak");
+                File bakFile = io.github.abdurazaaqmohammed.domain.files.SafeFileOperations.unusedFile(new File(outFile.getAbsolutePath() + ".bak"));
 
                 if (outFile.exists()) {
-                    FileUtil.copyFile(outFile.getAbsolutePath(), bakFile.getAbsolutePath());
-                    outFile.delete();
+                    io.github.abdurazaaqmohammed.domain.files.SafeFileOperations.copyFile(outFile, bakFile);
                 }
 
-                FileOutputStream fos = new FileOutputStream(outFile);
-                try {
-                    fos.write(result);
-                    fos.flush();
-                } finally {
-                    fos.close();
-                }
+                io.github.abdurazaaqmohammed.domain.files.SafeFileOperations.writeAtomically(outFile, result, (temporary, destination) -> {
+                    if (!temporary.renameTo(destination)) throw new IOException("Cannot publish compiled DEX; original retained.");
+                });
                 data = result;
             } catch (Exception e) {
-                e.printStackTrace();
+                throw e;
             }
 
             current++;
@@ -870,6 +947,7 @@ public class ClassTree {
         // reporting those dex files as "touched". Without this, every subsequent save would
         // recompile each dex all over again even when nothing changed since the last save.
         editedClassMap.clear();
+        originalDefinitions.clear(); originalDefinitions.putAll(classMap); renamedOrigins.clear();
 
         DexEditorActivity.isChanged = false;
         DexEditorActivity.isSaved = true;

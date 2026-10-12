@@ -89,7 +89,7 @@ public final class ZipArchiveCache {
 
         private Archive(File file) throws IOException {
             if (!file.isFile()) throw new IOException("Archive no longer exists: " + file);
-            reader = new ZipFile(file);
+            reader = io.github.abdurazaaqmohammed.domain.files.ArchivePasswords.open(file);
             folders.put("", new ArrayList<>());
             try {
                 for (FileHeader header : reader.getFileHeaders()) {

@@ -18,16 +18,26 @@ sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 ADB = os.environ.get("HEXORA_ADB", r"E:\AndroidStudioSDK\platform-tools\adb.exe")
-SERIAL = os.environ.get("HEXORA_SERIAL", "127.0.0.1:16384")
-PACKAGE = "app.hexora.manager"
-ARTIFACTS = Path(__file__).resolve().parent / "artifacts"
-ARTIFACTS.mkdir(exist_ok=True)
+SERIAL = os.environ.get("HEXORA_SERIAL")
+if not SERIAL:
+    connected = subprocess.run([ADB, "devices"], capture_output=True, text=True, timeout=15)
+    if connected.returncode: raise RuntimeError(connected.stderr)
+    emulators = [line.split()[0] for line in connected.stdout.splitlines()
+                 if len(line.split()) == 2 and line.split()[1] == "device"
+                 and line.split()[0].startswith(("emulator-", "127.0.0.1:", "localhost:"))]
+    if "127.0.0.1:16384" in emulators: SERIAL = "127.0.0.1:16384"
+    elif len(emulators) == 1: SERIAL = emulators[0]
+    else: raise RuntimeError("Set HEXORA_SERIAL to the intended emulator; available: " + ", ".join(emulators))
+PACKAGE = "com.hexora.zenin"
+ARTIFACTS = Path(os.environ.get("HEXORA_ARTIFACTS", str(Path(__file__).resolve().parent / "artifacts")))
+ARTIFACTS.mkdir(parents=True, exist_ok=True)
 DUMP_PATH = "/sdcard/hexora-qa-" + str(os.getpid()) + ".xml"
 
 def adb(*args, binary=False):
     result = subprocess.run([ADB, "-s", SERIAL, *map(str, args)], capture_output=True, timeout=45)
     if result.returncode:
-        raise RuntimeError(result.stderr.decode(errors="replace"))
+        message = (result.stderr + result.stdout).decode(errors="replace").strip()
+        raise RuntimeError(f"adb exited {result.returncode}: {message}")
     return result.stdout if binary else result.stdout.decode(errors="replace").strip()
 
 def tree():
@@ -102,11 +112,16 @@ def snapshot(name):
     rows = [{"text":n.get("text"), "desc":n.get("content-desc"),
              "id":n.get("resource-id"), "bounds":n.get("bounds")}
             for n in root.iter("node") if n.get("text") or n.get("content-desc")]
-    print("\n".join(str((r['text'], r['desc'], r['bounds'])) for r in rows))
+    # Keep complete XML evidence, but avoid megabytes of document text in logs.
+    def brief(value):
+        return value[:240] + f" … ({len(value)} chars)" if value and len(value) > 240 else value
+    print("\n".join(str((brief(r['text']), brief(r['desc']), r['bounds'])) for r in rows))
 
 def launch(path=None):
     adb("shell", "am", "force-stop", PACKAGE)
-    args = ["shell", "am", "start", "-W", "-n", PACKAGE + "/io.github.abdurazaaqmohammed.MPManager.MainActivity"]
+    # A completed package-installer screen can share the app's task. Reset only
+    # this test app's activity stack so the requested fixture actually opens.
+    args = ["shell", "am", "start", "-W", "-f", "0x10008000", "-n", PACKAGE + "/io.github.abdurazaaqmohammed.MPManager.MainActivity"]
     if path: args += ["--es", "locatePath", path]
     print(adb(*args))
     time.sleep(.7)

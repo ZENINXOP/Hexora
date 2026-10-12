@@ -1,0 +1,49 @@
+plugins {
+    id 'com.android.application'
+}
+
+// Owned acceptance fixture: never bundled into Hexora.
+def originalKey = new File(System.getProperty('user.home'), '.android/debug.keystore')
+def store = java.security.KeyStore.getInstance('JKS')
+originalKey.withInputStream { store.load(it, 'android'.toCharArray()) }
+def originalDigest = java.security.MessageDigest.getInstance('SHA-256')
+        .digest(store.getCertificate('androiddebugkey').getEncoded()).encodeHex().toString()
+def nativeFixture = providers.gradleProperty('nativeSignatureFixture').map { it.toBoolean() }.getOrElse(false)
+def fixtureAbi = providers.gradleProperty('signatureFixtureAbi').getOrElse('arm64-v8a')
+if (!(fixtureAbi in ['arm64-v8a', 'armeabi-v7a', 'x86', 'x86_64'])) {
+    throw new GradleException('Unsupported signature fixture ABI')
+}
+
+android {
+    namespace 'app.hexora.signaturefixture'
+    compileSdk 36
+    defaultConfig {
+        applicationId 'app.hexora.signaturefixture'
+        minSdk 28
+        targetSdk 35
+        versionCode 1
+        versionName '1.0'
+        buildConfigField 'String', 'ORIGINAL_CERT', '"' + originalDigest + '"'
+        buildConfigField 'boolean', 'NATIVE_FIXTURE', nativeFixture.toString()
+        if (nativeFixture) {
+            ndk { abiFilters fixtureAbi }
+        }
+    }
+    if (nativeFixture) {
+        ndkVersion '28.2.13676358'
+        externalNativeBuild {
+            cmake {
+                path file('src/main/cpp/CMakeLists.txt')
+                version '3.22.1'
+            }
+        }
+        applicationVariants.all { variant ->
+            variant.outputs.all { outputFileName = 'signature-native-fixture-' + variant.name + '.apk' }
+        }
+    }
+    buildFeatures { buildConfig true }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}

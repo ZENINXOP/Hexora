@@ -80,8 +80,38 @@ public class EditorDocumentReaderTest {
         EditorDocumentReader.Result result = EditorDocumentReader.read(new ByteArrayInputStream(bytes), bytes.length);
         assertEquals(EditorDocumentReader.Mode.BINARY, result.mode);
         assertTrue(result.isReadOnly());
-        assertTrue(result.text.contains("7F 45 4C 46"));
-        assertTrue(result.text.contains("00000000"));
+        assertTrue(result.text.contains("ELF"));
+        assertFalse(result.text.contains("\0"));
+        assertFalse(result.text.contains("7F 45 4C 46"));
+        assertFalse(result.text.contains("00000000"));
+    }
+
+    @Test public void binaryTextPreviewPreservesReadableStringsAndNewlines() throws Exception {
+        byte[] bytes = ("\0LIBRARY\nhello 你好\r\n\tworld\0\1").getBytes(StandardCharsets.UTF_8);
+        EditorDocumentReader.Result result = EditorDocumentReader.read(new ByteArrayInputStream(bytes), bytes.length);
+        assertEquals("LIBRARY\nhello 你好\r\n\tworld", result.text);
+        assertTrue(result.isReadOnly());
+    }
+
+    @Test public void largeBinaryTextPreviewsRemainBoundedWithoutReadingTheWholeFile() throws Exception {
+        final int[] bytesRead = {0};
+        InputStream unlimited = new InputStream() {
+            public int read() { bytesRead[0]++; return 0; }
+        };
+        EditorDocumentReader.Result result = EditorDocumentReader.read(unlimited, 500L * 1024 * 1024);
+        assertEquals(EditorDocumentReader.Mode.BINARY, result.mode);
+        assertTrue(result.isReadOnly());
+        assertEquals("", result.text);
+        assertTrue(bytesRead[0] < 100_000);
+    }
+
+    @Test public void binaryPreviewBoundsLineCountAndDoesNotSplitSurrogatePairs() throws Exception {
+        byte[] bytes = ("\0\n".repeat(EditorDocumentReader.PREVIEW_LINES + 1)).getBytes(StandardCharsets.UTF_8);
+        assertTrue(EditorDocumentReader.read(new ByteArrayInputStream(bytes), -1).text.lines().count()
+                <= EditorDocumentReader.PREVIEW_LINES);
+        bytes = ("\0" + "x".repeat(EditorDocumentReader.PREVIEW_LINE_CHARS - 2) + "😀").getBytes(StandardCharsets.UTF_8);
+        String text = EditorDocumentReader.read(new ByteArrayInputStream(bytes), -1).text;
+        assertFalse(Character.isHighSurrogate(text.charAt(text.length() - 1)));
     }
 
     @Test public void detectsBinaryControlsAfterTheInitialSample() throws Exception {
@@ -93,6 +123,21 @@ public class EditorDocumentReaderTest {
     @Test public void extensionDoesNotTurnTextLibrariesIntoBinary() throws Exception {
         // Classification is based on contents, so .lib/.so names can still contain text.
         assertEquals(EditorDocumentReader.Mode.EDIT, read("LIBRARY sample\nEXPORTS\n  hello").mode);
+    }
+
+    @Test public void routingRecognizesUnicodeTextLibrariesAndRejectsBinaryControls() {
+        String text = "LIBRARY sample\nEXPORTS\n  你好 αβ";
+        for (java.nio.charset.Charset charset : new java.nio.charset.Charset[]{
+                StandardCharsets.UTF_8, StandardCharsets.UTF_16LE, StandardCharsets.UTF_16BE}) {
+            byte[] bom = charset.equals(StandardCharsets.UTF_8) ? new byte[0]
+                    : charset.equals(StandardCharsets.UTF_16LE) ? new byte[]{(byte) 0xff, (byte) 0xfe}
+                    : new byte[]{(byte) 0xfe, (byte) 0xff};
+            byte[] bytes = EditorDocumentReader.encode(text, charset, bom);
+            assertTrue(EditorDocumentReader.isTextSample(bytes, bytes.length));
+        }
+        byte[] binary = new byte[]{0x7f, 'E', 'L', 'F', 2, 1, 0};
+        assertFalse(EditorDocumentReader.isTextSample(binary, binary.length));
+        assertTrue(EditorDocumentReader.isTextSample(new byte[0], 0));
     }
 
     @Test public void bomTextRoundTripsWithoutCorruptingOriginalEncoding() throws Exception {

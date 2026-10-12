@@ -203,6 +203,14 @@ public class MainFilesArrayAdapter extends RecyclerView.Adapter<MainFilesArrayAd
     public void openWithForFile(File file, String fileName) {
         fileOpener.openWithForFile(file, fileName);
     }
+    public void openArchiveEntry(ZipEntryInfo entry) { fileOps.handleZipEntryClick(entry); }
+    public boolean pasteFiles(List<File> files,boolean cut,File destination,java.util.function.Consumer<List<File>> finished) {
+        return fileOps.pasteFilesAsync(files,cut,destination,finished);
+    }
+
+    public void openAutomatically(File file, String name, File zip, String entry) {
+        fileOpener.openAutomatically(file, name, zip, entry);
+    }
 
     /** Zip-aware variant so editors launched from an archive know the entry's source. */
     public void openWithForFile(File file, String fileName, File zipFile, String zipEntryPath) {
@@ -342,7 +350,7 @@ public class MainFilesArrayAdapter extends RecyclerView.Adapter<MainFilesArrayAd
         // RecyclerView binds on the UI thread; attach handlers before recycling can occur.
         View.OnClickListener originalClickListener;
         if(isInZip && finalPosition == 0 && entry.getFullPath() == null) {
-            originalClickListener = v -> context.loadFolderInPane(entry.getZipFile().getParentFile(), pane1);
+            originalClickListener = v -> context.leaveArchive(entry.getZipFile(), pane1);
         } else {
             originalClickListener = !isInZip && file.isFile() ?
                 v -> {
@@ -371,6 +379,10 @@ public class MainFilesArrayAdapter extends RecyclerView.Adapter<MainFilesArrayAd
             List<FileMenuOrder.MenuItem> visibleMenu = new ArrayList<>();
             visibleMenu.add(new FileMenuOrder.MenuItem(FileMenuOrder.COPY, FileMenuOrder.labelFor(context, FileMenuOrder.COPY, direction)));
             visibleMenu.add(new FileMenuOrder.MenuItem(FileMenuOrder.MOVE, FileMenuOrder.labelFor(context, FileMenuOrder.MOVE, direction)));
+            if (!isInZip) {
+                visibleMenu.add(new FileMenuOrder.MenuItem(FileMenuOrder.CLIP_COPY,FileMenuOrder.labelFor(context,FileMenuOrder.CLIP_COPY,direction)));
+                visibleMenu.add(new FileMenuOrder.MenuItem(FileMenuOrder.CLIP_CUT,FileMenuOrder.labelFor(context,FileMenuOrder.CLIP_CUT,direction)));
+            }
             visibleMenu.add(new FileMenuOrder.MenuItem(FileMenuOrder.RENAME, FileMenuOrder.labelFor(context, FileMenuOrder.RENAME, direction)));
             visibleMenu.add(new FileMenuOrder.MenuItem(FileMenuOrder.DELETE, FileMenuOrder.labelFor(context, FileMenuOrder.DELETE, direction)));
             visibleMenu.add(new FileMenuOrder.MenuItem(FileMenuOrder.COMPRESS, FileMenuOrder.labelFor(context, FileMenuOrder.COMPRESS, direction)));
@@ -380,6 +392,11 @@ public class MainFilesArrayAdapter extends RecyclerView.Adapter<MainFilesArrayAd
             visibleMenu.add(new FileMenuOrder.MenuItem(FileMenuOrder.BOOKMARK, FileMenuOrder.labelFor(context, FileMenuOrder.BOOKMARK, direction)));
             visibleMenu.add(new FileMenuOrder.MenuItem(FileMenuOrder.CMD, FileMenuOrder.labelFor(context, FileMenuOrder.CMD, direction)));
             visibleMenu.add(new FileMenuOrder.MenuItem(FileMenuOrder.CHECK, FileMenuOrder.labelFor(context, FileMenuOrder.CHECK, direction)));
+            if (!multi && !isInZip && (file.isDirectory()
+                    || io.github.abdurazaaqmohammed.utils.MergeUtil.isSplitBundle(fileName))) {
+                visibleMenu.add(new FileMenuOrder.MenuItem(FileMenuOrder.MERGE_SPLITS,
+                        context.getString(R.string.merge_single_apk)));
+            }
 
             if (multi && !isInZip) {
                 boolean allApks = true;
@@ -391,6 +408,8 @@ public class MainFilesArrayAdapter extends RecyclerView.Adapter<MainFilesArrayAd
                     }
                 }
                 if (allApks) {
+                    if (selectedPositions.size() > 1) visibleMenu.add(new FileMenuOrder.MenuItem(
+                            FileMenuOrder.MERGE_SPLITS, context.getString(R.string.merge_single_apk)));
                     visibleMenu.add(new FileMenuOrder.MenuItem(FileMenuOrder.BATCH_SIGN, FileMenuOrder.labelFor(context, FileMenuOrder.BATCH_SIGN, direction)));
                     visibleMenu.add(new FileMenuOrder.MenuItem(FileMenuOrder.BATCH_OPT, FileMenuOrder.labelFor(context, FileMenuOrder.BATCH_OPT, direction)));
                     visibleMenu.add(new FileMenuOrder.MenuItem(FileMenuOrder.BATCH_INSTALL, FileMenuOrder.labelFor(context, FileMenuOrder.BATCH_INSTALL, direction)));
@@ -576,6 +595,27 @@ public class MainFilesArrayAdapter extends RecyclerView.Adapter<MainFilesArrayAd
                         return;
                     }
                     switch (actionId) {
+                        case FileMenuOrder.CLIP_COPY:
+                        case FileMenuOrder.CLIP_CUT: {
+                            List<File> selection=new ArrayList<>();
+                            if (multi) for (int index:selectedPositions) selection.add((File)values[index]);
+                            else selection.add(file);
+                            context.fileClipboard.capture(selection,FileMenuOrder.CLIP_CUT.equals(actionId));
+                            clearSelection();
+                            return;
+                        }
+                        case FileMenuOrder.MERGE_SPLITS:
+                            if (multi) {
+                                List<File> inputs = new ArrayList<>();
+                                for (int index : selectedPositions) inputs.add((File) values[index]);
+                                io.github.abdurazaaqmohammed.utils.MergeUtil.showMergeFilesDialog(inputs, context);
+                            } else if (file.isDirectory()) {
+                                io.github.abdurazaaqmohammed.utils.MergeUtil.showMergeFolderDialog(file, context);
+                            } else {
+                                fileOpener.withReadableCopy(file, readable ->
+                                        io.github.abdurazaaqmohammed.utils.MergeUtil.showAntisplitDialog(readable, context));
+                            }
+                            return;
                         case FileMenuOrder.CMP_DEX:
                             if (finalDexCompare1 != null && finalDexCompare2 != null) {
                                 new CompareDexOptionsDialog(context, finalDexCompare1, finalDexCompare2).show();
@@ -803,6 +843,10 @@ public class MainFilesArrayAdapter extends RecyclerView.Adapter<MainFilesArrayAd
             context.setMultiSelectModeUI(true);
         }
         notifyItemRangeChanged(changedStart, changedEnd - changedStart + 1, SELECTION_PAYLOAD);
+    }
+
+    public void withReadableCopy(File file, FileOpener.ReadableCallback callback) {
+        fileOpener.withReadableCopy(file, callback);
     }
 
     public void handleMultiSelect(int position) {

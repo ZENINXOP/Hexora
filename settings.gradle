@@ -17,4 +17,11 @@ include ':packs:pack-media'
 include ':packs:pack-network'
 include ':samples:plugin-sample'
 include ':samples:plugin-kill-sig'
+// Opt in after a debug build creates the local Android debug signing key.
+if (providers.gradleProperty('signatureFixtures').getOrElse('false').toBoolean()) {
+    include ':samples:signature-fixture'
+}
 include ':apkkit'
+if (providers.gradleProperty('shareFixtures').getOrElse('false').toBoolean()) {
+    include ':samples:share-fixture'
+}

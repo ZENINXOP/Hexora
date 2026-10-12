@@ -344,7 +344,7 @@ public class ApkInfoDialogs {
                 .setView(display)
                 .setNeutralButton(R.string.more, (dialog, which) -> {
                     List<String> moreTitles = new ArrayList<>(Arrays.asList(context.rss.getString(R.string.sign_apk), context.rss.getString(R.string.optimize_apk), context.rss.getString(R.string.decompile_reandroid_apkeditor), context.rss.getString(R.string.refactor_obfuscated_resource_names), context.rss.getString(R.string.protect_reandroid_apkeditor), context.rss.getString(R.string.clone_apk), context.rss.getString(R.string.view_certificate), context.rss.getString(R.string.add_toast_dialog), context.rss.getString(R.string.remove_all_toasts), context.rss.getString(R.string.remove_signature), context.rss.getString(R.string.signature_health), context.rss.getString(R.string.manifest_toggles), context.rss.getString(R.string.permissions)));
-                    moreTitles.add(context.getString(R.string.kill_signature_verification));
+                    moreTitles.add(1, context.getString(R.string.kill_signature_verification));
                     final int builtInCount = moreTitles.size();
                     // Keep plug-in offsets tied to the actual built-in menu length.
                     final List<ApkMoreAction> pluginMore =
@@ -363,7 +363,11 @@ public class ApkInfoDialogs {
                         moreTitles.add(e.title == null || e.title.isEmpty() ? e.id : e.title);
                     }
                     String[] items = moreTitles.toArray(new String[0]);
-                    dialogUtil.getDialogBuilder().setSingleChoiceItems(items, -1, (dialog12, which1) -> {
+                    dialogUtil.getDialogBuilder().setSingleChoiceItems(items, -1, (dialog12, displayIndex) -> {
+                        // Present signature patching beside signing while preserving existing
+                        // action IDs and the plug-in/external offsets below the built-ins.
+                        int which1 = displayIndex == 1 ? builtInCount - 1
+                                : displayIndex > 1 && displayIndex < builtInCount ? displayIndex - 1 : displayIndex;
                         dialog12.dismiss();
                         if (which1 == 0) SignatureKeyDialog.show(context, file, false);
                         else if (which1 == 1) {

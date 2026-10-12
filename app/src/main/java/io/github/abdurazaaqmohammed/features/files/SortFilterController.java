@@ -12,6 +12,8 @@ import android.widget.ListView;
 import android.widget.PopupMenu;
 import android.widget.RadioButton;
 import android.widget.RadioGroup;
+import android.view.inputmethod.InputMethodManager;
+import android.content.Context;
 
 import androidx.appcompat.app.AlertDialog;
 import androidx.recyclerview.widget.RecyclerView;
@@ -32,6 +34,7 @@ import io.github.codehasan.colorpicker.extensions.Extensions;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * Listing sort/filter/hidden-files behaviour extracted from MainActivity.
@@ -44,6 +47,11 @@ public class SortFilterController {
     private final ListPrefs prefs;
     private String currentPane1Filter = "";
     private String currentPane2Filter = "";
+    private final boolean[] filterVisible = new boolean[2];
+    private TextInputLayout filterBox;
+    private EditText filterBar;
+    private View pathLayout;
+    private boolean syncingFilterUi;
 
     public SortFilterController(MainActivity activity) {
         this.activity = activity;
@@ -52,9 +60,10 @@ public class SortFilterController {
 
     public void setupFilterBar() {
         LinearLayout topBar = activity.findViewById(R.id.topBar);
-        TextInputLayout filterBox =
+        filterBox =
                 UiFields.box(activity, "Filter...");
-        EditText filterBar = UiFields.field(filterBox, 0);
+        filterBar = UiFields.field(filterBox, 0);
+        pathLayout = topBar.getChildAt(1);
         filterBox.setVisibility(View.GONE);
         filterBox.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         filterBar.setSingleLine(true);
@@ -67,8 +76,9 @@ public class SortFilterController {
 
             @Override
             public void onTextChanged(CharSequence s, int start, int before, int count) {
-                if (activity.lastPaneSelected == 1) currentPane1Filter = s.toString().toLowerCase();
-                else currentPane2Filter = s.toString().toLowerCase();
+                if (syncingFilterUi) return;
+                if (activity.lastPaneSelected == 1) currentPane1Filter = s.toString().toLowerCase(Locale.ROOT);
+                else currentPane2Filter = s.toString().toLowerCase(Locale.ROOT);
                 applyFilterToCurrentPane();
             }
 
@@ -78,37 +88,78 @@ public class SortFilterController {
         });
     }
 
+    public void toggleFilterBar() {
+        boolean pane1 = activity.lastPaneSelected == 1;
+        int index = pane1 ? 0 : 1;
+        filterVisible[index] = !filterVisible[index];
+        if (!filterVisible[index]) {
+            if (pane1) currentPane1Filter = ""; else currentPane2Filter = "";
+            applyFilterToCurrentPane();
+        }
+        onPaneSelected();
+        InputMethodManager keyboard = (InputMethodManager) activity.getSystemService(Context.INPUT_METHOD_SERVICE);
+        if (keyboard == null) return;
+        if (filterVisible[index]) {
+            filterBar.requestFocus();
+            keyboard.showSoftInput(filterBar, InputMethodManager.SHOW_IMPLICIT);
+        } else keyboard.hideSoftInputFromWindow(filterBar.getWindowToken(), 0);
+    }
+
+    public void onPaneSelected() {
+        if (filterBar == null) return;
+        boolean pane1 = activity.lastPaneSelected == 1;
+        syncingFilterUi = true;
+        filterBar.setText(pane1 ? currentPane1Filter : currentPane2Filter);
+        filterBar.setSelection(filterBar.length());
+        syncingFilterUi = false;
+        boolean visible = filterVisible[pane1 ? 0 : 1];
+        filterBox.setVisibility(visible ? View.VISIBLE : View.GONE);
+        pathLayout.setVisibility(visible ? View.GONE : View.VISIBLE);
+    }
+
+    public File[] filterFiles(File[] files, boolean pane1) {
+        String filter = pane1 ? currentPane1Filter : currentPane2Filter;
+        if (filter.isEmpty()) return files;
+        List<File> visible = new ArrayList<>();
+        for (File file : files) if (file.getName().toLowerCase(Locale.ROOT).contains(filter)) visible.add(file);
+        return visible.toArray(new File[0]);
+    }
+
+    public List<ZipEntryInfo> filterZipEntries(List<ZipEntryInfo> entries, boolean pane1) {
+        String filter = pane1 ? currentPane1Filter : currentPane2Filter;
+        if (filter.isEmpty()) return entries;
+        List<ZipEntryInfo> visible = new ArrayList<>();
+        for (ZipEntryInfo entry : entries) {
+            if (entry.getName().equals("..") || entry.getName().toLowerCase(Locale.ROOT).contains(filter)) visible.add(entry);
+        }
+        return visible;
+    }
+
     public void applyFilterToCurrentPane() {
         boolean isPane1 = activity.lastPaneSelected == 1;
-        String filter = isPane1 ? currentPane1Filter : currentPane2Filter;
-        RecyclerView pane = activity.findViewById(isPane1 ? R.id.listViewPane1 : R.id.listViewPane2);
-
         RecyclerView.Adapter a = activity.getCurrentPane().getAdapter();
         if (!(a instanceof MainFilesArrayAdapter)) return;
-        MainFilesArrayAdapter adapter = (MainFilesArrayAdapter) pane.getAdapter();
+        MainFilesArrayAdapter adapter = (MainFilesArrayAdapter) a;
 
         if (adapter.isInZip) {
             List<ZipEntryInfo> entries = activity.paneZipEntries(isPane1);
             if (entries == null) return;
-            List<ZipEntryInfo> filtered = new ArrayList<>();
-            for (ZipEntryInfo e : entries) {
-                if (e.getName().toLowerCase().contains(filter) || e.getName().equals("..")) {
-                    filtered.add(e);
-                }
-            }
-            pane.setAdapter(new MainFilesArrayAdapter(activity, filtered.toArray(new ZipEntryInfo[0]), null, isPane1, true,
+            List<ZipEntryInfo> filtered = filterZipEntries(entries, isPane1);
+            activity.replacePaneListing(isPane1, "zip:" + (isPane1 ? activity.pane1Folder : activity.pane2Folder).getAbsolutePath()
+                    + "!" + adapter.currentZipPath, new MainFilesArrayAdapter(activity, filtered.toArray(new ZipEntryInfo[0]), null, isPane1, true,
                     adapter.currentZipPath));
+            activity.setCurrentFolder(activity.archiveDisplayPath(isPane1 ? activity.pane1Folder : activity.pane2Folder)
+                    + "!" + adapter.currentZipPath, filtered);
+            activity.findViewById(isPane1 ? R.id.pane1Empty : R.id.pane2Empty).setVisibility(filtered.size() <= 1 ? View.VISIBLE : View.GONE);
         } else {
             File[] files = activity.paneFiles(isPane1);
             if (files == null) return;
-            List<File> filtered = new ArrayList<>();
-            for (File f : files) {
-                if (f.getName().toLowerCase().contains(filter) || f.getName().equals("..")) {
-                    filtered.add(f);
-                }
-            }
-            pane.setAdapter(new MainFilesArrayAdapter(activity, filtered.toArray(new File[0]),
-                    (isPane1 ? activity.pane1Folder : activity.pane2Folder).getParentFile(), isPane1, false, null));
+            File[] filtered = filterFiles(files, isPane1);
+            File folder = isPane1 ? activity.pane1Folder : activity.pane2Folder;
+            activity.replacePaneListing(isPane1, "file:" + folder.getAbsolutePath(), new MainFilesArrayAdapter(activity, filtered,
+                    folder.getParentFile() != null ? folder.getParentFile() : folder, isPane1, false, null));
+            activity.setCurrentFolder(folder, filtered);
+            activity.findViewById(isPane1 ? R.id.pane1Empty : R.id.pane2Empty).setVisibility(filtered.length == 0 ? View.VISIBLE : View.GONE);
         }
     }
 
@@ -127,7 +178,7 @@ public class SortFilterController {
         RecyclerView.Adapter a = activity.getCurrentPane().getAdapter();
         if (!(a instanceof MainFilesArrayAdapter)) return;
         MainFilesArrayAdapter adapter = (MainFilesArrayAdapter) activity.getCurrentPane().getAdapter();
-        String currentPath = adapter.isInZip ? adapter.currentZipPath
+        String currentPath = adapter.isInZip ? (isPane1 ? activity.pane1Folder : activity.pane2Folder).getPath() + "!" + adapter.currentZipPath
                 : (isPane1 ? activity.pane1Folder.getPath() : activity.pane2Folder.getPath());
 
         int sortBy = prefs.sortBy(currentPath);

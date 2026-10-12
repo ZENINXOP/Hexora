@@ -3,7 +3,6 @@ package io.github.abdurazaaqmohammed.features.dex;
 import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
-import android.text.TextUtils;
 import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.EditText;
@@ -155,6 +154,20 @@ public class DexTools {
                 }).create());
     }
 
+    /** APK DEX entries can be opened together; standalone files open directly. */
+    public void openDexEditor(File dexFile, File zipFile, String entryPath) {
+        if (zipFile != null && entryPath != null && entryPath.matches("classes(\\d*)\\.dex")) {
+            openDexPlusInZip(zipFile, entryPath);
+            return;
+        }
+        Intent intent = new Intent(context, DexEditorActivity.class)
+                .putExtra("theme", context.theme)
+                .putStringArrayListExtra("SelectedDexFiles", singleDexList(dexFile));
+        if (zipFile != null) intent.putExtra("zipFilePath", zipFile.getPath())
+                .putExtra("zipEntryPath", entryPath);
+        context.startActivityForResult(intent, 757);
+    }
+
     private static ArrayList<String> singleDexList(File dexFile) {
         ArrayList<String> single = new ArrayList<>();
         single.add(dexFile.getPath());
@@ -247,12 +260,12 @@ public class DexTools {
     private static List<String> listAllDexNames(File zipFile) throws IOException {
         List<String> dexNames = new ArrayList<>();
         ZipArchiveCache.Archive archive = ZipArchiveCache.get(zipFile);
-        String name = "classes.dex";
-        int i = 2;
-        while (archive.contains(name)) {
-            dexNames.add(name);
-            name = "classes" + i++ + ".dex";
+        for (ZipEntryInfo entry : archive.children("")) {
+            if (!entry.isDirectory() && entry.getFullPath().matches("classes(\\d*)\\.dex")) {
+                dexNames.add(entry.getFullPath());
+            }
         }
+        Collections.sort(dexNames, (a, b) -> Integer.compare(dexNameNumber(a), dexNameNumber(b)));
         return dexNames;
     }
 
@@ -279,19 +292,61 @@ public class DexTools {
             Extensions.showMessage(context, R.string.no_files_found);
             return;
         }
-        File tempFolder = session.outputDir;
         List<String> dexNames = new ArrayList<>(dexFiles);
         MaterialAlertDialogBuilder builder = new MaterialAlertDialogBuilder(context);
         builder.setTitle(context.rss.getString(R.string.fo_multidex));
-        CharSequence[] fileNames = new CharSequence[dexNames.size()];
-        for (int j = 0; j < dexNames.size(); j++) fileNames[j] = dexNames.get(j);
         boolean[] selectedItems = new boolean[dexNames.size()];
-        String classesNo = preselected == null ? "" : preselected.replace("classes", "").replace(".dex", "");
-        try {
-            int initialIndex = TextUtils.isEmpty(classesNo) ? 0 : (Integer.parseInt(classesNo) - 1);
-            if (initialIndex >= 0 && initialIndex < selectedItems.length) selectedItems[initialIndex] = true;
-        } catch (NumberFormatException ignored) { }
-        builder.setMultiChoiceItems(fileNames, selectedItems, (dialog, which, isChecked) -> selectedItems[which] = isChecked);
+        int initialIndex = dexNames.indexOf(preselected);
+        selectedItems[initialIndex < 0 ? 0 : initialIndex] = true;
+        int spacing = Math.round(8 * context.getResources().getDisplayMetrics().density);
+        LinearLayout content = new LinearLayout(context);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(spacing * 2, spacing, spacing * 2, spacing);
+        TextView count = new TextView(context);
+        content.addView(count);
+        android.widget.ScrollView scroll = new android.widget.ScrollView(context);
+        LinearLayout grid = new LinearLayout(context);
+        grid.setOrientation(LinearLayout.VERTICAL);
+        int columns = context.getResources().getConfiguration().screenWidthDp >= 320 ? 2 : 1;
+        scroll.addView(grid, new android.widget.ScrollView.LayoutParams(-1, -2));
+        content.addView(scroll, new LinearLayout.LayoutParams(-1,
+                Math.min(Math.round(Math.min(360, ((dexNames.size() + columns - 1) / columns) * 80)
+                                * context.getResources().getDisplayMetrics().density),
+                        Math.round(context.getResources().getDisplayMetrics().heightPixels * .45f))));
+        List<CheckBox> choices = new ArrayList<>();
+        AlertDialog[] shown = new AlertDialog[1];
+        Runnable updateSelection = () -> {
+            int selected = 0;
+            for (boolean checked : selectedItems) if (checked) selected++;
+            count.setText(context.getString(R.string.dex_selected_count, selected, dexNames.size()));
+            if (shown[0] != null) shown[0].getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(selected > 0);
+        };
+        LinearLayout tileRow = null;
+        for (int index = 0; index < dexNames.size(); index++) {
+            if (index % columns == 0) {
+                tileRow = new LinearLayout(context);
+                tileRow.setOrientation(LinearLayout.HORIZONTAL);
+                grid.addView(tileRow, new LinearLayout.LayoutParams(-1, -2));
+            }
+            final int itemIndex = index;
+            CheckBox tile = new com.google.android.material.checkbox.MaterialCheckBox(context);
+            tile.setText(dexNames.get(index));
+            tile.setTextSize(13);
+            tile.setMinHeight(spacing * 8);
+            tile.setPadding(spacing, spacing, spacing, spacing);
+            tile.setBackgroundResource(R.drawable.dex_selection_tile);
+            tile.setChecked(selectedItems[index]);
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, -2, 1f);
+            params.setMargins(spacing / 2, spacing / 2, spacing / 2, spacing / 2);
+            tileRow.addView(tile, params);
+            choices.add(tile);
+            tile.setOnCheckedChangeListener((button, checked) -> {
+                selectedItems[itemIndex] = checked;
+                updateSelection.run();
+            });
+        }
+        updateSelection.run();
+        builder.setView(content);
         builder.setNeutralButton(context.rss.getString(android.R.string.selectAll), null).setPositiveButton(android.R.string.ok, (dialog, which) -> {
             List<String> selectedNames = new ArrayList<>();
             for (int k = 0; k < selectedItems.length; k++) {
@@ -345,21 +400,24 @@ public class DexTools {
         builder.setNegativeButton(android.R.string.cancel, null);
         AlertDialog dialog = builder.create();
         dialog.setOnShowListener(dialogInterface -> {
+            shown[0] = dialog;
+            updateSelection.run();
             Button invertButton = dialog.getButton(AlertDialog.BUTTON_NEUTRAL);
             invertButton.setOnClickListener(v -> {
                 String buttonText = invertButton.getText().toString();
                 if (buttonText.equals(context.rss.getString(android.R.string.selectAll))) {
                     for (int i1 = 0; i1 < selectedItems.length; i1++) {
-                        selectedItems[i1] = true;
-                        dialog.getListView().setItemChecked(i1, true);
+                        choices.get(i1).setChecked(true);
                     }
                     invertButton.setText(R.string.invert_selection);
                 } else {
                     for (int i1 = 0; i1 < selectedItems.length; i1++) {
-                        selectedItems[i1] = !selectedItems[i1];
-                        dialog.getListView().setItemChecked(i1, selectedItems[i1]);
+                        choices.get(i1).setChecked(!selectedItems[i1]);
                     }
                 }
+                boolean any = false;
+                for (boolean selected : selectedItems) any |= selected;
+                dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(any);
             });
         });
         dialog.show();
@@ -373,11 +431,15 @@ public class DexTools {
             if (f.isFile() && f.length() > 0) selectedPaths.add(f.getPath());
             else if (missing == null) missing = f.getAbsolutePath();
         }
-        if (selectedPaths.isEmpty()) {
+        if (missing != null || selectedPaths.isEmpty()) {
             Extensions.showMessage(context, missing != null ? missing : context.rss.getString(R.string.file_no_longer_available));
             return;
         }
-        openDexPlusFiles(selectedPaths, null);
+        Intent intent = new Intent(context, DexEditorActivity.class)
+                .putExtra("theme", context.theme)
+                .putExtra("zipFilePath", session.zipFile.getAbsolutePath())
+                .putStringArrayListExtra("SelectedDexFiles", selectedPaths);
+        context.startActivityForResult(intent, 757);
     }
 
     private void repairDex(File dexFile, File zipFile) {
@@ -523,7 +585,8 @@ public class DexTools {
                 File tempFile = new File(tempFolder, name);
                 ZipArchiveCache.Archive archive = ZipArchiveCache.get(zipFile);
                 archive.copyEntry(fullPath, tempFile);
-                boolean binaryXml = name.endsWith(".xml") && FileUtils.isAxml(tempFile);
+                String lowerName = name.toLowerCase(Locale.ROOT);
+                boolean binaryXml = lowerName.endsWith(".xml") && FileUtils.isAxml(tempFile);
                 File resources = new File(tempFolder, "resources.arsc");
                 if (binaryXml && archive.contains("resources.arsc")) {
                     archive.copyEntry("resources.arsc", resources);
@@ -536,10 +599,9 @@ public class DexTools {
                         new Thread(() -> deleteQuietly(tempFolder)).start();
                         return;
                     }
-                    if (name.endsWith(".dex")) {
-                        // Other dex files are extracted only if the chosen tool needs them.
-                        showDexOptionsDialog(tempFile, zipFile, fullPath, name);
-                    } else if (name.endsWith(".xml")) {
+                    if (lowerName.endsWith(".dex")) {
+                        openDexEditor(tempFile, zipFile, fullPath);
+                    } else if (lowerName.endsWith(".xml")) {
                         Intent intent = new Intent(context, TextEditorActivity.class)
                                 .putExtra("zf", zipFile.getPath())
                                 .putExtra("zipEntryPath", fullPath)
@@ -549,8 +611,11 @@ public class DexTools {
                             if (resources.isFile()) intent.putExtra("rssPath", resources.getPath());
                         }
                         context.startActivityForResult(intent, 757);
-                    } else if (name.equals("resources.arsc")) {
-                        showArscOpenWith(tempFile, zipFile, fullPath);
+                    } else if (lowerName.endsWith(".arsc")) {
+                        Intent intent = new Intent(context, ArscEditorPlusActivity.class)
+                                .putExtra("path", tempFile.getPath()).putExtra("apkPath", zipFile.getPath())
+                                .putExtra("zipEntryPath", fullPath).putExtra("arscMode", ArscEditorPlusActivity.MODE_PLUS);
+                        context.startActivityForResult(intent, 757);
                     } else {
                         openWith.open(tempFile, name, zipFile, fullPath);
                     }
@@ -671,7 +736,7 @@ public class DexTools {
                     File tmpDir = new File(context.getCacheDir(), "dexmerge" + UUID.randomUUID());
                     tmpDir.mkdirs();
                     List<File> inputs = new ArrayList<>();
-                    try (ZipFile zf = new ZipFile(zipFile)) {
+                    try (ZipFile zf = io.github.abdurazaaqmohammed.domain.files.ArchivePasswords.open(zipFile)) {
                         List<String> names = new ArrayList<>();
                         for (FileHeader fh : zf.getFileHeaders()) {
                             String n = fh.getFileName();
@@ -757,7 +822,7 @@ public class DexTools {
         return 28;
     }
 
-    private int dexNameNumber(String name) {
+    private static int dexNameNumber(String name) {
         if ("classes.dex".equals(name)) {
             return 1;
         }

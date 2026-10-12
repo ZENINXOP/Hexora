@@ -36,6 +36,11 @@ public final class EditorDocumentReader {
 
     private EditorDocumentReader() { }
 
+    /** A complete page supplied by the disk-backed binary text viewer. */
+    public static Result binaryPage(String text, Charset charset) {
+        return new Result(text, Mode.BINARY, charset, new byte[0]);
+    }
+
     // Does not own the stream; callers close it on success, failure and cancellation.
     public static Result read(InputStream source, long knownBytes) throws IOException {
         if (source == null) throw new IOException("Cannot open document");
@@ -51,18 +56,11 @@ public final class EditorDocumentReader {
             count += n;
         }
         input.reset();
-        Charset charset = StandardCharsets.UTF_8;
-        int bomLength = 0;
-        if (count >= 3 && (sample[0] & 255) == 0xef && (sample[1] & 255) == 0xbb && (sample[2] & 255) == 0xbf) {
-            bomLength = 3;
-        } else if (count >= 2 && (sample[0] & 255) == 0xff && (sample[1] & 255) == 0xfe) {
-            charset = StandardCharsets.UTF_16LE; bomLength = 2;
-        } else if (count >= 2 && (sample[0] & 255) == 0xfe && (sample[1] & 255) == 0xff) {
-            charset = StandardCharsets.UTF_16BE; bomLength = 2;
-        }
+        Charset charset = sampleCharset(sample, count);
+        int bomLength = sampleBomLength(sample, count);
         byte[] bom = java.util.Arrays.copyOf(sample, bomLength);
         if (isBinary(new String(sample, bomLength, count - bomLength, charset))) {
-            return new Result(hexPreview(sample, Math.min(count, 4096)), Mode.BINARY, charset, bom);
+            return new Result(binaryTextPreview(input, charset, bomLength), Mode.BINARY, charset, bom);
         }
         for (int i = 0; i < bomLength; i++) input.read();
         InputStreamReader reader = new InputStreamReader(input, charset);
@@ -81,7 +79,8 @@ public final class EditorDocumentReader {
             for (int i = 0; i < n; i++) {
                 char c = buffer[i];
                 if (c == 0 || (c < 32 && c != '\n' && c != '\r' && c != '\t' && c != '\f')) {
-                    return new Result(hexPreview(sample, Math.min(count, 4096)), Mode.BINARY, charset, bom);
+                    return new Result(binaryTextPreview(new java.io.ByteArrayInputStream(sample, 0, count),
+                            charset, bomLength), Mode.BINARY, charset, bom);
                 }
                 if (text.length() >= charLimit) { preview = true; break outer; }
                 text.append(c);
@@ -103,6 +102,11 @@ public final class EditorDocumentReader {
         Mode mode = preview ? Mode.PREVIEW
                 : value.length() > 256 * 1024 || lines > 10_000 || maxColumn > 4096 ? Mode.LARGE : Mode.EDIT;
         return new Result(value, mode, charset, bom);
+    }
+
+    public static Result readOnlyText(String value) throws IOException {
+        Result bounded = fromText(value);
+        return new Result(bounded.text, Mode.PREVIEW, StandardCharsets.UTF_8, new byte[0]);
     }
 
     /** Also bounds already decoded XML, shared text, and restored unsaved content. */
@@ -135,6 +139,23 @@ public final class EditorDocumentReader {
         return bytes;
     }
 
+    /** A bounded routing hint; read() still checks the complete editable document. */
+    public static boolean isTextSample(byte[] bytes, int count) {
+        int bomLength = sampleBomLength(bytes, count);
+        return !isBinary(new String(bytes, bomLength, count - bomLength, sampleCharset(bytes, count)));
+    }
+
+    private static Charset sampleCharset(byte[] bytes, int count) {
+        if (count >= 2 && (bytes[0] & 255) == 0xff && (bytes[1] & 255) == 0xfe) return StandardCharsets.UTF_16LE;
+        if (count >= 2 && (bytes[0] & 255) == 0xfe && (bytes[1] & 255) == 0xff) return StandardCharsets.UTF_16BE;
+        return StandardCharsets.UTF_8;
+    }
+
+    private static int sampleBomLength(byte[] bytes, int count) {
+        if (count >= 3 && (bytes[0] & 255) == 0xef && (bytes[1] & 255) == 0xbb && (bytes[2] & 255) == 0xbf) return 3;
+        return sampleCharset(bytes, count).equals(StandardCharsets.UTF_8) ? 0 : 2;
+    }
+
     private static boolean isBinary(String value) {
         int controls = 0;
         for (int i = 0; i < value.length(); i++) {
@@ -161,26 +182,38 @@ public final class EditorDocumentReader {
         return value.substring(0, end);
     }
 
-    private static String hexPreview(byte[] bytes, int count) {
-        char[] hex = "0123456789ABCDEF".toCharArray();
-        StringBuilder out = new StringBuilder(count * 5);
-        for (int offset = 0; offset < count; offset += 16) {
-            for (int shift = 28; shift >= 0; shift -= 4) out.append(hex[(offset >>> shift) & 15]);
-            out.append("  ");
-            for (int j = 0; j < 16; j++) {
-                if (offset + j < count) {
-                    int b = bytes[offset + j] & 255;
-                    out.append(hex[b >>> 4]).append(hex[b & 15]).append(' ');
-                } else out.append("   ");
+    /** Text viewer decodes bytes; only Hex editor presents offsets and hexadecimal columns. */
+    private static String binaryTextPreview(InputStream input, Charset charset, int bomLength) throws IOException {
+        for (int i = 0; i < bomLength; i++) input.read();
+        InputStreamReader reader = new InputStreamReader(input, charset);
+        StringBuilder text = new StringBuilder(8192);
+        char[] buffer = new char[4096];
+        int lines = 1, column = 0, decodedChars = 0;
+        boolean previousCr = false;
+        outer: while (true) {
+            checkCancelled();
+            int count = reader.read(buffer);
+            if (count < 0) break;
+            for (int i = 0; i < count; i++) {
+                char c = buffer[i];
+                if (++decodedChars > PREVIEW_CHARS) break outer;
+                if (text.length() >= PREVIEW_CHARS) break outer;
+                // MT's text presentation hides binary padding/control bytes instead of
+                // replacing every NUL with a large diamond. Count them towards the read cap.
+                if (Character.isISOControl(c) && c != '\n' && c != '\r' && c != '\t') continue;
+                if (c == '\r' || c == '\n') {
+                    if (!(c == '\n' && previousCr)) lines++;
+                    column = 0;
+                } else column++;
+                if (lines > PREVIEW_LINES || column > PREVIEW_LINE_CHARS) break outer;
+                text.append(c);
+                previousCr = c == '\r';
             }
-            out.append(" |");
-            for (int j = offset; j < Math.min(count, offset + 16); j++) {
-                int b = bytes[j] & 255;
-                out.append(b >= 32 && b < 127 ? (char) b : '.');
-            }
-            out.append("|\n");
         }
-        return out.toString();
+        if (text.length() > 0 && Character.isHighSurrogate(text.charAt(text.length() - 1))) {
+            text.setLength(text.length() - 1);
+        }
+        return text.toString();
     }
 
     private static void checkCancelled() throws InterruptedIOException {

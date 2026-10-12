@@ -49,6 +49,7 @@ import io.github.abdurazaaqmohammed.utils.SignWrapper;
 import io.github.codehasan.colorpicker.extensions.Extensions;
 
 import java.io.File;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -192,6 +193,22 @@ public class EntryDialogs {
                 });
     }
 
+    private void deleteWithProgress(File file, boolean elevated) throws IOException {
+        if (elevated) {
+            try {
+                AccessManager.delete(context, file.getAbsolutePath(), true);
+                io.github.abdurazaaqmohammed.domain.files.FileWorkProgress.advance(1);
+                return;
+            } catch (IOException ignored) { }
+            // A shell delete supplies progress per selected target, not per nested inode.
+            try (io.github.abdurazaaqmohammed.domain.files.FileWorkProgress.Scope scope =
+                         io.github.abdurazaaqmohammed.domain.files.FileWorkProgress.track(units -> { })) {
+                io.github.abdurazaaqmohammed.domain.files.SafeFileOperations.delete(file);
+            }
+            io.github.abdurazaaqmohammed.domain.files.FileWorkProgress.advance(1);
+        } else io.github.abdurazaaqmohammed.domain.files.SafeFileOperations.delete(file);
+    }
+
     public void showDeleteDialog(int position, File file, ZipEntryInfo entry, boolean multi) {
         Object[] values = state.values();
         boolean isInZip = state.isInZip();
@@ -216,9 +233,29 @@ public class EntryDialogs {
             Runnable doDelete = () -> {
                 pm.show();
                 new Thread(() -> {
+                    io.github.abdurazaaqmohammed.domain.files.FileWorkProgress.Scope progressScope = null;
                     try {
-                        if (isInZip) FileUtils.copyFile(zipFile, new File(zipFile.getParent(), zipFile.getName() + ".bak"));
+                        pm.setText(context.getString(R.string.progress_counting));
                         boolean useElevatedForDelete = AccessManager.fileOpsOn(context);
+                        long planned = isInZip ? Math.max(1, zipFile.length()) + (sign[0] ? 1 : 0) : 0;
+                        if (!isInZip) {
+                            List<File> targets = new ArrayList<>();
+                            if (multi) for (int index : selectedPositions) targets.add((File) values[index]);
+                            else targets.add(file);
+                            for (File target : targets) {
+                                long count = useElevatedForDelete ? 1 : io.github.abdurazaaqmohammed.domain.files.FileWorkProgress.deleteUnits(target);
+                                planned = Math.addExact(planned, count);
+                            }
+                        }
+                        final long total = Math.max(1, planned);
+                        long[] deleted = {0};
+                        pm.setText(context.getString(R.string.deleting, filesToDisplay));
+                        pm.setProgress(0L, total);
+                        progressScope = io.github.abdurazaaqmohammed.domain.files.FileWorkProgress.track(units -> {
+                            deleted[0] += units;
+                            pm.setProgress(Math.min(deleted[0], total - 1), total);
+                        });
+                        if (isInZip) FileUtils.copyFile(zipFile, new File(zipFile.getParent(), zipFile.getName() + ".bak"));
                         if (multi) {
                             if (!isInZip) {
                                 File selectedFile = null;
@@ -228,16 +265,7 @@ public class EntryDialogs {
                                     if (finalSelectedFile1 != null)
                                         pm.setText(context.rss.getString(R.string.deleting, finalSelectedFile1.getName()));
 
-                                    if (useElevatedForDelete) {
-                                        try {
-                                            AccessManager.delete(context, selectedFile.getAbsolutePath(), true);
-                                            continue;
-                                        } catch (Exception ignored) {}
-                                    }
-                                    if (selectedFile.isDirectory())
-                                        io.github.abdurazaaqmohammed.domain.files.SafeFileOperations.delete(selectedFile);
-                                    else
-                                        io.github.abdurazaaqmohammed.domain.files.SafeFileOperations.delete(selectedFile);
+                                    deleteWithProgress(selectedFile, useElevatedForDelete);
                                 }
                                 if (selectedFile != null) {
                                     File finalSelectedFile = selectedFile;
@@ -254,21 +282,9 @@ public class EntryDialogs {
                                 context.handler.post(state::clearSelection);
                             }
                         } else if (!isInZip) {
-                            int total = (int) Util.countInsideFolder(file).total();
-                            pm.setProgress(0, total);
                             pm.setText(context.rss.getString(R.string.deleting, file.getName()));
 
-                            if (useElevatedForDelete) {
-                                try {
-                                    AccessManager.delete(context, file.getAbsolutePath(), true);
-                                } catch (Exception e) {
-                                    if (file.isDirectory()) io.github.abdurazaaqmohammed.domain.files.SafeFileOperations.delete(file);
-                                    else io.github.abdurazaaqmohammed.domain.files.SafeFileOperations.delete(file);
-                                }
-                            } else {
-                                if (file.isDirectory()) io.github.abdurazaaqmohammed.domain.files.SafeFileOperations.delete(file);
-                                else io.github.abdurazaaqmohammed.domain.files.SafeFileOperations.delete(file);
-                            }
+                            deleteWithProgress(file, useElevatedForDelete);
                             context.handler.post(() -> {
                                 state.clearSelection();
                                 context.loadFolderInPane(file.getParentFile(), pane1);
@@ -279,10 +295,13 @@ public class EntryDialogs {
                             context.handler.post(state::clearSelection);
                         }
                         context.handler.post(context::refreshAllPanes);
+                        pm.setProgress(total, total);
                         pm.dismiss();
                     } catch (Exception e) {
                         pm.dismiss();
                         new ErrorUtil(context).showError(e);
+                    } finally {
+                        if (progressScope != null) progressScope.close();
                     }
                 }).start();
             };

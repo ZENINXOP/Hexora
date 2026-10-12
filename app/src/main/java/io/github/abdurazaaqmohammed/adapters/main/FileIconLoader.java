@@ -95,7 +95,47 @@ public class FileIconLoader {
         } else {
             fileIconView.setImageDrawable(copyIcon(cachedFolderIcon));
             fileDateView.setVisibility(View.INVISIBLE);
+            if (!isInZip && isAndroidPackageFolder(file)) loadPackageFolderIconAsync(file, fileIconView);
         }
+    }
+
+    /** Only package directories immediately inside Android/data, obb, or media. */
+    private static boolean isAndroidPackageFolder(File folder) {
+        File parent = folder.getParentFile();
+        if (parent == null || parent.getParentFile() == null
+                || !"Android".equals(parent.getParentFile().getName())) return false;
+        String category = parent.getName();
+        return ("data".equals(category) || "obb".equals(category) || "media".equals(category))
+                && folder.getName().contains(".");
+    }
+
+    private void loadPackageFolderIconAsync(File folder, ImageView view) {
+        String rowKey = "package-folder:" + folder.getAbsolutePath();
+        view.setTag(rowKey);
+        iconLoaderService.execute(() -> {
+            if (!rowKey.equals(view.getTag())) return;
+            try {
+                android.content.pm.PackageManager manager = context.getPackageManager();
+                android.content.pm.PackageInfo info = manager.getPackageInfo(folder.getName(), 0);
+                if (info.applicationInfo == null) return;
+                String cacheKey = "installed-app:" + folder.getName() + ':' + info.lastUpdateTime
+                        + ':' + info.applicationInfo.sourceDir;
+                Drawable icon = iconCache.get(cacheKey);
+                if (icon == null) {
+                    icon = manager.getApplicationIcon(info.applicationInfo);
+                    iconCache.put(cacheKey, icon);
+                }
+                final Drawable loaded = icon;
+                context.runOnUiThread(() -> {
+                    if (rowKey.equals(view.getTag())) view.setImageDrawable(new FolderAppBadgeDrawable(
+                            copyIcon(cachedFolderIcon), copyIcon(loaded),
+                            com.google.android.material.color.MaterialColors.getColor(view,
+                                    com.google.android.material.R.attr.colorSurface)));
+                });
+            } catch (android.content.pm.PackageManager.NameNotFoundException | SecurityException ignored) {
+                // An uninstalled or inaccessible app keeps the regular folder icon.
+            }
+        });
     }
 
     private void setupNonFolderIconView(String path, ImageView fileIconView) {

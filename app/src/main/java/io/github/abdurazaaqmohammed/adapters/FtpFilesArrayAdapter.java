@@ -57,6 +57,10 @@ public class FtpFilesArrayAdapter extends RecyclerView.Adapter<FtpFilesArrayAdap
 
     public FTPFileWrapper getItem(int position) { return values[position]; }
 
+    public FTPFileWrapper[] getShownFiles() {
+        return java.util.Arrays.copyOfRange(values, Math.min(1, values.length), values.length);
+    }
+
     @Override
     public int getItemCount() { return values.length; }
 

@@ -108,6 +108,7 @@ public final class SafeFileOperations {
                 else copyFile(child, target);
             }
             destination.setLastModified(source.lastModified());
+            FileWorkProgress.advance(1);
         } finally {
             ancestors.remove(source.getCanonicalPath());
         }
@@ -124,13 +125,14 @@ public final class SafeFileOperations {
             long expectedSize = source.length();
             long expectedTime = source.lastModified();
             long copied = 0;
-            try (InputStream in = new FileInputStream(source); FileOutputStream out = new FileOutputStream(temporary)) {
+            try (InputStream in = FileWorkProgress.openInput(source); FileOutputStream out = new FileOutputStream(temporary)) {
                 byte[] buffer = new byte[64 * 1024];
                 int count;
                 while ((count = in.read(buffer)) != -1) {
                     checkInterrupted();
                     out.write(buffer, 0, count);
                     copied += count;
+                    FileWorkProgress.advance(count);
                 }
                 out.getFD().sync();
             }
@@ -141,6 +143,7 @@ public final class SafeFileOperations {
                 throw new IOException("Cannot finish copy: " + destination);
             }
             destination.setLastModified(expectedTime);
+            FileWorkProgress.advance(1);
         } finally {
             if (temporary.exists()) temporary.delete();
         }
@@ -156,11 +159,12 @@ public final class SafeFileOperations {
                 throw new IOException("Incomplete directory copy: " + source);
             }
             for (File child : children) verifyCopy(child, new File(destination, child.getName()));
+            FileWorkProgress.advance(1);
         } else {
             if (!destination.isFile() || source.length() != destination.length()) {
                 throw new IOException("Incomplete file copy: " + source);
             }
-            try (InputStream left = new FileInputStream(source); InputStream right = new FileInputStream(destination)) {
+            try (InputStream left = FileWorkProgress.openInput(source); InputStream right = new FileInputStream(destination)) {
                 byte[] a = new byte[64 * 1024];
                 byte[] b = new byte[a.length];
                 int count;
@@ -175,9 +179,11 @@ public final class SafeFileOperations {
                     for (int i = 0; i < count; i++) {
                         if (a[i] != b[i]) throw new IOException("Copy verification failed: " + source);
                     }
+                    FileWorkProgress.advance(count);
                 }
                 if (right.read() != -1) throw new IOException("Copy verification failed: " + source);
             }
+            FileWorkProgress.advance(1);
         }
     }
 
@@ -192,6 +198,7 @@ public final class SafeFileOperations {
             for (File child : children) delete(child);
         }
         if (!file.delete()) throw new IOException("Cannot delete: " + file);
+        FileWorkProgress.advance(1);
     }
 
     private static void checkInterrupted() throws IOException {

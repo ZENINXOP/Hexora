@@ -4,9 +4,15 @@ import java.util.Locale;
 
 /** Recognizable labels remain distinct even when users cannot distinguish colors. */
 public enum FileType {
-    PYTHON("PY", 0xFF356A99, "py", "pyw", "pyi", "pyc"),
+    PYTHON("PY", 0xFF356A99, "py", "pyw", "pyi"),
     XML("XML", 0xFF315CBC, "xml", "xsd", "xsl", "xslt", "svg"),
-    JAVA("JAVA", 0xFF8A563F, "java", "class"),
+    JAVA("JAVA", 0xFF8A563F, "java"),
+    DEX("DEX", 0xFF008C87, "dex", "odex", "vdex"),
+    ARSC("ARSC", 0xFFB87900, "arsc"),
+    CLASS("JVM", 0xFF855A47, "class"),
+    PYTHON_BYTECODE("PYC", 0xFF526A86, "pyc", "pyo"),
+    LIBRARY("LIB", 0xFF705F9C, "lib", "a", "so", "dll", "o"),
+    DATABASE("DB", 0xFF37788C, "db", "sqlite", "sqlite3"),
     TEXT("TXT", 0xFF315CBC, "txt", "text"),
     KOTLIN("KT", 0xFF8054AD, "kt", "kts"),
     JAVASCRIPT("JS", 0xFF997310, "js", "mjs", "cjs", "jsx"),
@@ -15,7 +21,7 @@ public enum FileType {
     HTML("HTML", 0xFFB95434, "html", "htm", "xhtml", "vue", "svelte"),
     CSS("CSS", 0xFF6654B3, "css", "scss", "sass", "less"),
     SHELL("SH", 0xFF47735B, "sh", "bash", "zsh", "bat", "cmd", "ps1"),
-    SQL("SQL", 0xFF3B798F, "sql", "db", "sqlite", "sqlite3"),
+    SQL("SQL", 0xFF3B798F, "sql"),
     MARKDOWN("MD", 0xFF536D83, "md", "markdown", "rst"),
     CONFIG("CFG", 0xFF7A6A52, "ini", "conf", "cfg", "properties", "prop", "toml", "env", "gradle", "pro"),
     YAML("YML", 0xFF997042, "yml", "yaml"),
@@ -34,7 +40,7 @@ public enum FileType {
     SLIDES("PPT", 0xFFAC6040, "ppt", "pptx", "odp"),
     FONT("Aa", 0xFF6552C9, "ttf", "otf", "woff", "woff2"),
     CERTIFICATE("KEY", 0xFF947431, "pem", "crt", "cer", "key", "jks", "keystore", "p12"),
-    BINARY("BIN", 0xFF65737F, "bin", "dat", "lib", "a", "so", "dll", "exe", "o");
+    BINARY("BIN", 0xFF65737F, "bin", "dat", "exe");
 
     public final String label;
     public final int color;
@@ -44,6 +50,16 @@ public enum FileType {
         this.label = label;
         this.color = color;
         this.extensions = extensions;
+    }
+
+    /** Compiled formats must never be decoded as source text based on their icon. */
+    public boolean isText() {
+        switch (this) {
+            case DEX: case ARSC: case CLASS: case PYTHON_BYTECODE: case LIBRARY:
+            case DATABASE: case BINARY: case PDF: case WORD: case SHEET: case SLIDES:
+            case FONT: case CERTIFICATE: return false;
+            default: return true;
+        }
     }
 
     public static FileType forPath(String path) {

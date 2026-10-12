@@ -109,12 +109,17 @@ public class SignWrapper {
     }
 
     public static void requireAuth(AppCompatActivity activity, SignKeyCallback callback) {
+        requireAuth(activity, callback, () -> { });
+    }
+
+    public static void requireAuth(AppCompatActivity activity, SignKeyCallback callback, Runnable onCancelled) {
         SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(activity);
         String keyPath;
         try {
             keyPath = prefs.getString("keyPath", FileUtils.getDebugKeystore(activity).getPath());
         } catch (IOException e) {
             Extensions.showMessage(activity, activity.getString(R.string.sig_default_key_failed, String.valueOf(e.getMessage())));
+            onCancelled.run();
             return;
         }
         File keyFile = new File(keyPath);
@@ -132,16 +137,16 @@ public class SignWrapper {
         } else if (prefs.getBoolean("useBiometrics", false) && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             String storedPass = PasswordEncryptor.decryptString(prefs.getString("keyPass", ""));
             if (!TextUtils.isEmpty(storedPass)) {
-                authenticateWithBiometrics(activity, keyFile, storedPass, v1, v2, v3, v4, signedBy, zipalign, callback);
+                authenticateWithBiometrics(activity, keyFile, storedPass, v1, v2, v3, v4, signedBy, zipalign, callback, onCancelled);
                 return;
             }
-            requestPassword(activity, keyFile, v1, v2, v3, v4, signedBy, zipalign, callback);
+            requestPassword(activity, keyFile, v1, v2, v3, v4, signedBy, zipalign, callback, onCancelled);
         } else {
-            requestPassword(activity, keyFile, v1, v2, v3, v4, signedBy, zipalign, callback);
+            requestPassword(activity, keyFile, v1, v2, v3, v4, signedBy, zipalign, callback, onCancelled);
         }
     }
 
-    private static void requestPassword(AppCompatActivity activity, File keyFile, boolean v1, boolean v2, boolean v3, boolean v4, String signedBy, boolean zipalign, SignKeyCallback callback) {
+    private static void requestPassword(AppCompatActivity activity, File keyFile, boolean v1, boolean v2, boolean v3, boolean v4, String signedBy, boolean zipalign, SignKeyCallback callback, Runnable onCancelled) {
         EditText pwInput = new EditText(activity);
         pwInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
         pwInput.setHint(activity.getString(R.string.enter_password));
@@ -149,10 +154,15 @@ public class SignWrapper {
         layout.setOrientation(LinearLayout.VERTICAL);
         layout.setPadding(48, 24, 48, 24);
         layout.addView(UiFields.wrap(activity, pwInput, null, 0));
-        new MaterialAlertDialogBuilder(activity)
+        java.util.concurrent.atomic.AtomicBoolean accepted = new java.util.concurrent.atomic.AtomicBoolean();
+        androidx.appcompat.app.AlertDialog dialog = new MaterialAlertDialogBuilder(activity)
                 .setTitle(activity.getString(R.string.enter_password))
                 .setView(layout)
-                .setPositiveButton(android.R.string.ok, (d, w) -> {
+                .setPositiveButton(android.R.string.ok, null)
+                .setNegativeButton(android.R.string.cancel, null)
+                .create();
+        dialog.setOnDismissListener(d -> { if (!accepted.get()) onCancelled.run(); });
+        dialog.setOnShowListener(d -> dialog.getButton(androidx.appcompat.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
                     String password = pwInput.getText() != null ? pwInput.getText().toString() : "";
                     if (TextUtils.isEmpty(password)) {
                         Extensions.showMessage(activity, R.string.no_password_entered);
@@ -162,19 +172,21 @@ public class SignWrapper {
                         Extensions.showMessage(activity, R.string.invalid_password);
                         return;
                     }
+                    accepted.set(true);
+                    dialog.dismiss();
                     callback.onAuthenticated(new SignWrapper(keyFile, password, v1, v2, v3, v4, signedBy, zipalign));
-                })
-                .setNegativeButton(android.R.string.cancel, null)
-                .show();
+                }));
+        dialog.show();
     }
 
-    private static void authenticateWithBiometrics(AppCompatActivity activity, File keyFile, String storedPass, boolean v1, boolean v2, boolean v3, boolean v4, String signedBy, boolean zipalign, SignKeyCallback callback) {
+    private static void authenticateWithBiometrics(AppCompatActivity activity, File keyFile, String storedPass, boolean v1, boolean v2, boolean v3, boolean v4, String signedBy, boolean zipalign, SignKeyCallback callback, Runnable onCancelled) {
         Executor executor = ContextCompat.getMainExecutor(activity);
         BiometricPrompt biometricPrompt = new BiometricPrompt(activity, executor, new BiometricPrompt.AuthenticationCallback() {
             @Override
             public void onAuthenticationError(int errorCode, @NonNull CharSequence errString) {
                 super.onAuthenticationError(errorCode, errString);
                 Extensions.showMessage(activity, activity.getString(R.string.sig_auth_error, errString));
+                onCancelled.run();
             }
 
             @Override
@@ -395,19 +407,25 @@ public class SignWrapper {
 
     private File getV4SignatureOutputFile(File inputApk, File output) {
         String fileName = inputApk.getName();
-        String formattedName = fileName.replaceFirst("\\.(xapk|aspk|apk[sm]|apk)$", ".idsig");
-        String idsigName;
-        if (fileName.equals(formattedName)) {
-            int lastDot = fileName.lastIndexOf('.');
-            if (lastDot == -1) {
-                idsigName = fileName + "_signed";
-            } else {
-                idsigName = fileName.substring(0, lastDot) + "_signed." + fileName.substring(lastDot + 1);
-            }
-        } else {
-            idsigName = formattedName;
-        }
+        String formattedName = fileName.replaceFirst("(?i)\\.(xapk|aspk|apk[sm]|apk)$", ".idsig");
+        String idsigName = fileName.equals(formattedName) ? fileName + ".idsig" : formattedName;
         return resolveSibling(output, idsigName);
+    }
+
+    /** Move a staged APK's optional incremental-install signature to its final name. */
+    public void publishStagedV4Signature(File staged, File destination) throws IOException {
+        if (!v4) return;
+        File signature = getV4SignatureOutputFile(staged, staged);
+        if (!signature.isFile()) throw new IOException("APK saved, but its V4 signature is unavailable.");
+        File target = getV4SignatureOutputFile(destination, destination);
+        io.github.abdurazaaqmohammed.domain.files.SafeFileOperations.writeAtomically(target,
+                readAllBytes(signature), (temporary, output) -> {
+                    if (!temporary.renameTo(output)) throw new IOException("APK saved, but its V4 signature could not be published.");
+                });
+    }
+
+    public void discardStagedV4Signature(File staged) {
+        if (v4 && staged != null) getV4SignatureOutputFile(staged, staged).delete();
     }
 
     private void finishInPlaceSign(File inputApk, File output) throws IOException {

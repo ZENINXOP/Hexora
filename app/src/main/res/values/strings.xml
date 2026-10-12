@@ -177,7 +177,21 @@
     <string name="loading">Loading…</string>
     <string name="editor_large_mode">Large file mode · Syntax colors and word wrap are paused for smoother editing.</string>
     <string name="editor_large_preview">Read-only preview · This file is too large or has very long lines. Only the beginning is shown; saving is disabled.</string>
-    <string name="editor_binary_preview">Binary file · Read-only byte preview. Use Hex editor to view or edit the complete file.</string>
+    <string name="editor_binary_preview">Read-only library text. Binary control bytes are hidden; undecodable bytes appear as replacement characters. Large files are shown in pages.</string>
+    <string name="editor_text_page_count">Page %1$d of %2$d</string>
+    <string name="editor_text_go_to_page">Go to text page</string>
+    <string name="editor_text_invalid_page">Enter an available page number</string>
+    <string name="folder_access_title">Folder access</string>
+    <string name="folder_access_message">Grant this folder through the system file picker to browse without Shizuku. Some Android versions block permissions for data and obb; on those devices, use Shizuku or enabled root access.</string>
+    <string name="folder_access_choose">Grant folder access</string>
+    <string name="folder_access_picker_missing">The system folder picker is unavailable.</string>
+    <string name="folder_access_reading">Opening file with folder permission…</string>
+    <string name="opened_with_folder_access">Opened using system folder permission</string>
+    <string name="dex_selected_count">%1$d of %2$d DEX files selected</string>
+    <string name="progress_complete_remaining">%1$s complete · %2$s remaining</string>
+    <string name="progress_counting">Calculating total work…</string>
+    <string name="moving">Moving %1$s…</string>
+    <string name="editor_preview_short">Preview</string>
     <string name="editor_preview_no_save">This is a read-only preview. The original file cannot be overwritten.</string>
     <string name="editor_load_failed">Could not load this file. Use File options → File → Reload file to try again.</string>
     <string name="enter_path">Enter path</string>
@@ -962,6 +976,33 @@ Layout Inspector
     <string name="rec_capturing_sub">Tap the recorder to stop</string>
     <string name="locate_failed">Could not locate this file</string>
     <string name="locate_resolving">Resolving file…</string>
+    <string name="shared_no_file">No file was shared.</string>
+    <string name="shared_read_failed">The sharing app did not allow this file to be read. Open it in that app and share it to Hexora again.</string>
+    <string name="merge_single_apk">Merge to single APK</string>
+    <string name="archive_password_title">Archive password</string>
+    <string name="dex_add_class">Add class</string>
+    <string name="dex_rename_package">Rename package</string>
+    <string name="archive_search_limits">Up to 500 matches; text entries under 2 MiB; 64 MiB total scanned.</string>
+    <string name="archive_search_limited">Search limits reached; showing available matches.</string>
+    <string name="clipboard_copy">Copy to clipboard</string>
+    <string name="clipboard_clear">Clear file clipboard</string>
+    <string name="clipboard_copy_count">%1$d items copied to file clipboard</string>
+    <string name="clipboard_cut_count">%1$d items ready to move</string>
+    <string name="clipboard_busy">A paste operation is already running.</string>
+    <string name="clipboard_local_destination">Open a local folder to paste files.</string>
+    <string name="dex_import_classes">Import Smali/DEX</string>
+    <string name="dex_rename_class">Rename class</string>
+    <string name="dex_class_name_hint">Class name, for example com/example/NewClass</string>
+    <string name="sh_arguments">Arguments</string>
+    <string name="sh_timeout">Timeout in seconds (0 = unlimited)</string>
+    <string name="sh_stop">Stop</string>
+    <string name="sh_send">Send</string>
+    <string name="sh_end_input">End input</string>
+    <string name="sh_input_hint">Input for script</string>
+    <string name="sh_running">Running…</string>
+    <string name="merge_output_folder">Save to: %1$s</string>
+    <string name="merge_choose_output">Choose output folder</string>
+    <string name="merge_obb_separate">OBB expansion files are separate game data and are not included in the merged APK.</string>
     <string name="color_stop">Stop</string>
     <string name="color_start">Start</string>
     <string name="storage_manager">Storage Manager</string>
@@ -1523,8 +1564,10 @@ Layout Inspector
     <string name="sh_edit">Edit</string>
     <string name="sh_execute">Execute</string>
     <string name="sh_run_as_root">Run as root</string>
+    <string name="sh_run_as_app">Run as app</string>
+    <string name="sh_run_with_shizuku">Run with Shizuku</string>
     <string name="sh_root_unavailable">Root mode is not enabled</string>
-    <string name="sh_warning">Warning: shell scripts execute with full privileges and can modify or damage your device, erase data, or compromise security. Only execute scripts obtained from sources you trust, and review the script contents before executing. You assume sole responsibility for any consequences resulting from execution.</string>
+    <string name="sh_warning">Only run scripts you trust. Scripts can modify files and settings allowed by the selected execution mode.</string>
     <string name="sh_output">Script output</string>
     <string name="sh_exit_code">Exit code: %1$d</string>
     <string name="sh_no_output">(no output)</string>
@@ -1590,4 +1633,5 @@ Layout Inspector
         <item>CSS</item>
         <item>Markdown</item>
     </string-array>
+    <string name="editor_reload_discard">Reloading will discard unsaved changes in this file.</string>
 </resources>

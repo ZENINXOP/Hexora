@@ -42,11 +42,14 @@ public final class RootStaging {
 
     public static boolean needsStaging(Context context, File file) {
         if (context == null || file == null) return false;
+        if (file instanceof io.github.abdurazaaqmohammed.MPManager.shizuku.ShizukuFile) return true;
+        if (file instanceof SafAccess.GrantedFile
+                || (!file.canRead() && SafAccess.resolve(file, false) != null)) return true;
         return AccessManager.needsElevated(context, file.getAbsolutePath());
     }
 
     public static boolean needsStaging(Context context, String absPath) {
-        return AccessManager.needsElevated(context, absPath);
+        return absPath != null && needsStaging(context, new File(absPath));
     }
 
     public static File stageForRead(Context context, String srcAbsPath) throws IOException {
