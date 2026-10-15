@@ -3,6 +3,7 @@ package io.github.abdurazaaqmohammed.MPManager;
 import static io.github.abdurazaaqmohammed.utils.FileUtils.doesNotHaveStoragePerm;
 
 import android.Manifest;
+import android.content.ActivityNotFoundException;
 import android.content.ClipboardManager;
 import android.content.ComponentName;
 import android.content.Context;
@@ -155,6 +156,9 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
     boolean logEnabled;
     private File homeDir1;
     private File homeDir2;
+    private boolean startupUiReady;
+    private boolean startupPanesInitialized;
+    private boolean storagePermissionRequestInFlight;
     private MediaProjectionManager mediaProjectionManager;
     public File pane1Folder;
     public File pane2Folder;
@@ -280,14 +284,22 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
     }
 
     public void playMediaFile(String filePath) {
-        boolean isVideo = filePath.endsWith(".mp4") || filePath.endsWith(".mkv") || filePath.endsWith(".avi")
-                || filePath.endsWith(".mov") || filePath.endsWith(".webm") || filePath.endsWith(".3gp")
-                || filePath.endsWith(".ts") || filePath.endsWith(".flv") || filePath.endsWith(".wmv");
+        boolean isVideo = FileUtils.matchExt("." + org.apache.commons.io.FilenameUtils.getExtension(filePath)
+                .toLowerCase(java.util.Locale.ROOT), FileUtils.VIDEO_EXTS);
         boolean useActivity = isVideo || PreferenceManager.getDefaultSharedPreferences(this).getBoolean("player_open_activity", false);
-        if (useActivity) MediaPlayerActivity.openAndPlay(this, filePath);
+        ArrayList<String> orderedPaths = null;
+        if (getCurrentPane().getAdapter() instanceof MainFilesArrayAdapter adapter && !adapter.isInZip) {
+            File[] shown = adapter.getShownFiles();
+            if (shown != null && shown.length <= 4096) {
+                orderedPaths = new ArrayList<>();
+                for (File item : shown) if (item.isFile()) orderedPaths.add(item.getAbsolutePath());
+                if (!orderedPaths.contains(filePath)) orderedPaths = null;
+            }
+        }
+        if (useActivity) MediaPlayerActivity.openAndPlay(this, filePath, orderedPaths);
         else {
             PlayerManager pm = PlayerManager.getInstance(this);
-            pm.play(PlayerManager.buildMediaItem(this, filePath));
+            pm.play(PlayerManager.buildMediaItem(this, filePath), orderedPaths);
             if (miniPlayerDialog == null || !miniPlayerDialog.isShowing()) (miniPlayerDialog = new MiniPlayerDialog(this)).show();
         }
     }
@@ -316,20 +328,47 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
     }
 
     private void checkStoragePerm() {
+        checkStoragePerm(false);
+    }
+
+    private void checkStoragePerm(boolean userInitiated) {
+        if (storagePermissionRequestInFlight || !doesNotHaveStoragePerm(this)) return;
         // Legacy storage uses runtime grants even on a modern device. All-files
         // access alone must not skip this request after switching target SDKs.
         if (Build.VERSION.SDK_INT >= 23 && getApplicationInfo().targetSdkVersion <= 28
                 && (checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED
                 || checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED)) {
+            storagePermissionRequestInFlight = true;
+            if (userInitiated
+                    && !shouldShowRequestPermissionRationale(Manifest.permission.READ_EXTERNAL_STORAGE)
+                    && !shouldShowRequestPermissionRationale(Manifest.permission.WRITE_EXTERNAL_STORAGE)) {
+                // A permanently declined runtime grant must be changed in app Settings.
+                startActivityForResult(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                        Uri.parse("package:" + getPackageName())), 9030);
+                return;
+            }
             requestPermissions(new String[]{Manifest.permission.READ_EXTERNAL_STORAGE,
                     Manifest.permission.WRITE_EXTERNAL_STORAGE}, 0);
             return;
         }
         if (doesNotHaveStoragePerm(this)) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                startActivityForResult(new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
-                        Uri.parse("package:" + getPackageName())), 0);
-            } else if (Build.VERSION.SDK_INT > 22) requestPermissions(new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, 0);
+                storagePermissionRequestInFlight = true;
+                try {
+                    startActivityForResult(new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                            Uri.parse("package:" + getPackageName())), 0);
+                } catch (ActivityNotFoundException e) {
+                    try {
+                        startActivityForResult(new Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION), 0);
+                    } catch (ActivityNotFoundException unavailable) {
+                        storagePermissionRequestInFlight = false;
+                        showStoragePermissionRequired();
+                    }
+                }
+            } else if (Build.VERSION.SDK_INT > 22) {
+                storagePermissionRequestInFlight = true;
+                requestPermissions(new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, 0);
+            }
         }
     }
 
@@ -337,14 +376,50 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
     public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == 0) {
-            if (doesNotHaveStoragePerm(this)) Extensions.showMessage(this, R.string.storage_perm_needed);
-            else recreate();
+            storagePermissionRequestInFlight = false;
+            boolean granted = grantResults.length > 0;
+            for (int result : grantResults) granted &= result == PackageManager.PERMISSION_GRANTED;
+            if (!granted) showStoragePermissionRequired();
+            else if (doesNotHaveStoragePerm(this)) checkStoragePerm();
+            else resumeAfterStoragePermission();
         }
     }
 
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == 0 || requestCode == 9030) {
+            // The all-files Settings screen can return RESULT_CANCELED even after a grant.
+            storagePermissionRequestInFlight = false;
+            if (doesNotHaveStoragePerm(this)) {
+                showStoragePermissionRequired();
+                // App Settings may have supplied the legacy grant while all-files
+                // access still needs its separate Settings screen.
+                if (Build.VERSION.SDK_INT >= 30
+                        && checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
+                        && checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
+                        && !Environment.isExternalStorageManager()
+                        && requestCode == 9030) {
+                    checkStoragePerm();
+                }
+            }
+            else resumeAfterStoragePermission();
+            return;
+        }
+        if (requestCode == io.github.abdurazaaqmohammed.utils.LocalStorage.PICK_FOLDER) {
+            if (resultCode == RESULT_OK && data != null) new Thread(() -> {
+                try {
+                    io.github.abdurazaaqmohammed.utils.LocalStorage.Mount mount = io.github.abdurazaaqmohammed.utils.LocalStorage.add(data);
+                    handler.post(() -> {
+                        if (isFinishing() || isDestroyed()) return;
+                        refreshSidebar(getSidebarSectionOrder());
+                        loadFolderInPane(new File(mount.path()), lastPaneSelected == 1);
+                        closeSidebarDrawer();
+                    });
+                } catch (Exception e) { new ErrorUtil(this).showError(e); }
+            }, "hexora-add-storage").start();
+            return;
+        }
         if (requestCode == 9022) {
             SharedPreferences request = getSharedPreferences("folder_grant_request", MODE_PRIVATE);
             String path = request.getString("path", null);
@@ -697,6 +772,8 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
     protected void onCreate(Bundle savedInstanceState) {
         upgradeThemePrefsIfNeeded();
         super.onCreate(savedInstanceState);
+        storagePermissionRequestInFlight = savedInstanceState != null
+                && savedInstanceState.getBoolean("storagePermissionRequestInFlight", false);
         restoreArchiveOrigins(savedInstanceState);
         // BaseActivity applied the ThemeRegistry plugin; sync legacy fields for
         // status-bar tinting, icon colors and intent extras during transition.
@@ -708,7 +785,7 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
 
         setContentView(R.layout.activity_main);
         paneHighlight.attach();
-        checkStoragePerm();
+        findViewById(R.id.grant_storage_access).setOnClickListener(v -> checkStoragePerm(true));
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) mediaProjectionManager = (MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE);
         // App language is applied by AppCompatDelegate per-app locales
         // (see SettingsController.setupLanguageSettings + res/xml/locales_config.xml).
@@ -721,42 +798,6 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
         }).start();
 
         requestPermissionLauncher = registerForActivityResult(new ActivityResultContracts.RequestPermission(), isGranted -> { });
-
-        new Thread(() -> {
-            File frameworks = new File("/sdcard/Hexora/frameworks/");
-            if(!doesNotHaveStoragePerm(this) && !frameworks.exists()) try(
-                    InputStream is23 = rss.openRawResource(R.raw.android_23);
-                    InputStream is24 = rss.openRawResource(R.raw.android_24);
-                    InputStream is25 = rss.openRawResource(R.raw.android_25);
-                    InputStream is26 = rss.openRawResource(R.raw.android_26);
-                    InputStream is27 = rss.openRawResource(R.raw.android_27);
-                    InputStream is28 = rss.openRawResource(R.raw.android_28);
-                    InputStream is29 = rss.openRawResource(R.raw.android_29);
-                    InputStream is30 = rss.openRawResource(R.raw.android_30);
-                    InputStream is31 = rss.openRawResource(R.raw.android_31);
-                    InputStream is32 = rss.openRawResource(R.raw.android_32);
-                    InputStream is33 = rss.openRawResource(R.raw.android_33);
-                    InputStream is34 = rss.openRawResource(R.raw.android_34);
-                    InputStream is35 = rss.openRawResource(R.raw.android_35);
-                    InputStream is36 = rss.openRawResource(R.raw.android_36)
-            ) {
-                frameworks.mkdirs();
-                FileUtils.copyFile(is23, new File(frameworks, "android_23.apk"));
-                FileUtils.copyFile(is24, new File(frameworks, "android_24.apk"));
-                FileUtils.copyFile(is25, new File(frameworks, "android_25.apk"));
-                FileUtils.copyFile(is26, new File(frameworks, "android_26.apk"));
-                FileUtils.copyFile(is27, new File(frameworks, "android_27.apk"));
-                FileUtils.copyFile(is28, new File(frameworks, "android_28.apk"));
-                FileUtils.copyFile(is29, new File(frameworks, "android_29.apk"));
-                FileUtils.copyFile(is30, new File(frameworks, "android_30.apk"));
-                FileUtils.copyFile(is31, new File(frameworks, "android_31.apk"));
-                FileUtils.copyFile(is32, new File(frameworks, "android_32.apk"));
-                FileUtils.copyFile(is33, new File(frameworks, "android_33.apk"));
-                FileUtils.copyFile(is34, new File(frameworks, "android_34.apk"));
-                FileUtils.copyFile(is35, new File(frameworks, "android_35.apk"));
-                FileUtils.copyFile(is36, new File(frameworks, "android_36.apk"));
-            } catch (Exception ignored) { }
-        }).start();
 
         handler = new Handler(Looper.getMainLooper());
         drawerLayout = findViewById(R.id.drawer_layout);
@@ -885,13 +926,13 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
         TextView currentFolderView = findViewById(R.id.currentFolderPath);
         currentFolderView.setText(TextUtils.isEmpty(homeDir1Path) ? Environment.getExternalStorageDirectory().getPath() : homeDir1Path);
         currentFolderView.setOnLongClickListener(v -> {
-            CopyUtil.copyToClipboard(this, ((TextView) v).getText());
+            CopyUtil.copyToClipboard(this, shownPath());
             return false;
         });
         currentFolderView.setOnClickListener(v -> {
             View textInputLayout = LayoutInflater.from(this).inflate(R.layout.material_edittext, null);//new TextInputLayout(this, null, com.google.android.material.R.style.Widget_MaterialComponents_TextInputLayout_OutlinedBox);
             EditText input = textInputLayout.findViewById(R.id.m_et_edittext);
-            input.setText(((TextView) v).getText());
+            input.setText(shownPath());
             AlertDialog ad = dialogUtil.getDialogBuilder()
                     .setTitle(R.string.path)
                     .setView(textInputLayout)
@@ -900,6 +941,7 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
                     .setPositiveButton(android.R.string.ok, (dialog, which) -> {
                         File inputPath = new File(input.getText().toString());
                         boolean canOpen = inputPath.isDirectory()
+                                || io.github.abdurazaaqmohammed.utils.LocalStorage.mount(inputPath) != null
                                 || io.github.abdurazaaqmohammed.utils.SafAccess.isRestrictedFolder(inputPath);
                         if (!canOpen) {
                             try {
@@ -1130,21 +1172,13 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
         });
 
 
-        String locate = getIntent() == null ? null : getIntent().getStringExtra("locatePath");
         handler.post(() -> {
             sortFilter.setupFilterBar();
             setupNavigationButtons();
             refreshSidebar(getSidebarSectionOrder());
-            File[] dir1Files = homeDir1.listFiles();
-            if (dir1Files != null) {
-                File[] folders = homeDir1.listFiles(File::isDirectory);
-                int foldersCount = folders == null ? 0 : folders.length;
-                MainActivity.this.<TextView>findViewById(R.id.folderCount).setText(
-                        new StringBuilder("Folders: ").append(foldersCount).append(" Files: ")
-                                .append(dir1Files.length - foldersCount));
-            }
-            if(TextUtils.isEmpty(locate)) loadFolderInPane(resolveStartupFolder(true, homeDir1), true);
-            loadFolderInPane(resolveStartupFolder(false, homeDir2), false);
+            startupUiReady = true;
+            initializeStartupPanes();
+            checkStoragePerm();
             new Thread(() -> AccessManager.warmUp(MainActivity.this)).start();
             new Thread(() -> {
                 try {
@@ -1169,6 +1203,44 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
         if ((checkForUpdates = settings.getBoolean("checkForUpdates", true))) UpdateUtil.checkForUpdates(false, this);
     }
 
+    private void initializeFrameworks() {
+        new Thread(() -> {
+            File frameworks = new File("/sdcard/Hexora/frameworks/");
+            if(!doesNotHaveStoragePerm(this) && !frameworks.exists()) try(
+                    InputStream is23 = rss.openRawResource(R.raw.android_23);
+                    InputStream is24 = rss.openRawResource(R.raw.android_24);
+                    InputStream is25 = rss.openRawResource(R.raw.android_25);
+                    InputStream is26 = rss.openRawResource(R.raw.android_26);
+                    InputStream is27 = rss.openRawResource(R.raw.android_27);
+                    InputStream is28 = rss.openRawResource(R.raw.android_28);
+                    InputStream is29 = rss.openRawResource(R.raw.android_29);
+                    InputStream is30 = rss.openRawResource(R.raw.android_30);
+                    InputStream is31 = rss.openRawResource(R.raw.android_31);
+                    InputStream is32 = rss.openRawResource(R.raw.android_32);
+                    InputStream is33 = rss.openRawResource(R.raw.android_33);
+                    InputStream is34 = rss.openRawResource(R.raw.android_34);
+                    InputStream is35 = rss.openRawResource(R.raw.android_35);
+                    InputStream is36 = rss.openRawResource(R.raw.android_36)
+            ) {
+                frameworks.mkdirs();
+                FileUtils.copyFile(is23, new File(frameworks, "android_23.apk"));
+                FileUtils.copyFile(is24, new File(frameworks, "android_24.apk"));
+                FileUtils.copyFile(is25, new File(frameworks, "android_25.apk"));
+                FileUtils.copyFile(is26, new File(frameworks, "android_26.apk"));
+                FileUtils.copyFile(is27, new File(frameworks, "android_27.apk"));
+                FileUtils.copyFile(is28, new File(frameworks, "android_28.apk"));
+                FileUtils.copyFile(is29, new File(frameworks, "android_29.apk"));
+                FileUtils.copyFile(is30, new File(frameworks, "android_30.apk"));
+                FileUtils.copyFile(is31, new File(frameworks, "android_31.apk"));
+                FileUtils.copyFile(is32, new File(frameworks, "android_32.apk"));
+                FileUtils.copyFile(is33, new File(frameworks, "android_33.apk"));
+                FileUtils.copyFile(is34, new File(frameworks, "android_34.apk"));
+                FileUtils.copyFile(is35, new File(frameworks, "android_35.apk"));
+                FileUtils.copyFile(is36, new File(frameworks, "android_36.apk"));
+            } catch (Exception ignored) { }
+        }).start();
+    }
+
     private File resolveStartupFolder(boolean pane1, File home) {
         try {
             if ("last".equals(UiPrefs.startupMode(this, pane1))) {
@@ -1176,12 +1248,60 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
                         .getString(pane1 ? "last_path_1" : "last_path_2", null);
                 if (!TextUtils.isEmpty(saved)) {
                     File f = new File(saved);
-                    if (f.isDirectory() || AccessManager.exists(this, saved)) return f;
+                    if (io.github.abdurazaaqmohammed.utils.LocalStorage.mount(f) != null
+                            || f.isDirectory() || AccessManager.exists(this, saved)) return f;
                 }
             }
         } catch (Exception ignored) {
         }
         return home;
+    }
+
+    private void showStoragePermissionRequired() {
+        findViewById(R.id.storage_permission_panel).setVisibility(View.VISIBLE);
+        ((SwipeRefreshLayout) findViewById(R.id.swipeRefreshPane1)).setRefreshing(false);
+        ((SwipeRefreshLayout) findViewById(R.id.swipeRefreshPane2)).setRefreshing(false);
+    }
+
+    private void resumeAfterStoragePermission() {
+        findViewById(R.id.storage_permission_panel).setVisibility(View.GONE);
+        if (!initializeStartupPanes() && startupPanesInitialized) refreshAllPanes();
+    }
+
+    private boolean initializeStartupPanes() {
+        if (!startupUiReady || startupPanesInitialized) return false;
+        if (doesNotHaveStoragePerm(this)) {
+            showStoragePermissionRequired();
+            return false;
+        }
+        findViewById(R.id.storage_permission_panel).setVisibility(View.GONE);
+        startupPanesInitialized = true;
+        initializeFrameworks();
+        if (!openLocatedFolder()) loadFolderInPane(resolveStartupFolder(true, homeDir1), true);
+        loadFolderInPane(resolveStartupFolder(false, homeDir2), false);
+        return true;
+    }
+
+    private boolean openLocatedFolder() {
+        String locate = getIntent() == null ? null : getIntent().getStringExtra("locatePath");
+        if (TextUtils.isEmpty(locate) || doesNotHaveStoragePerm(this)) return false;
+        // Keep a launch request pending while the user is granting storage access.
+        getIntent().removeExtra("locatePath");
+        File target = new File(locate);
+        File folder = target.isFile() ? target.getParentFile() : target;
+        if (folder != null) {
+            loadFolderInPane(folder, true);
+            return true;
+        }
+        return false;
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        if (io.github.abdurazaaqmohammed.utils.ProgressManager.isRestoreIntent(intent)) return;
+        setIntent(intent);
+        if (startupPanesInitialized) openLocatedFolder();
     }
 
     private void setupNavigationButtons() {
@@ -1225,9 +1345,10 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
                                 loadZipFolderInPane(archive, slash < 0 ? "" : noSlash.substring(0, slash + 1), adapter.pane1, true);
                             } else leaveArchive(archive, adapter.pane1);
                         } else {
-                            String path = this.<TextView>findViewById(R.id.currentFolderPath).getText().toString();
-                            File f = new File(path).getParentFile();
-                            if (f != null && (f.canRead() || canListViaRoot(f))) loadFolderInPane(f, lastPaneSelected == 1);
+                            File current = lastPaneSelected == 1 ? pane1Folder : pane2Folder;
+                            File f = current.getParentFile();
+                            if (f != null && !f.equals(current) && (io.github.abdurazaaqmohammed.utils.LocalStorage.isPath(f)
+                                    || f.canRead() || canListViaRoot(f))) loadFolderInPane(f, lastPaneSelected == 1);
                             else if (isBackPressedToExit) {
                                 handler.removeCallbacks(resetExitPrompt);
                                 finishAffinity();
@@ -1293,7 +1414,8 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
 
     @Override
     public String shownPath() {
-        return this.<TextView>findViewById(R.id.currentFolderPath).getText().toString();
+        TextView view = findViewById(R.id.currentFolderPath);
+        return view.getTag() instanceof String ? (String) view.getTag() : view.getText().toString();
     }
 
     @Override
@@ -1316,6 +1438,11 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
         new Thread(() -> {
             try {
                 File target = new File(folder, name);
+                if (io.github.abdurazaaqmohammed.utils.LocalStorage.isPath(folder)) {
+                    io.github.abdurazaaqmohammed.utils.LocalStorage.create(folder, name, directory);
+                    handler.post(this::refreshAllPanes);
+                    return;
+                }
                 if (target.exists()) throw new IOException("Destination already exists.");
                 boolean created = directory ? target.mkdir() : target.createNewFile();
                 if (!created) created = directory ? mkdirViaRoot(folder, name) : touchViaRoot(folder, name);
@@ -1335,7 +1462,7 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
             loadFtpFolderInPane((FTPFileWrapper) folder, pane1);
             return;
         }
-        if (folder.getName().endsWith(".zip")) {
+        if (folder.getName().endsWith(".zip") && !io.github.abdurazaaqmohammed.utils.LocalStorage.isPath(folder)) {
             loadZipFolderInPane(folder, "", pane1, addToHistory);
             return;
         }
@@ -1344,6 +1471,17 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
         int request = archiveRequests.get(paneIndex);
         archiveLoads[paneIndex] = archiveWorkers.submit(() -> {
             try {
+                if (io.github.abdurazaaqmohammed.utils.LocalStorage.isPath(folder)) {
+                    File resolved = io.github.abdurazaaqmohammed.utils.LocalStorage.file(folder);
+                    File[] children = resolved.listFiles(this::isNotHidden);
+                    if (children == null) throw new IOException(getString(R.string.local_storage_unavailable));
+                    sortFiles(children, resolved.getPath());
+                    handler.post(() -> {
+                        if (!isFinishing() && !isDestroyed() && archiveRequests.get(paneIndex) == request)
+                            applyFolderListing(resolved, children, pane1, addToHistory);
+                    });
+                    return;
+                }
         boolean shizukuDir = io.github.abdurazaaqmohammed.utils.SafAccess.isRestrictedFolder(folder);
         File[] files = null;
         String folderPath = folder.getAbsolutePath();
@@ -1416,6 +1554,13 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
             } catch (Exception e) {
                 handler.post(() -> {
                     if (isFinishing() || isDestroyed() || archiveRequests.get(paneIndex) != request) return;
+                    ((SwipeRefreshLayout) findViewById(pane1 ? R.id.swipeRefreshPane1 : R.id.swipeRefreshPane2)).setRefreshing(false);
+                    String path = folder.getAbsolutePath();
+                    if (doesNotHaveStoragePerm(this) && (path.equals("/sdcard") || path.startsWith("/sdcard/")
+                            || path.equals("/storage") || path.startsWith("/storage/"))) {
+                        showStoragePermissionRequired();
+                        return;
+                    }
                     new ErrorUtil(this).showError(e);
                 });
             }
@@ -1573,6 +1718,7 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
     @Override
     protected void onSaveInstanceState(Bundle state) {
         super.onSaveInstanceState(state);
+        state.putBoolean("storagePermissionRequestInFlight", storagePermissionRequestInFlight);
         Bundle origins = new Bundle();
         for (java.util.Map.Entry<String, io.github.abdurazaaqmohammed.features.files.ArchiveNavigation.Origin> entry : archiveNavigation.snapshot().entrySet()) {
             NavigationHistoryEntry parent = entry.getValue().parent();
@@ -1959,7 +2105,8 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
         Runnable updatePath = () -> {
             if (isFinishing() || isDestroyed() || folderStatusRequests.get() != request) return;
             TextView currentFolderPath = findViewById(R.id.currentFolderPath);
-            currentFolderPath.setText(path);
+            currentFolderPath.setTag(path);
+            currentFolderPath.setText(io.github.abdurazaaqmohammed.utils.LocalStorage.displayPath(path));
             uiHelper.scrollTextView(currentFolderPath);
         };
         if (Looper.myLooper() == Looper.getMainLooper()) updatePath.run();
@@ -1988,7 +2135,8 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
     public void setCurrentFolderFromSelected(File curr, Set<File> files) {
         folderStatusRequests.incrementAndGet();
         TextView currentFolderPath = findViewById(R.id.currentFolderPath);
-        currentFolderPath.setText(curr.getPath());
+        currentFolderPath.setTag(curr.getPath());
+        currentFolderPath.setText(io.github.abdurazaaqmohammed.utils.LocalStorage.displayPath(curr.getPath()));
         uiHelper.scrollTextView(currentFolderPath);
         int foldersCount = 0;
         for (File file : files)
@@ -2003,6 +2151,7 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
     protected void onResume() {
         super.onResume();
         boolean handledLocate = false;
+        boolean loadedStartupPanes = false;
         CURRENT = new WeakReference<>(this);
         // Pane highlight style may have changed in Settings.
         try {
@@ -2012,20 +2161,14 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
         }
         try {
             updates.register();
-            String locate = getIntent() == null ? null : getIntent().getStringExtra("locatePath");
-            if (locate != null && !locate.isEmpty()) {
-                try {
-                    getIntent().removeExtra("locatePath");
-                } catch (Exception ignored) {
-                }
-                File target = new File(locate);
-                File folder = target.isFile() ? target.getParentFile() : target;
-                if (folder != null && (folder.exists()
-                        || io.github.abdurazaaqmohammed.utils.SafAccess.isRestrictedFolder(folder)
-                        || AccessManager.isDirectory(this, folder.getAbsolutePath()))) {
-                    handledLocate = true;
-                    loadFolderInPane(folder, true);
-                }
+            if (doesNotHaveStoragePerm(this)) {
+                cancelArchiveLoad(true);
+                cancelArchiveLoad(false);
+                showStoragePermissionRequired();
+            } else {
+                findViewById(R.id.storage_permission_panel).setVisibility(View.GONE);
+                loadedStartupPanes = initializeStartupPanes();
+                if (!loadedStartupPanes && startupPanesInitialized) handledLocate = openLocatedFolder();
             }
         } catch (Exception ignored) {
         }
@@ -2036,7 +2179,7 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
         // Returning from editors/viewers (started with startActivity, not for result)
         // leaves listings stale — always re-list the visible panes.
         try {
-            if (!handledLocate) refreshAllPanes();
+            if (!doesNotHaveStoragePerm(this) && !loadedStartupPanes && startupPanesInitialized && !handledLocate) refreshAllPanes();
         } catch (Exception ignored) {
         }
     }

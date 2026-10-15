@@ -267,6 +267,12 @@ public class DexEditorActivity extends BaseActivity {
         tabsRecyclerView = findViewById(R.id.tabs_recycler_view);
         Toolbar toolbar = findViewById(R.id._toolbar);
         setSupportActionBar(toolbar);
+        findViewById(R.id.dex_classes).setOnClickListener(v -> {
+            hideEditor();
+            explorerViewPager.setCurrentItem(0, false);
+        });
+        findViewById(R.id.dex_navigation).setOnClickListener(this::showNavigationMenu);
+        findViewById(R.id.dex_code_theme).setOnClickListener(v -> showCodeThemeDialog());
 
         drawerToolbar = findViewById(R.id.drawer_toolbar);
         drawerToolbar.setOverflowIcon(ContextCompat.getDrawable(this, R.drawable.ic_more_mt));
@@ -567,6 +573,72 @@ public class DexEditorActivity extends BaseActivity {
         if (drawerLayout.isDrawerOpen(GravityCompat.START))
             drawerLayout.closeDrawer(GravityCompat.START);
         else drawerLayout.openDrawer(GravityCompat.START);
+    }
+
+    private void showNavigationMenu(View anchor) {
+        PopupMenu popup = new PopupMenu(this, anchor);
+        Menu menu = popup.getMenu();
+        menu.add(0, R.id.dex_classes, 0, R.string.dex_classes);
+        menu.add(0, R.id.tabs_recycler_view, 1, R.string.opened_classes);
+        menu.add(0, R.id.explorer_tab_layout, 2, R.string.history);
+        UnifiedEditorFragment fragment = viewPager.getVisibility() == View.VISIBLE
+                ? getCurrentFragment() : null;
+        menu.add(0, R.id.search, 3, R.string.search);
+        if (fragment != null && fragment.getEditor() != null) {
+            menu.add(0, R.id.btn_undo, 4, R.string.previous_position).setEnabled(fragment.canGoBack());
+            menu.add(0, R.id.btn_redo, 5, R.string.next_position).setEnabled(fragment.canGoForward());
+            menu.add(0, R.id.jumpToLine, 6, R.string.jump_to_line);
+            if (currentTabIndex >= 0 && currentTabIndex < tabs.size() && tabs.get(currentTabIndex).type == 0) {
+                menu.add(0, R.id.navigation, 7, R.string.method_field_list);
+            }
+        }
+        popup.setOnMenuItemClickListener(item -> {
+            int id = item.getItemId();
+            if (id == R.id.dex_classes) {
+                hideEditor();
+                explorerViewPager.setCurrentItem(0, false);
+            } else if (id == R.id.tabs_recycler_view) {
+                drawerLayout.openDrawer(GravityCompat.START);
+            } else if (id == R.id.explorer_tab_layout) {
+                hideEditor();
+                explorerViewPager.setCurrentItem(1, false);
+            } else if (id == R.id.search) {
+                if (fragment != null) fragment.showSearchPanel();
+                else {
+                    hideEditor();
+                    explorerViewPager.setCurrentItem(2, false);
+                }
+            } else if (fragment != null) {
+                if (id == R.id.btn_undo) fragment.navigateHistory(false);
+                else if (id == R.id.btn_redo) fragment.navigateHistory(true);
+                else if (id == R.id.jumpToLine) fragment.showJumpToLineDialog();
+                else if (id == R.id.navigation) fragment.showMethodFieldList();
+            }
+            return true;
+        });
+        popup.show();
+    }
+
+    public void showCodeThemeDialog() {
+        SharedPreferences prefs = getSharedPreferences("editor_prefs", MODE_PRIVATE);
+        String[] values = getResources().getStringArray(R.array.dex_editor_theme_values);
+        String selected = prefs.getString("pref_dex_theme", "app");
+        int checked = 0;
+        for (int i = 0; i < values.length; i++) if (values[i].equals(selected)) checked = i;
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.dex_editor_theme)
+                .setSingleChoiceItems(R.array.dex_editor_theme_entries, checked, (dialog, which) -> {
+                    prefs.edit().putString("pref_dex_theme", values[which]).apply();
+                    // Refresh colors in place: keep edits, undo history, selection and open tabs.
+                    for (Fragment page : getSupportFragmentManager().getFragments()) {
+                        if (page instanceof UnifiedEditorFragment editorPage && editorPage.getEditor() != null) {
+                            editorPage.applyPreferences();
+                        }
+                    }
+                    dialog.dismiss();
+                })
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
     }
 
     @Override

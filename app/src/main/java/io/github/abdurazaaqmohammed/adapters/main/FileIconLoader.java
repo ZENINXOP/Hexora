@@ -75,28 +75,32 @@ public class FileIconLoader {
         fileIconView.setTag(null);
         if (zipEntry.isDirectory()) {
             fileIconView.setImageDrawable(copyIcon(cachedFolderIcon));
-            fileDateView.setVisibility(View.INVISIBLE);
         } else {
             setupNonFolderIconView(zipEntry.getFullPath(), fileIconView);
-            fileDateView.setVisibility(View.VISIBLE);
-            fileDateView.setTextSize(dateSize);
-            fileDateView.setText(new StringBuilder(dateFormat.format(new java.util.Date(zipEntry.getLastModified()))).append(' ').append(FileSize.getHumanReadableFileSize(zipEntry.getSize())));
         }
+        bindDetails(fileDateView, zipEntry.isDirectory(), zipEntry.getLastModified(), zipEntry.getSize());
     }
 
     public void setupFileView(File file, ImageView fileIconView, TextView fileDateView) {
         // Invalidate thumbnail work from the row's previous file before rebinding.
         fileIconView.setTag(null);
         if (file.isFile()) {
-            fileDateView.setVisibility(View.VISIBLE);
-            fileDateView.setTextSize(dateSize);
             setupNonFolderIconView(file.getPath(), fileIconView);
-            fileDateView.setText(new StringBuilder(dateFormat.format(new java.util.Date(file.lastModified()))).append(' ').append(FileSize.getHumanReadableFileSize(file.length())));
+            bindDetails(fileDateView, false, file.lastModified(), file.length());
         } else {
             fileIconView.setImageDrawable(copyIcon(cachedFolderIcon));
-            fileDateView.setVisibility(View.INVISIBLE);
+            bindDetails(fileDateView, true, file.lastModified(), 0L);
             if (!isInZip && isAndroidPackageFolder(file)) loadPackageFolderIconAsync(file, fileIconView);
         }
+    }
+
+    private void bindDetails(TextView details, boolean directory, long modified, long size) {
+        String date = modified > 0L ? dateFormat.format(new java.util.Date(modified)) : "";
+        // Some virtual/archive folders have no recorded timestamp. Do not show 1970.
+        if (directory) details.setText(date.isEmpty() ? context.getString(R.string.file_date_unavailable) : date);
+        else details.setText((date.isEmpty() ? "" : date + " ") + FileSize.getHumanReadableFileSize(size));
+        details.setTextSize(dateSize);
+        details.setVisibility(View.VISIBLE);
     }
 
     /** Only package directories immediately inside Android/data, obb, or media. */
@@ -157,7 +161,8 @@ public class FileIconLoader {
             // A drawable belongs to one ImageView: sharing its bounds between rows
             // causes incorrect rendering when users change the list scale.
             fileIconView.setImageDrawable(new FileTypeDrawable(fileType));
-        } else if (".apk".equals(ext)) {
+        } else if (".apk".equals(ext) || ".apks".equals(ext) || ".xapk".equals(ext)
+                || ".apkm".equals(ext) || ".aspk".equals(ext)) {
             fileIconView.setImageDrawable(copyIcon(cachedApkIcon));
             if (!isInZip) loadApkIconAsync(path, fileIconView);
         } else if (FileUtils.matchExt(ext, FileUtils.IMAGE_EXTS)) {

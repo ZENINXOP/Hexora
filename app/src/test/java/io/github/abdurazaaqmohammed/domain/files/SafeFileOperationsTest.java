@@ -70,6 +70,24 @@ public class SafeFileOperationsTest {
         assertTrue(src.exists());
     }
 
+    @Test public void directoryVerificationUsesReturnedProviderFilesAndStreams() throws Exception {
+        File source = tmp.newFolder("source");
+        byte[] bytes = "provider content".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        Files.write(new File(source, "note.txt").toPath(), bytes);
+        class ProviderFile extends File implements FileWorkProgress.ReadableFile {
+            ProviderFile() { super(tmp.getRoot(), "virtual/note.txt"); }
+            @Override public boolean isFile() { return true; }
+            @Override public long length() { return bytes.length; }
+            @Override public java.io.InputStream openInput() { return new java.io.ByteArrayInputStream(bytes); }
+        }
+        File providerDirectory = new File(tmp.getRoot(), "virtual") {
+            @Override public boolean isDirectory() { return true; }
+            @Override public File[] listFiles() { return new File[]{new ProviderFile()}; }
+        };
+        SafeFileOperations.verifyCopy(source, providerDirectory);
+        assertFalse(new File(tmp.getRoot(), "virtual").exists());
+    }
+
     @Test public void verificationDetectsMissingEmptyDirectory() throws Exception {
         File src = tmp.newFolder("src");
         new File(src, "empty").mkdir();
@@ -100,6 +118,48 @@ public class SafeFileOperationsTest {
         } finally { Thread.interrupted(); }
         assertTrue(src.exists());
         assertFalse(dest.exists());
+    }
+
+    @Test public void cancellationAfterFinalChunkDoesNotPublishDestination() throws Exception {
+        File src = tmp.newFile("src");
+        writeText(src.toPath(), "keep original");
+        File dest = new File(tmp.getRoot(), "dest");
+        try (FileWorkProgress.Scope scope = FileWorkProgress.track(units -> Thread.currentThread().interrupt())) {
+            assertThrows(IOException.class, () -> SafeFileOperations.copyFile(src, dest));
+        } finally { Thread.interrupted(); }
+        assertEquals("keep original", readText(src.toPath()));
+        assertFalse(dest.exists());
+        assertEquals(1, tmp.getRoot().list().length);
+    }
+
+    @Test public void channelCopyReportsEachByteExactlyOnce() throws Exception {
+        File src = tmp.newFile("src");
+        byte[] bytes = new byte[8 * 1024 * 1024 + 37];
+        new java.util.Random(17).nextBytes(bytes);
+        Files.write(src.toPath(), bytes);
+        File dest = new File(tmp.getRoot(), "dest");
+        long[] progress = {0};
+        try (FileWorkProgress.Scope scope = FileWorkProgress.track(units -> progress[0] += units)) {
+            SafeFileOperations.copyFile(src, dest);
+        }
+        assertEquals(bytes.length + 1L, progress[0]);
+        assertArrayEquals(bytes, Files.readAllBytes(dest.toPath()));
+    }
+
+    @Test public void providerStreamCopyStillWorksWithoutAFileChannel() throws Exception {
+        File src = tmp.newFile("src");
+        byte[] bytes = new byte[256 * 1024 + 37];
+        new java.util.Random(23).nextBytes(bytes);
+        Files.write(src.toPath(), bytes);
+        class StreamFile extends File implements FileWorkProgress.ReadableFile {
+            StreamFile() { super(src.getPath()); }
+            @Override public java.io.InputStream openInput() {
+                return new java.io.ByteArrayInputStream(bytes);
+            }
+        }
+        File dest = new File(tmp.getRoot(), "dest");
+        SafeFileOperations.copyFile(new StreamFile(), dest);
+        assertArrayEquals(bytes, Files.readAllBytes(dest.toPath()));
     }
 
     @Test public void rejectsInvalidNames() {

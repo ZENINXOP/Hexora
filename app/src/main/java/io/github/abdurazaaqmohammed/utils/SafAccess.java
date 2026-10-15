@@ -26,7 +26,10 @@ public final class SafAccess {
     private static Context application;
     private SafAccess() { }
 
-    public static void init(Context context) { application = context.getApplicationContext(); }
+    public static void init(Context context) {
+        application = context.getApplicationContext();
+        LocalStorage.init(context);
+    }
 
     private static String documentId(File file) {
         if (file == null) return null;
@@ -61,6 +64,7 @@ public final class SafAccess {
     }
 
     public static Uri resolve(File file, boolean write) {
+        if (LocalStorage.isPath(file)) return LocalStorage.resolve(file, write);
         String id = documentId(file);
         if (application == null || id == null) return null;
         Uri best = null;
@@ -110,22 +114,36 @@ public final class SafAccess {
             DocumentsContract.Document.COLUMN_MIME_TYPE, DocumentsContract.Document.COLUMN_SIZE,
             DocumentsContract.Document.COLUMN_LAST_MODIFIED, DocumentsContract.Document.COLUMN_FLAGS};
 
+    public static File stat(File path, Uri uri) throws IOException {
+        try (Cursor cursor = application.getContentResolver().query(uri, COLUMNS, null, null, null)) {
+            if (cursor == null || !cursor.moveToFirst()) throw new IOException("The storage document is unavailable.");
+            return new GrantedFile(path.getAbsolutePath(), uri,
+                    DocumentsContract.Document.MIME_TYPE_DIR.equals(cursor.getString(2)),
+                    cursor.isNull(3) ? 0 : cursor.getLong(3), cursor.isNull(4) ? 0 : cursor.getLong(4),
+                    cursor.isNull(5) ? 0 : cursor.getInt(5), cursor.getString(1));
+        } catch (SecurityException e) { throw new IOException("Folder permission was revoked.", e); }
+    }
+
     public static File[] tryList(File folder) {
         Uri document = resolve(folder, false);
         if (document == null) return null;
         try {
+            LocalStorage.forgetChildren(folder);
             Uri children = DocumentsContract.buildChildDocumentsUriUsingTree(document, DocumentsContract.getDocumentId(document));
             try (Cursor cursor = application.getContentResolver().query(children, COLUMNS, null, null, null)) {
                 if (cursor == null) return null;
                 List<File> files = new ArrayList<>();
+                java.util.Set<String> names = new java.util.HashSet<>();
                 while (cursor.moveToNext()) {
                     String name = cursor.getString(1);
                     if (name == null || name.isEmpty() || name.equals(".") || name.equals("..") || name.contains("/")) continue;
+                    if (LocalStorage.isPath(folder) && !names.add(name)) throw new IOException("The provider returned duplicate file names.");
                     Uri uri = DocumentsContract.buildDocumentUriUsingTree(document, cursor.getString(0));
+                    LocalStorage.remember(new File(folder, name), uri);
                     files.add(new GrantedFile(new File(folder, name).getAbsolutePath(), uri,
                             DocumentsContract.Document.MIME_TYPE_DIR.equals(cursor.getString(2)),
                             cursor.isNull(3) ? 0 : cursor.getLong(3), cursor.isNull(4) ? 0 : cursor.getLong(4),
-                            cursor.isNull(5) ? 0 : cursor.getInt(5)));
+                            cursor.isNull(5) ? 0 : cursor.getInt(5), name));
                 }
                 return files.toArray(new File[0]);
             }
@@ -153,6 +171,14 @@ public final class SafAccess {
     }
 
     public static File stage(Context context, File source) throws IOException {
+        if (LocalStorage.isPath(source)) {
+            long available = context.getCacheDir().getUsableSpace();
+            try (InputStream input = openInput(source)) {
+                return io.github.abdurazaaqmohammed.domain.files.SharedFileCopy.copy(input,
+                        SharedFileCache.directory(context), source.getName(),
+                        available > 0 ? Math.max(0, available - 16L * 1024 * 1024) : Long.MAX_VALUE);
+            }
+        }
         File directory = new File(context.getCacheDir(), "folder_staging/" + java.util.UUID.randomUUID());
         if (!directory.mkdirs()) throw new IOException("Cannot prepare file viewer");
         File destination = new File(directory, source.getName());
@@ -176,13 +202,20 @@ public final class SafAccess {
         private final boolean directory;
         private final long size, modified;
         private final int flags;
-        private GrantedFile(String path, Uri uri, boolean directory, long size, long modified, int flags) {
+        private final String displayName;
+        private GrantedFile(String path, Uri uri, boolean directory, long size, long modified, int flags, String displayName) {
             super(path);
             this.uri = uri;
             this.directory = directory;
             this.size = size;
             this.modified = modified;
             this.flags = flags;
+            this.displayName = displayName;
+        }
+        @Override public String getName() { return displayName == null ? super.getName() : displayName; }
+        @Override public File getParentFile() {
+            LocalStorage.Mount mount = LocalStorage.mount(this);
+            return mount != null && mount.path().equals(getAbsolutePath()) ? this : super.getParentFile();
         }
         @Override public boolean exists() { return true; }
         @Override public InputStream openInput() throws IOException { return SafAccess.openInput(this); }
@@ -197,9 +230,29 @@ public final class SafAccess {
         @Override public long length() { return size; }
         @Override public long lastModified() { return modified; }
         @Override public boolean delete() {
+            LocalStorage.Mount mount = LocalStorage.mount(this);
+            if (mount != null && mount.path().equals(getAbsolutePath())) return false;
             if ((flags & DocumentsContract.Document.FLAG_SUPPORTS_DELETE) == 0 || resolve(this, true) == null) return false;
-            try { return DocumentsContract.deleteDocument(application.getContentResolver(), uri); }
+            try {
+                boolean deleted = DocumentsContract.deleteDocument(application.getContentResolver(), uri);
+                if (deleted) LocalStorage.invalidate(this);
+                return deleted;
+            }
             catch (Exception ignored) { return false; }
+        }
+        @Override public boolean renameTo(File destination) {
+            if (!LocalStorage.isPath(this)) return super.renameTo(destination);
+            if ((flags & DocumentsContract.Document.FLAG_SUPPORTS_RENAME) == 0 || resolve(this, true) == null
+                    || getParentFile().equals(this) || !getParentFile().equals(destination.getParentFile())) return false;
+            try {
+                io.github.abdurazaaqmohammed.domain.files.SafeFileOperations.validateName(destination.getName());
+                if (LocalStorage.resolve(destination, false) != null) return false;
+                Uri renamed = DocumentsContract.renameDocument(application.getContentResolver(), uri, destination.getName());
+                if (renamed == null) return false;
+                LocalStorage.invalidate(this);
+                LocalStorage.remember(destination, renamed);
+                return true;
+            } catch (Exception ignored) { return false; }
         }
         @Override public File[] listFiles() { return directory ? tryList(this) : null; }
         @Override public File[] listFiles(FileFilter filter) {

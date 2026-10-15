@@ -37,6 +37,95 @@ public final class ApkMetadata {
         String key = key(file);
         ApkMetadata cached = CACHE.get(key);
         if (cached != null) return cached;
+        String lower = file.getName().toLowerCase(java.util.Locale.ROOT);
+        if (lower.endsWith(".apks") || lower.endsWith(".xapk") || lower.endsWith(".apkm") || lower.endsWith(".aspk")) {
+            File temporary = null;
+            java.util.List<File> resourceSplits = new java.util.ArrayList<>();
+            try (java.util.zip.ZipFile zip = new java.util.zip.ZipFile(file)) {
+                java.util.zip.ZipEntry selected = null;
+                int best = -1;
+                java.util.Enumeration<? extends java.util.zip.ZipEntry> entries = zip.entries();
+                while (entries.hasMoreElements()) {
+                    java.util.zip.ZipEntry entry = entries.nextElement();
+                    String name = entry.getName().toLowerCase(java.util.Locale.ROOT);
+                    if (entry.isDirectory() || !name.endsWith(".apk") || entry.getSize() > 256L * 1024 * 1024) continue;
+                    int rank = name.endsWith("/base.apk") || name.equals("base.apk") ? 4
+                            : name.contains("base-master") ? 3 : name.contains("standalone") ? 2
+                            : !name.contains("config.") && !name.contains("split_config") ? 1 : 0;
+                    if (rank > best) { selected = entry; best = rank; }
+                }
+                if (selected == null) return null;
+                temporary = File.createTempFile("bundle-icon-", ".apk", context.getCacheDir());
+                try (java.io.InputStream input = zip.getInputStream(selected);
+                     java.io.OutputStream output = new java.io.FileOutputStream(temporary)) {
+                    byte[] buffer = new byte[64 * 1024];
+                    long total = 0;
+                    int count;
+                    while ((count = input.read(buffer)) != -1) {
+                        total += count;
+                        if (total > 256L * 1024 * 1024 || Thread.currentThread().isInterrupted()) return null;
+                        output.write(buffer, 0, count);
+                    }
+                }
+                ApkMetadata metadata = load(context, temporary);
+                if (metadata != null && android.os.Build.VERSION.SDK_INT >= 21) {
+                    // Bundletool often puts launcher pixels in a density split, not base-master.
+                    String selectedName = selected.getName();
+                    String parent = selectedName.substring(0, selectedName.lastIndexOf('/') + 1);
+                    java.util.Enumeration<? extends java.util.zip.ZipEntry> splits = zip.entries();
+                    long splitBytes = 0;
+                    while (splits.hasMoreElements() && resourceSplits.size() < 8) {
+                        java.util.zip.ZipEntry entry = splits.nextElement();
+                        String name = entry.getName().toLowerCase(java.util.Locale.ROOT);
+                        if (entry.isDirectory() || !entry.getName().startsWith(parent)
+                                || !name.matches(".*(?:base-|config[._]).*dpi\\.apk")
+                                || entry.getSize() < 0 || entry.getSize() > 32L * 1024 * 1024) continue;
+                        File split = File.createTempFile("bundle-icon-split-", ".apk", context.getCacheDir());
+                        resourceSplits.add(split);
+                        try (java.io.InputStream input = zip.getInputStream(entry);
+                             java.io.OutputStream output = new java.io.FileOutputStream(split)) {
+                            byte[] buffer = new byte[64 * 1024];
+                            long bytes = 0;
+                            int count;
+                            while ((count = input.read(buffer)) != -1) {
+                                bytes += count;
+                                splitBytes += count;
+                                if (bytes > 32L * 1024 * 1024 || splitBytes > 128L * 1024 * 1024
+                                        || Thread.currentThread().isInterrupted()) throw new java.io.IOException("Bundle icon limit exceeded.");
+                                output.write(buffer, 0, count);
+                            }
+                        }
+                    }
+                    if (!resourceSplits.isEmpty()) {
+                        android.content.pm.ApplicationInfo app = metadata.packageInfo.applicationInfo;
+                        app.splitSourceDirs = resourceSplits.stream().map(File::getAbsolutePath).toArray(String[]::new);
+                        app.splitPublicSourceDirs = app.splitSourceDirs;
+                        try { metadata = new ApkMetadata(metadata.packageInfo, app.loadLabel(context.getPackageManager()).toString(),
+                                app.loadIcon(context.getPackageManager())); }
+                        catch (Exception ignored) { }
+                    }
+                }
+                if (metadata != null) {
+                    // Detach bitmap pixels before removing the temporary APK resource source.
+                    Drawable icon = metadata.icon;
+                    if (icon != null) {
+                        int size = Math.max(48, Math.min(192, (int) (64 * context.getResources().getDisplayMetrics().density)));
+                        android.graphics.Bitmap bitmap = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888);
+                        icon.setBounds(0, 0, size, size);
+                        icon.draw(new android.graphics.Canvas(bitmap));
+                        icon = new android.graphics.drawable.BitmapDrawable(context.getResources(), bitmap);
+                    }
+                    ApkMetadata result = new ApkMetadata(metadata.packageInfo, metadata.label, icon);
+                    CACHE.put(key, result);
+                    return result;
+                }
+                return null;
+            } catch (Exception ignored) { return null; }
+            finally {
+                if (temporary != null) { CACHE.remove(key(temporary)); temporary.delete(); }
+                for (File split : resourceSplits) split.delete();
+            }
+        }
         PackageManager pm = context.getPackageManager();
         PackageInfo info = pm.getPackageArchiveInfo(file.getPath(), 0);
         if (info == null || info.applicationInfo == null) return null;

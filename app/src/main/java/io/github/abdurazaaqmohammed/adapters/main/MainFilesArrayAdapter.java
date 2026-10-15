@@ -27,6 +27,7 @@ import org.apache.commons.io.FilenameUtils;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
@@ -345,6 +346,12 @@ public class MainFilesArrayAdapter extends RecyclerView.Adapter<MainFilesArrayAd
             holder.fileNameView.setText(fileName = (position == 0 ? ".." : file.getName()));
         }
 
+        // The parent entry is navigation, so it has no timestamp or file size.
+        if (position == 0 && (!isInZip || "..".equals(fileName))) {
+            holder.fileDateView.setText("");
+            holder.fileDateView.setVisibility(View.INVISIBLE);
+        }
+
         bindSelection(convertView, position);
         int finalPosition = position;
         // RecyclerView binds on the UI thread; attach handlers before recycling can occur.
@@ -441,16 +448,33 @@ public class MainFilesArrayAdapter extends RecyclerView.Adapter<MainFilesArrayAd
             Object compareFile2 = null;
             List<File> dexCompareFiles1 = null;
             List<File> dexCompareFiles2 = null;
-            if(a instanceof MainFilesArrayAdapter otherPaneAdapter) {
-                // Compare DEX: 1 APK or 1+ DEX files selected in each pane.
+            if (selectedPositions.size() == 2) {
+                List<Integer> positions = new ArrayList<>(selectedPositions);
+                Collections.sort(positions);
+                compareFile1 = values[positions.get(0)];
+                compareFile2 = values[positions.get(1)];
+                if (compareFile1 instanceof File first && compareFile2 instanceof File second
+                        && !first.isDirectory() && !second.isDirectory()
+                        && (first.getName().toLowerCase(Locale.ROOT).endsWith(".dex") || first.getName().toLowerCase(Locale.ROOT).endsWith(".apk"))
+                        && (second.getName().toLowerCase(Locale.ROOT).endsWith(".dex") || second.getName().toLowerCase(Locale.ROOT).endsWith(".apk"))) {
+                    dexCompareFiles1 = Collections.singletonList(first);
+                    dexCompareFiles2 = Collections.singletonList(second);
+                }
+            } else if (a instanceof MainFilesArrayAdapter otherPaneAdapter) {
                 dexCompareFiles1 = collectDexCompareFiles();
                 dexCompareFiles2 = otherPaneAdapter.collectDexCompareFiles();
-                if (dexCompareFiles1 != null && dexCompareFiles2 != null) {
-                    visibleMenu.add(new FileMenuOrder.MenuItem(FileMenuOrder.CMP_DEX, FileMenuOrder.labelFor(context, FileMenuOrder.CMP_DEX, direction)));
-                }
                 if (selectedPositions.size() == 1 && otherPaneAdapter.selectedPositions.size() == 1) {
                     compareFile1 = values[selectedPositions.iterator().next()];
                     compareFile2 = otherPaneAdapter.values[otherPaneAdapter.selectedPositions.iterator().next()];
+                }
+            }
+            if (dexCompareFiles1 != null && dexCompareFiles2 != null)
+                visibleMenu.add(new FileMenuOrder.MenuItem(FileMenuOrder.CMP_DEX, FileMenuOrder.labelFor(context, FileMenuOrder.CMP_DEX, direction)));
+            if (compareFile1 != null && compareFile2 != null
+                    && !(compareFile1 instanceof File first && first.isDirectory())
+                    && !(compareFile2 instanceof File second && second.isDirectory())
+                    && !(compareFile1 instanceof ZipEntryInfo first && first.isDirectory())
+                    && !(compareFile2 instanceof ZipEntryInfo second && second.isDirectory())) {
                     String name1 = compareFile1 instanceof File ? ((File)compareFile1).getName() : ((ZipEntryInfo)compareFile1).getName();
                     String name2 = compareFile2 instanceof File ? ((File)compareFile2).getName() : ((ZipEntryInfo)compareFile2).getName();
 
@@ -473,7 +497,6 @@ public class MainFilesArrayAdapter extends RecyclerView.Adapter<MainFilesArrayAd
                     if (ext1.equals("apk") && ext2.equals("apk")
                             && compareFile1 instanceof File && compareFile2 instanceof File)
                         visibleMenu.add(new FileMenuOrder.MenuItem(FileMenuOrder.CMP_APK, FileMenuOrder.labelFor(context, FileMenuOrder.CMP_APK, direction)));
-                }
             }
 
             // Third-party file actions: real files only, visibility decided per selection.

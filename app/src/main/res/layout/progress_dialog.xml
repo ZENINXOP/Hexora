@@ -30,21 +30,29 @@
         app:trackThickness="4dp"
         app:trackCornerRadius="2dp" />
 
+    <TextView
+        android:id="@+id/progressValue"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textColor="?attr/colorOnSurfaceVariant"
+        android:textSize="13sp"
+        android:importantForAccessibility="no"
+        android:visibility="invisible" />
+
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:gravity="center_vertical"
+        android:gravity="end|center_vertical"
         android:orientation="horizontal">
 
-        <TextView
-            android:id="@+id/progressValue"
-            android:layout_width="0dp"
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/cancelTaskButton"
+            style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:textColor="?attr/colorOnSurfaceVariant"
-            android:textSize="13sp"
-            android:importantForAccessibility="no"
-            android:visibility="invisible" />
+            android:minHeight="48dp"
+            android:text="@android:string/cancel"
+            android:visibility="gone" />
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/hideButton"

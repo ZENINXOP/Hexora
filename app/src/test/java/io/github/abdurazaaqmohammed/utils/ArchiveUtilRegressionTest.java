@@ -62,7 +62,7 @@ public class ArchiveUtilRegressionTest {
         assertThrows(IOException.class, () -> ArchiveUtil.extract(archive, output));
         assertFalse(new File(tmp.getRoot(),"escape").exists());
     }
-    @Test public void tarLinksFailExplicitly() throws Exception {
+    @Test public void tarLinksCannotEscapeDestination() throws Exception {
         File archive = tmp.newFile("link.tar");
         try (TarArchiveOutputStream tar = new TarArchiveOutputStream(new FileOutputStream(archive))) {
             TarArchiveEntry entry = new TarArchiveEntry("link", TarConstants.LF_SYMLINK);
@@ -70,6 +70,135 @@ public class ArchiveUtilRegressionTest {
         }
         File output=tmp.newFolder("out");
         assertThrows(IOException.class, () -> ArchiveUtil.extract(archive, output));
+    }
+
+    private void addTarFile(TarArchiveOutputStream tar, String name, byte[] contents) throws IOException {
+        TarArchiveEntry entry = new TarArchiveEntry(name);
+        entry.setSize(contents.length);
+        tar.putArchiveEntry(entry);
+        tar.write(contents);
+        tar.closeArchiveEntry();
+    }
+
+    private void addTarLink(TarArchiveOutputStream tar, String name, String target, byte type) throws IOException {
+        TarArchiveEntry entry = new TarArchiveEntry(name, type);
+        entry.setLinkName(target);
+        tar.putArchiveEntry(entry);
+        tar.closeArchiveEntry();
+    }
+
+    @Test public void ndkLibrarySymlinkCanReferToALaterEntry() throws Exception {
+        String folder = "android-ndk-aide/toolchains/aarch64-linux-android-4.9/prebuilt/linux-arm64/libexec/gcc/aarch64-linux-android/4.9.x/";
+        byte[] library = new byte[]{0x7f, 'E', 'L', 'F', 1, 2, 3};
+        File archive = tmp.newFile("ndk.tar");
+        try (TarArchiveOutputStream tar = new TarArchiveOutputStream(new FileOutputStream(archive))) {
+            tar.setLongFileMode(TarArchiveOutputStream.LONGFILE_POSIX);
+            addTarLink(tar, folder + "liblto_plugin.so", "liblto_plugin.so.0", TarConstants.LF_SYMLINK);
+            addTarFile(tar, folder + "liblto_plugin.so.0", library);
+        }
+        File output = tmp.newFolder("ndk");
+        ArchiveUtil.extract(archive, output, true);
+        assertArrayEquals(library, Files.readAllBytes(new File(output, folder + "liblto_plugin.so").toPath()));
+    }
+
+    @Test public void tarLinkChainsAndRootRelativeHardLinksAreResolved() throws Exception {
+        File archive = tmp.newFile("chain.tar");
+        byte[] content = "library".getBytes(StandardCharsets.UTF_8);
+        try (TarArchiveOutputStream tar = new TarArchiveOutputStream(new FileOutputStream(archive))) {
+            addTarLink(tar, "bin/plugin", "../lib/alias", TarConstants.LF_SYMLINK);
+            addTarLink(tar, "lib/alias", "target", TarConstants.LF_SYMLINK);
+            addTarLink(tar, "bin/hard", "lib/target", TarConstants.LF_LINK);
+            addTarFile(tar, "lib/target", content);
+        }
+        File output = tmp.newFolder("chain");
+        ArchiveUtil.extract(archive, output);
+        assertArrayEquals(content, Files.readAllBytes(new File(output, "bin/plugin").toPath()));
+        assertArrayEquals(content, Files.readAllBytes(new File(output, "bin/hard").toPath()));
+    }
+
+    @Test public void directoryLinkIncludesItsDeferredChildren() throws Exception {
+        File archive = tmp.newFile("directory-link.tar");
+        byte[] content = "header".getBytes(StandardCharsets.UTF_8);
+        try (TarArchiveOutputStream tar = new TarArchiveOutputStream(new FileOutputStream(archive))) {
+            addTarLink(tar, "include", "real", TarConstants.LF_SYMLINK);
+            addTarLink(tar, "real/alias.h", "target.h", TarConstants.LF_SYMLINK);
+            addTarFile(tar, "real/target.h", content);
+        }
+        File output = tmp.newFolder("directory-link");
+        ArchiveUtil.extract(archive, output);
+        assertArrayEquals(content, Files.readAllBytes(new File(output, "include/target.h").toPath()));
+        assertArrayEquals(content, Files.readAllBytes(new File(output, "include/alias.h").toPath()));
+    }
+
+    @Test public void missingAndCyclicLinksDoNotHangOrCreateFakeFiles() throws Exception {
+        for (boolean cyclic : new boolean[]{false, true}) {
+            File archive = tmp.newFile(cyclic ? "cyclic.tar" : "missing.tar");
+            try (TarArchiveOutputStream tar = new TarArchiveOutputStream(new FileOutputStream(archive))) {
+                addTarLink(tar, "a", "b", TarConstants.LF_SYMLINK);
+                if (cyclic) addTarLink(tar, "b", "a", TarConstants.LF_SYMLINK);
+            }
+            File output = tmp.newFolder(cyclic ? "cyclic" : "missing");
+            assertThrows(IOException.class, () -> ArchiveUtil.extract(archive, output));
+            assertFalse(new File(output, "a").exists());
+        }
+    }
+
+    @Test public void absoluteAndEscapingHardLinkTargetsAreRejected() throws Exception {
+        int index = 0;
+        for (String target : new String[]{"/absolute", "../outside", "C:/outside", "..\\outside"}) {
+            File archive = tmp.newFile("bad-target-" + index + ".tar");
+            try (TarArchiveOutputStream tar = new TarArchiveOutputStream(new FileOutputStream(archive))) {
+                addTarLink(tar, "link", target, TarConstants.LF_LINK);
+            }
+            File output = tmp.newFolder("bad-target-" + index++);
+            assertThrows(IOException.class, () -> ArchiveUtil.extract(archive, output));
+        }
+        assertFalse(new File(tmp.getRoot(), "outside").exists());
+    }
+
+    @Test public void archiveLinkCannotOverwriteAnExtractedFile() throws Exception {
+        File archive = tmp.newFile("collision.tar");
+        byte[] original = "keep".getBytes(StandardCharsets.UTF_8);
+        try (TarArchiveOutputStream tar = new TarArchiveOutputStream(new FileOutputStream(archive))) {
+            addTarFile(tar, "link", original);
+            addTarFile(tar, "target", new byte[]{42});
+            addTarLink(tar, "link", "target", TarConstants.LF_SYMLINK);
+        }
+        File output = tmp.newFolder("collision");
+        assertThrows(IOException.class, () -> ArchiveUtil.extract(archive, output));
+        assertArrayEquals(original, Files.readAllBytes(new File(output, "link").toPath()));
+    }
+
+    @Test public void nestedArchivesStayPackedUntilExtractedSeparately() throws Exception {
+        java.io.ByteArrayOutputStream buffer = new java.io.ByteArrayOutputStream();
+        try (java.util.zip.ZipOutputStream zip = new java.util.zip.ZipOutputStream(buffer)) {
+            zip.putNextEntry(new java.util.zip.ZipEntry("inside.txt"));
+            zip.write("packed".getBytes(StandardCharsets.UTF_8));
+            zip.closeEntry();
+        }
+        byte[] packed = buffer.toByteArray();
+        File archive = tmp.newFile("outer.tar");
+        try (TarArchiveOutputStream tar = new TarArchiveOutputStream(new FileOutputStream(archive))) {
+            addTarFile(tar, "nested.zip", packed);
+            addTarFile(tar, "nested.jar", packed);
+        }
+        File output = tmp.newFolder("outer");
+        ArchiveUtil.extract(archive, output);
+        assertArrayEquals(packed, Files.readAllBytes(new File(output, "nested.zip").toPath()));
+        assertArrayEquals(packed, Files.readAllBytes(new File(output, "nested.jar").toPath()));
+        assertFalse(new File(output, "inside.txt").exists());
+        assertFalse(new File(output, "nested").exists());
+
+        File zipArchive = tmp.newFile("outer.zip");
+        try (java.util.zip.ZipOutputStream zip = new java.util.zip.ZipOutputStream(new FileOutputStream(zipArchive))) {
+            zip.putNextEntry(new java.util.zip.ZipEntry("nested.zip"));
+            zip.write(packed);
+            zip.closeEntry();
+        }
+        File zipOutput = tmp.newFolder("outer-zip");
+        ArchiveUtil.extract(zipArchive, zipOutput);
+        assertArrayEquals(packed, Files.readAllBytes(new File(zipOutput, "nested.zip").toPath()));
+        assertFalse(new File(zipOutput, "inside.txt").exists());
     }
     @Test public void sevenZipWithoutTimestampCanBeExtracted() throws Exception {
         File archive=tmp.newFile("no-time.7z");

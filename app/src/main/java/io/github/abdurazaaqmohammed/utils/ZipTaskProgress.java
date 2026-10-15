@@ -17,6 +17,7 @@ public final class ZipTaskProgress {
         long reported = 0;
         boolean interrupted = false;
         try {
+            if (Thread.currentThread().isInterrupted()) throw new InterruptedIOException("Archive operation cancelled");
             task.run();
             while (monitor.getState() == ProgressMonitor.State.BUSY) {
                 long total = monitor.getTotalWork();

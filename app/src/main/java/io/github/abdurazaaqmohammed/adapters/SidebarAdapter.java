@@ -452,6 +452,8 @@ public class SidebarAdapter extends ArrayAdapter<SidebarAdapter.SidebarEntry> {
             ((TextView) view.findViewById(R.id.tvUsedFree)).setText(context.getString(R.string.used,
                     FileSize.getHumanReadableFileSize(info.usedBytes), FileSize.getHumanReadableFileSize(info.freeBytes)));
             ((ProgressBar) view.findViewById(R.id.pbUsed)).setProgress(info.usedPercent());
+            ((View) view.findViewById(R.id.pbUsed).getParent()).setVisibility(info.addedLocalStorage ? View.GONE : View.VISIBLE);
+            if (info.addedLocalStorage) ((TextView) view.findViewById(R.id.tvUsedFree)).setText(info.description);
             view.setOnClickListener(v -> callbacks.onEntryClicked(entry, v));
             view.setOnLongClickListener(v -> {
                 callbacks.onEntryStorageLongPressed(entry, v);

@@ -73,9 +73,14 @@ public class MediaPlayerActivity extends BaseActivity implements
     }
 
     public static void openAndPlay(Activity activity, String filePath) {
+        openAndPlay(activity, filePath, null);
+    }
+
+    public static void openAndPlay(Activity activity, String filePath, java.util.ArrayList<String> orderedPaths) {
         Intent intent = new Intent(activity, MediaPlayerActivity.class);
         intent.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
         intent.putExtra("play_path", filePath);
+        if (orderedPaths != null) intent.putStringArrayListExtra("play_queue", orderedPaths);
         activity.startActivity(intent);
     }
 
@@ -96,9 +101,9 @@ public class MediaPlayerActivity extends BaseActivity implements
         setupQueueList();
 
         String playPath = getIntent().getStringExtra("play_path");
-        if (playPath != null) {
+        if (playPath != null && savedInstanceState == null) {
             MediaItem item = PlayerManager.buildMediaItem(this, playPath);
-            playerManager.play(item);
+            playerManager.play(item, getIntent().getStringArrayListExtra("play_queue"));
         } else if (playerManager.getState() == PlayerManager.PlayState.IDLE && playerManager.getQueue().isEmpty()) {
             finish();
         }
@@ -646,7 +651,7 @@ public class MediaPlayerActivity extends BaseActivity implements
         String playPath = intent.getStringExtra("play_path");
         if (playPath != null) {
             MediaItem item = PlayerManager.buildMediaItem(this, playPath);
-            playerManager.play(item);
+            playerManager.play(item, intent.getStringArrayListExtra("play_queue"));
         }
     }
 

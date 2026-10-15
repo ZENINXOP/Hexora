@@ -1,4 +1,21 @@
 <resources>
+    <string name="app_storage_details">Package and data details</string>
+    <string name="app_storage_directories">Open directory</string>
+    <string name="app_storage_package_directory">Package directory</string>
+    <string name="app_storage_data_directory">App data directory</string>
+    <string name="app_storage_device_data">Device-protected data directory</string>
+    <string name="app_storage_package_size">Package size</string>
+    <string name="app_storage_data_size">Data size (excluding cache)</string>
+    <string name="app_storage_cache_size">Cache size</string>
+    <string name="app_storage_unavailable">Unavailable</string>
+    <string name="app_storage_usage_access">Usage access</string>
+    <string name="app_storage_access_needed">Allow Usage access to read app storage sizes, or enable elevated file access to inspect private data directories.</string>
+    <string name="sidebar_menu">Sidebar menu</string>
+    <string name="add_local_storage">Add local storage</string>
+    <string name="remove_local_storage">Remove storage</string>
+    <string name="remove_local_storage_message">Remove “%1$s” from local storage? Files in this folder will be kept.</string>
+    <string name="local_storage_unavailable">Local storage is unavailable. Check the provider or add the folder again.</string>
+    <string name="local_storage_requires_lollipop">Adding a storage provider requires Android 5.0 or later.</string>
     <string name="hexora_error_details">Details</string>
     <string name="hexora_empty_folder">Empty folder</string>
     <string name="app_name" translatable="false">Hexora</string>
@@ -1634,4 +1651,22 @@ Layout Inspector
         <item>Markdown</item>
     </string-array>
     <string name="editor_reload_discard">Reloading will discard unsaved changes in this file.</string>
+    <string name="dex_classes">Classes</string>
+    <string name="archive_extract_on_request">Choose Extract to unpack this archive. Archives inside it will stay packed.</string>
+    <string name="progress_cancelling">Cancelling…</string>
+    <string name="file_date_unavailable">Date unavailable</string>
+    <string name="storage_access_message">Allow storage access to browse and manage your files.</string>
+    <string name="grant_storage_access">Grant storage access</string>
+    <string name="dex_code_theme">Code theme</string>
+    <string name="dex_editor_theme">DEX / Smali theme</string>
+    <string-array name="dex_editor_theme_entries">
+        <item>Follow app theme</item>
+        <item>Light (white)</item>
+        <item>Dark</item>
+    </string-array>
+    <string-array name="dex_editor_theme_values">
+        <item>app</item>
+        <item>light</item>
+        <item>dark</item>
+    </string-array>
 </resources>

@@ -355,6 +355,7 @@ public class FileOpener {
     public void openAutomatically(File file, String name, File zip, String entry) {
         FileType type = FileType.forPath(name);
         String ext = '.' + FilenameUtils.getExtension(name).toLowerCase(Locale.ROOT);
+        if (".bak".equals(ext) || ".ab".equals(ext)) { openBackupOrRestore(file, name); return; }
         if (MergeUtil.isSplitBundle(name)) {
             withReadableCopy(file, readable -> showSplitApkMenu(readable, name));
             return;
@@ -758,35 +759,18 @@ public class FileOpener {
         } else {
             String bak = ".bak";
             if(ext.equals(bak)) {
-                View et = LayoutInflater.from(context).inflate(R.layout.enter_name, null);
-                context.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE);
-                EditText tv = et.findViewById(R.id.m_et_edittext);
-                String newName = fileName.substring(0, fileName.length() - bak.length());
-                tv.setText(newName);
-                tv.requestFocus();
-                tv.post(() -> {
-                    int dot = newName.lastIndexOf('.');
-                    tv.setSelection(0, dot > 0 ? dot : newName.length());
-                    InputMethodManager imm = (InputMethodManager) context.getSystemService(Context.INPUT_METHOD_SERVICE);
-                    if (imm != null) imm.showSoftInput(tv, InputMethodManager.SHOW_IMPLICIT);
-                });
-                new MaterialAlertDialogBuilder(context)
-                .setTitle(R.string.restore_backup)
-                .setView(et)
-                .setPositiveButton(R.string.restore, (dialog, which) -> {
-                    String name = tv.getText().toString();
-                    try {
-                        io.github.abdurazaaqmohammed.domain.files.SafeFileOperations.validateName(name);
-                        restoreBakRootAware(file, new File(file.getParentFile(), name), fileName);
-                    } catch (IOException e) { new ErrorUtil(context).showError(e); }
-                })
-                .setNegativeButton(android.R.string.cancel, null).show();
+                openBackupOrRestore(file, fileName);
             } else if (ext.equals(".zip") || ext.equals(".jar") || ext.equals(".war") || ext.equals(".aar")) {
                 withReadableCopy(file, readable -> context.openArchiveInPane(readable, file, null, null, pane1));
             } else if (ext.equals(".arsc")) {
                 openAutomatically(file, fileName, null, null);
             } else if (ArchiveUtil.isSupportedArchive(fileName)) {
-                withReadableCopy(file, fileOps::extractArchive);
+                new MaterialAlertDialogBuilder(context)
+                        .setTitle(fileName)
+                        .setMessage(R.string.archive_extract_on_request)
+                        .setPositiveButton(R.string.extract, (dialog, which) -> fileOps.extractArchive(file))
+                        .setNegativeButton(android.R.string.cancel, null)
+                        .show();
             } else if (ext.equals(".apks") || ext.equals(".xapk") || ext.equals(".aspk") || ext.equals(".apkm")) {
                 withReadableCopy(file, readable -> showSplitApkMenu(readable, fileName));
             } else {
@@ -919,6 +903,57 @@ public class FileOpener {
                 context.handler.post(() -> new ErrorUtil(context).showError(e));
             }
         }).start();
+    }
+
+    private void openBackupOrRestore(File file, String fileName) {
+        withReadableCopy(file, readable -> {
+            ProgressManager progress = new ProgressManager(context, true).setText(R.string.loading).show();
+            progress.startWorker(() -> {
+                try {
+                    boolean backup;
+                    try (InputStream input = FileUtils.getInputStream(readable)) {
+                        backup = io.github.abdurazaaqmohammed.domain.files.AndroidBackup.recognizes(input);
+                    }
+                    if (!backup) {
+                        context.handler.post(() -> showRestoreBackup(file, fileName));
+                        return;
+                    }
+                    File view = io.github.abdurazaaqmohammed.utils.BackupViewer.convert(context, readable);
+                    context.handler.post(() -> {
+                        if (context.isFinishing() || context.isDestroyed()) { view.delete(); return; }
+                        context.openArchiveInPane(view, file, null, null, pane1);
+                    });
+                } catch (Exception e) { new ErrorUtil(context).showError(e); }
+                finally { progress.dismiss(); }
+            });
+        });
+    }
+
+    private void showRestoreBackup(File file, String fileName) {
+        String bak = ".bak";
+                View et = LayoutInflater.from(context).inflate(R.layout.enter_name, null);
+                context.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE);
+                EditText tv = et.findViewById(R.id.m_et_edittext);
+                String newName = fileName.substring(0, fileName.length() - bak.length());
+                tv.setText(newName);
+                tv.requestFocus();
+                tv.post(() -> {
+                    int dot = newName.lastIndexOf('.');
+                    tv.setSelection(0, dot > 0 ? dot : newName.length());
+                    InputMethodManager imm = (InputMethodManager) context.getSystemService(Context.INPUT_METHOD_SERVICE);
+                    if (imm != null) imm.showSoftInput(tv, InputMethodManager.SHOW_IMPLICIT);
+                });
+                new MaterialAlertDialogBuilder(context)
+                .setTitle(R.string.restore_backup)
+                .setView(et)
+                .setPositiveButton(R.string.restore, (dialog, which) -> {
+                    String name = tv.getText().toString();
+                    try {
+                        io.github.abdurazaaqmohammed.domain.files.SafeFileOperations.validateName(name);
+                        restoreBakRootAware(file, new File(file.getParentFile(), name), fileName);
+                    } catch (IOException e) { new ErrorUtil(context).showError(e); }
+                })
+                .setNegativeButton(android.R.string.cancel, null).show();
     }
 
     private void startTextEditor(Intent intent) {

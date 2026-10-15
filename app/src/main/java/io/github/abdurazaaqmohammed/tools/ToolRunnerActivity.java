@@ -132,6 +132,7 @@ public class ToolRunnerActivity extends BaseActivity {
 
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
+        if (io.github.abdurazaaqmohammed.utils.ProgressManager.isRestoreIntent(intent)) return;
         setIntent(intent);
         for (ToolPlugin plugin : activePlugins) {
             try {

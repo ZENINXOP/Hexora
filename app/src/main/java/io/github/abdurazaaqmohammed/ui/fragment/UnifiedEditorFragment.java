@@ -564,6 +564,7 @@ public class UnifiedEditorFragment extends Fragment implements SmaliMethodFieldL
                 }
             } catch (Exception ignored) {}
         }
+        recordPosition(editor.getCursor().getLeftLine(), editor.getCursor().getLeftColumn());
     }
 
     public void loadEditorSettings(boolean loadTypeface) {
@@ -619,15 +620,12 @@ public class UnifiedEditorFragment extends Fragment implements SmaliMethodFieldL
         if (isSmali) {
             try {
                 ensureLanguageInitialized(requireContext().getApplicationContext());
-                int surface = MaterialColors.getColor(editor, com.google.android.material.R.attr.colorSurface);
+                int surface = dexSurface();
                 ThemeRegistry registry = ThemeRegistry.getInstance();
                 registry.setTheme(ColorUtils.calculateLuminance(surface) < 0.5 ? "smali-dark.json" : "smali-light.json");
                 // A language owns its analyzer and must belong to exactly one editor.
                 editor.setEditorLanguage(new CustomAutoComplete(editor, cachedInstructions,
                         TextMateLanguage.create("source.smali", true)));
-                TextMateColorScheme scheme = TextMateColorScheme.create(registry);
-                editor.setColorScheme(scheme);
-                applyDexChrome(scheme);
             } catch (Exception e) {
                 Log.e("UnifiedEditor", "Error setting smali language", e);
                 editor.setEditorLanguage(new EmptyLanguage());
@@ -665,17 +663,19 @@ public class UnifiedEditorFragment extends Fragment implements SmaliMethodFieldL
         if (lightweightDocument || !editorPrefs.getBoolean("pref_syntax_highlight", true)) selected = SyntaxFormat.TEXT;
         if (appliedSyntax == selected) return;
         editor.setEditorLanguage(selected == SyntaxFormat.JAVA ? new JavaLanguage()
-                : selected == SyntaxFormat.TEXT ? new EmptyLanguage() : new FormatLanguage(selected));
+                : lightweightDocument ? new EmptyLanguage() : new FormatLanguage(selected));
         appliedSyntax = selected;
     }
 
     public void applyPreferences() {
+        if (editor == null) return;
         SharedPreferences editorPrefs = requireContext().getSharedPreferences("editor_prefs", Context.MODE_PRIVATE);
-        if (type == TYPE_JAVA) {
+        if (isSmali) {
+            applySmaliTheme();
+        } else if (type == TYPE_JAVA) {
             // A converted DEX tab belongs to the same themed workspace as Smali.
             // The standalone Text editor palette must not replace its appearance.
-            boolean dark = ColorUtils.calculateLuminance(MaterialColors.getColor(
-                    editor, com.google.android.material.R.attr.colorSurface)) < .5;
+            boolean dark = ColorUtils.calculateLuminance(dexSurface()) < .5;
             EditorColorScheme scheme = dark ? new SchemeDarcula() : new SchemeEclipse();
             applyDexChrome(scheme);
             editor.setColorScheme(scheme);
@@ -837,10 +837,18 @@ public class UnifiedEditorFragment extends Fragment implements SmaliMethodFieldL
     }
 
     private void jumpToRecordedPosition() {
+        if (editor == null) return;
         isNavigating = true;
         int[] pos = navigationHistory.get(historyPointer);
-        editor.setSelection(pos[0], pos[1]);
-        isNavigating = false;
+        try {
+            // An edit can remove lines/columns that were present when this stop was recorded.
+            int line = Math.max(0, Math.min(pos[0], editor.getText().getLineCount() - 1));
+            int column = Math.max(0, Math.min(pos[1], editor.getText().getColumnCount(line)));
+            editor.setSelection(line, column);
+            editor.ensureSelectionVisible();
+        } finally {
+            isNavigating = false;
+        }
     }
 
         public void showSearchPanel() { searchPanel.setVisibility(View.VISIBLE); }
@@ -1252,6 +1260,10 @@ public class UnifiedEditorFragment extends Fragment implements SmaliMethodFieldL
         }
         popupMenu.getMenu().add(0, R.id.action_minimize, 100, R.string.hexora_minimize)
                 .setIcon(R.drawable.ic_minimize);
+        if (getActivity() instanceof DexEditorActivity) {
+            popupMenu.getMenu().add(0, R.id.dex_code_theme, 98, R.string.dex_editor_theme)
+                    .setIcon(R.drawable.baseline_settings_24);
+        }
         // A decompiled Java preview must remain read-only.
         popupMenu.getMenu().findItem(9).setEnabled(type != TYPE_JAVA && !documentReadOnly);
         popupMenu.getMenu().findItem(8).setEnabled(!lightweightDocument);
@@ -1260,6 +1272,8 @@ public class UnifiedEditorFragment extends Fragment implements SmaliMethodFieldL
             int id = item.getItemId();
             if (id == R.id.action_java_preview) {
                 if (callback != null) callback.onJavaPreviewRequested();
+            } else if (id == R.id.dex_code_theme && getActivity() instanceof DexEditorActivity dexActivity) {
+                dexActivity.showCodeThemeDialog();
             } else if (id == R.id.action_minimize) {
                 io.github.abdurazaaqmohammed.ui.EditorMinimizer.minimize(requireActivity());
             } else if (id == 0) { showSubFileMenu(anchor); }
@@ -1708,11 +1722,43 @@ public class UnifiedEditorFragment extends Fragment implements SmaliMethodFieldL
         }
     }
 
+    private int dexSurface() {
+        String theme = requireContext().getSharedPreferences("editor_prefs", Context.MODE_PRIVATE)
+                .getString("pref_dex_theme", "app");
+        if ("light".equals(theme)) return 0xffffffff;
+        if ("dark".equals(theme)) return 0xff202124;
+        return MaterialColors.getColor(editor, com.google.android.material.R.attr.colorSurface);
+    }
+
+    private void applySmaliTheme() {
+        try {
+            ensureLanguageInitialized(requireContext().getApplicationContext());
+            ThemeRegistry registry = ThemeRegistry.getInstance();
+            registry.setTheme(ColorUtils.calculateLuminance(dexSurface()) < .5
+                    ? "smali-dark.json" : "smali-light.json");
+            TextMateColorScheme scheme = TextMateColorScheme.create(registry);
+            editor.setColorScheme(scheme);
+            applyDexChrome(scheme);
+        } catch (Exception e) {
+            Log.e("UnifiedEditor", "Error applying smali theme", e);
+            EditorColorScheme scheme = new EditorColorScheme();
+            applyDexChrome(scheme);
+            editor.setColorScheme(scheme);
+        }
+    }
+
     private void applyDexChrome(EditorColorScheme scheme) {
-        int surface = MaterialColors.getColor(editor, com.google.android.material.R.attr.colorSurface);
-        int foreground = MaterialColors.getColor(editor, com.google.android.material.R.attr.colorOnSurface);
-        int muted = MaterialColors.getColor(editor, com.google.android.material.R.attr.colorOnSurfaceVariant);
-        int primary = MaterialColors.getColor(editor, com.google.android.material.R.attr.colorPrimary);
+        int surface = dexSurface();
+        boolean dark = ColorUtils.calculateLuminance(surface) < .5;
+        String theme = requireContext().getSharedPreferences("editor_prefs", Context.MODE_PRIVATE)
+                .getString("pref_dex_theme", "app");
+        boolean followApp = !"light".equals(theme) && !"dark".equals(theme);
+        int foreground = followApp ? MaterialColors.getColor(editor, com.google.android.material.R.attr.colorOnSurface)
+                : dark ? 0xffe8eaed : 0xff202124;
+        int muted = followApp ? MaterialColors.getColor(editor, com.google.android.material.R.attr.colorOnSurfaceVariant)
+                : dark ? 0xffbdc1c6 : 0xff60646c;
+        int primary = followApp ? MaterialColors.getColor(editor, com.google.android.material.R.attr.colorPrimary)
+                : dark ? 0xff8ab4f8 : 0xff2457a6;
         int currentLine = ColorUtils.blendARGB(surface, primary, 0.07f);
         int selection = ColorUtils.blendARGB(surface, primary, 0.23f);
         scheme.setColor(EditorColorScheme.WHOLE_BACKGROUND, surface);

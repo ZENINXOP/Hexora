@@ -73,10 +73,26 @@ public class FileOperationsHelper {
     private final DexTools dex;
 
     private volatile ProgressManager activeProgress;
+    private volatile Thread operationWorker;
     private final AtomicBoolean running = new AtomicBoolean();
     private boolean moving;
     private long completedWork, totalWork;
     private boolean knownWork;
+    private boolean batchingPaste, deferredMoveSizing;
+    private final Map<Object, Long> copyWork = new LinkedHashMap<>();
+    private final Map<File, Long> deleteWork = new LinkedHashMap<>();
+
+    private long cachedCopyWork(Object item) throws IOException {
+        Long work = copyWork.get(item);
+        if (work == null) { work = itemCopyWork(item); copyWork.put(item, work); }
+        return work;
+    }
+
+    private long cachedDeleteWork(File file) {
+        Long work = deleteWork.get(file);
+        if (work == null) { work = itemDeleteWork(file); deleteWork.put(file, work); }
+        return work;
+    }
 
     private long itemCopyWork(Object item) throws IOException {
         if (item instanceof File file) {
@@ -111,6 +127,12 @@ public class FileOperationsHelper {
 
     private interface IoOperation {
         void run() throws Exception;
+    }
+
+    private void checkOperationCancelled() throws IOException {
+        if (Thread.currentThread().isInterrupted()) throw new java.io.InterruptedIOException("Operation cancelled");
+        ProgressManager progress = activeProgress;
+        if (progress != null && running.get()) progress.checkCancelled();
     }
 
     public FileOperationsHelper(MainActivity context, DialogUtil dialogUtil, MainFilesArrayAdapter adapter) {
@@ -148,6 +170,8 @@ public class FileOperationsHelper {
         pm.setText(text);
         if (knownWork && totalWork > 0) pm.setProgress(Math.min(completedWork, totalWork - 1), totalWork);
         activeProgress = pm;
+        Thread worker = operationWorker;
+        if (worker != null) pm.onCancel(worker::interrupt);
         pm.show();
     }
 
@@ -162,10 +186,13 @@ public class FileOperationsHelper {
     private boolean runWithProgress(String text,List<Object> items,boolean move,IoOperation op,Runnable finished) {
         if (!running.compareAndSet(false, true)) return false;
         completedWork = totalWork = 0;
+        copyWork.clear();
+        deleteWork.clear();
         knownWork = false;
         showActiveProgress(text);
-        new Thread(() -> {
+        Thread worker = new Thread(() -> {
             try {
+                activeProgress.checkCancelled();
                 completedWork = 0;
                 totalWork = 0;
                 knownWork = true;
@@ -173,11 +200,16 @@ public class FileOperationsHelper {
                 RecyclerView destinationView = context.findViewById(adapter.pane1 ? R.id.listViewPane2 : R.id.listViewPane1);
                 boolean archiveDestination = destinationView.getAdapter() instanceof MainFilesArrayAdapter
                         && ((MainFilesArrayAdapter) destinationView.getAdapter()).isInZip;
+                // A same-volume move is a rename, even for a folder with millions of files.
+                // Only count its contents if rename fails and copying is actually needed.
+                deferredMoveSizing = move && !archiveDestination && !adapter.isInZip
+                        && items.stream().allMatch(item -> item instanceof File);
                 for (Object item : items) {
-                    long copy = itemCopyWork(item);
+                    activeProgress.checkCancelled();
+                    long copy = deferredMoveSizing ? 1 : cachedCopyWork(item);
                     if (archiveDestination && item instanceof ZipEntryInfo) copy *= move ? 3 : 2;
-                    if (move && item instanceof File file) copy = Math.addExact(copy * 2,
-                            itemDeleteWork(file));
+                    if (move && !deferredMoveSizing && item instanceof File file) copy = Math.addExact(copy * 2,
+                            cachedDeleteWork(file));
                     totalWork = Math.addExact(totalWork, copy);
                 }
                 if (move && adapter.isInZip && !items.isEmpty()) totalWork += Math.max(1, ((ZipEntryInfo) items.get(0)).getZipFile().length());
@@ -185,18 +217,26 @@ public class FileOperationsHelper {
                 if (knownWork) activeProgress.setProgress(0L, Math.max(1, totalWork));
                 try (io.github.abdurazaaqmohammed.domain.files.FileWorkProgress.Scope scope =
                              io.github.abdurazaaqmohammed.domain.files.FileWorkProgress.track(this::advanceWork)) {
+                    activeProgress.checkCancelled();
                     op.run();
                 }
                 activeProgress.setProgress(Math.max(1, totalWork), Math.max(1, totalWork));
             } catch (Exception e) {
-                new ErrorUtil(context).showError(e);
+                activeProgress.reportError(e);
             } finally {
                 dismissActiveProgress();
+                copyWork.clear();
+                deleteWork.clear();
                 moving = false;
+                operationWorker = null;
                 running.set(false);
+                context.handler.post(context::refreshAllPanes);
                 context.handler.post(finished);
             }
-        }).start();
+        }, "hexora-transfer");
+        operationWorker = worker;
+        activeProgress.onCancel(worker::interrupt);
+        worker.start();
         return true;
     }
 
@@ -206,16 +246,21 @@ public class FileOperationsHelper {
         return runWithProgress(context.getString(cut ? R.string.moving : R.string.copying,summarizeItems(snapshot)),snapshot,cut,() -> {
             // Validate all destinations before a cut can remove any source.
             for (File source:files) {
+                checkOperationCancelled();
                 if (!source.exists() && !(AccessManager.fileOpsOn(context) && AccessManager.exists(context,source.getAbsolutePath())))
                     throw new IOException("Clipboard source no longer exists: "+source);
                 if (!isSameDirectory(source,destination)) SafeFileOperations.validateDestination(source,new File(destination,source.getName()));
             }
-            for (File source:files) {
-                List<Object> item=Collections.singletonList(source);
-                if (cut) moveToDestination(item,destination,adapter,true);
-                else copyToRegularFolder(item,destination);
-                completed.add(source);
-            }
+            batchingPaste = true;
+            try {
+                for (File source:files) {
+                    checkOperationCancelled();
+                    List<Object> item=Collections.singletonList(source);
+                    if (cut) moveToDestination(item,destination,adapter,true);
+                    else copyToRegularFolder(item,destination);
+                    completed.add(source);
+                }
+            } finally { batchingPaste = false; }
         },() -> { context.refreshAllPanes(); finished.accept(new ArrayList<>(completed)); });
     }
 
@@ -284,6 +329,7 @@ public class FileOperationsHelper {
         if (destIsZip) {
             if (!copyToZip(items, destinationFolder, otherPaneAdapter.currentZipPath)) return false;
             for (Object item : items) {
+                checkOperationCancelled();
                 if (item instanceof File) SafeFileOperations.delete((File) item);
                 else if (item instanceof ZipEntryInfo) deleteZipEntry((ZipEntryInfo) item);
             }
@@ -295,28 +341,53 @@ public class FileOperationsHelper {
         boolean useElevated = AccessManager.fileOpsOn(context);
 
         for (Object item : items) {
+            checkOperationCancelled();
             if (item instanceof File f) {
-                long targetWork = completedWork + itemCopyWork(f) * 2
-                        + itemDeleteWork(f);
+                long targetWork = completedWork + (deferredMoveSizing ? 1
+                        : cachedCopyWork(f) * 2 + cachedDeleteWork(f));
                 if (isSameDirectory(f, destinationFolder)) { finishItemWork(targetWork); continue; }
+                if (io.github.abdurazaaqmohammed.utils.LocalStorage.isPath(f)
+                        || io.github.abdurazaaqmohammed.utils.LocalStorage.isPath(destinationFolder)) {
+                    if (deferredMoveSizing) {
+                        long work = cachedCopyWork(f) * 2 + cachedDeleteWork(f);
+                        totalWork = Math.addExact(totalWork, work - 1);
+                        targetWork = completedWork + work;
+                    }
+                    io.github.abdurazaaqmohammed.utils.LocalStorage.transfer(f, destinationFolder, true);
+                    finishItemWork(targetWork);
+                    continue;
+                }
                 File dest = getUnusedDest(destinationFolder, f.getName(), useElevated);
                 SafeFileOperations.validateDestination(f, dest);
+                if (f.renameTo(dest)) { finishItemWork(targetWork); continue; }
+                if (useElevated) {
+                    try {
+                        AccessManager.rename(context, f.getAbsolutePath(), dest.getAbsolutePath(), true);
+                        finishItemWork(targetWork);
+                        continue;
+                    } catch (IOException ignored) { }
+                }
+                if (ShizukuFileOps.involvesShizukuPath(f, destinationFolder) && ShizukuFileOps.shellMove(f, destinationFolder, dest.getName())) {
+                    finishItemWork(targetWork);
+                    continue;
+                }
                 if (useElevated) {
                     try {
                         if (f.isDirectory()) AccessManager.copyDir(context, f.getAbsolutePath(), dest.getAbsolutePath(), true);
                         else AccessManager.copyFile(context, f.getAbsolutePath(), dest.getAbsolutePath(), true);
                         AccessManager.preserveTime(context, f.getAbsolutePath(), dest.getAbsolutePath());
+                        checkOperationCancelled();
                         AccessManager.delete(context, f.getAbsolutePath(), true);
                         finishItemWork(targetWork);
                         continue;
                     } catch (Exception e) {
                     }
                 }
-                if (ShizukuFileOps.involvesShizukuPath(f, destinationFolder) && ShizukuFileOps.shellMove(f, destinationFolder, dest.getName())) {
-                    finishItemWork(targetWork);
-                    continue;
+                if (deferredMoveSizing) {
+                    long work = cachedCopyWork(f) * 2 + cachedDeleteWork(f);
+                    totalWork = Math.addExact(totalWork, work - 1);
+                    targetWork = completedWork + work;
                 }
-                if (f.renameTo(dest)) { finishItemWork(targetWork); continue; }
                 if (f.isDirectory()) {
                     if (useElevated) {
                         try {
@@ -330,7 +401,6 @@ public class FileOperationsHelper {
                         dest.mkdir();
                     }
                     FileUtils.copyFolder(f, dest);
-                    syncDirTimes(f, dest);
                 } else {
                     SafeFileOperations.copyFile(f, dest);
                     AccessManager.preserveTime(context, f.getAbsolutePath(), dest.getAbsolutePath());
@@ -342,9 +412,8 @@ public class FileOperationsHelper {
                 extractZipEntry((ZipEntryInfo) item, destinationFolder);
             }
         }
-        context.handler.post(() -> {
+        if (!paste) context.handler.post(() -> {
             adapter.clearSelection();
-            if (paste) { context.refreshAllPanes(); return; }
             context.loadFolderInPane(destinationFolder, !adapter.pane1);
             // Source pane also changed after a move (files deleted) — reload it too.
             try {
@@ -376,21 +445,6 @@ public class FileOperationsHelper {
         return first;
     }
 
-    private void syncDirTimes(File srcDir, File dstDir) {
-        try {
-            AccessManager.preserveTime(context, srcDir.getAbsolutePath(), dstDir.getAbsolutePath());
-            File[] kids = srcDir.listFiles();
-            if (kids == null) return;
-            for (File k : kids) {
-                File d = new File(dstDir, k.getName());
-                if (!d.exists()) continue;
-                if (k.isDirectory()) syncDirTimes(k, d);
-                else AccessManager.preserveTime(context, k.getAbsolutePath(), d.getAbsolutePath());
-            }
-        } catch (Exception ignored) {
-        }
-    }
-
     private boolean copyToDestination(List<Object> items) throws IOException {
         File destinationFolder = adapter.pane1 ? context.pane2Folder : context.pane1Folder;
         RecyclerView.Adapter rvAdapter = ((RecyclerView) context.findViewById(adapter.pane1 ? R.id.listViewPane2 : R.id.listViewPane1)).getAdapter();
@@ -411,8 +465,15 @@ public class FileOperationsHelper {
         boolean useElevated = AccessManager.fileOpsOn(context);
 
         for (Object item : items) {
+            checkOperationCancelled();
             if (item instanceof File f) {
-                long targetWork = completedWork + itemCopyWork(f);
+                long targetWork = completedWork + cachedCopyWork(f);
+                if (io.github.abdurazaaqmohammed.utils.LocalStorage.isPath(f)
+                        || io.github.abdurazaaqmohammed.utils.LocalStorage.isPath(destinationFolder)) {
+                    io.github.abdurazaaqmohammed.utils.LocalStorage.transfer(f, destinationFolder, false);
+                    finishItemWork(targetWork);
+                    continue;
+                }
                 File dest = isSameDirectory(f, destinationFolder) ? promptForDuplicateName(f, destinationFolder) : getUnusedDest(destinationFolder, f.getName(), useElevated);
                 if (dest == null || dest.equals(f)) { finishItemWork(targetWork); continue; }
                 SafeFileOperations.validateDestination(f, dest);
@@ -443,7 +504,6 @@ public class FileOperationsHelper {
                         dest.mkdir();
                     }
                     FileUtils.copyFolder(f, dest);
-                    syncDirTimes(f, dest);
                 } else {
                     SafeFileOperations.copyFile(f, dest);
                     AccessManager.preserveTime(context, f.getAbsolutePath(), dest.getAbsolutePath());
@@ -455,7 +515,7 @@ public class FileOperationsHelper {
         }
         // A move must remove the archive source before either pane opens it
         // again. Reloading here races zip4j's replacement on shared storage.
-        if (!moving) context.handler.post(context::refreshAllPanes);
+        if (!moving && !batchingPaste) context.handler.post(context::refreshAllPanes);
         return true;
     }
 
@@ -712,8 +772,11 @@ public class FileOperationsHelper {
                 }
             }
         } catch (IOException | RuntimeException e) {
+            // Rollback must finish even when cancellation interrupted the worker.
+            boolean interrupted = Thread.interrupted();
             try { FileUtils.copyFile(bak, zipFile); }
             catch (IOException restoreError) { e.addSuppressed(restoreError); }
+            finally { if (interrupted) Thread.currentThread().interrupt(); }
             ZipArchiveCache.invalidate(zipFile);
             throw e;
         } finally {
@@ -813,6 +876,7 @@ public class FileOperationsHelper {
                 io.github.abdurazaaqmohammed.domain.files.FileWorkProgress.advance(1);
                 String prefix = zipEntryPath.endsWith("/") ? zipEntryPath : zipEntryPath + "/";
                 for(FileHeader fh : zf.getFileHeaders()) {
+                    checkOperationCancelled();
                     String name = fh.getFileName().replace('\\', '/');
                     if(!name.startsWith(prefix)) continue;
                     String relative = name.substring(prefix.length());
@@ -880,11 +944,14 @@ public class FileOperationsHelper {
         ProgressManager pm = new ProgressManager(context, true);
         pm.setText(context.rss.getString(R.string.extracting_to_folder, destDir.getName()));
         pm.show();
-        new Thread(() -> {
+        pm.startWorker(() -> {
+            boolean created = false;
             try {
+                pm.checkCancelled();
                 if (!destDir.mkdirs()) {
                     throw new IOException("Cannot create extraction folder: " + destDir);
                 }
+                created = true;
                 // Root-only archives are unreadable to zip4j/tar readers:
                 // stage a copy into cache first (binary-safe).
                 File readable = archive;
@@ -895,6 +962,7 @@ public class FileOperationsHelper {
                     readable = staged;
                 }
                 try {
+                    pm.checkCancelled();
                     boolean keepTime = PreferenceManager.getDefaultSharedPreferences(context).getBoolean("preserve_mtime", true);
                     ArchiveUtil.extract(readable, destDir, keepTime, pm);
                 } finally {
@@ -903,13 +971,20 @@ public class FileOperationsHelper {
                         staged.delete();
                     }
                 }
+            } catch (Exception e) {
+                if (created && pm.isCancelled()) {
+                    // Only this task's newly created output is eligible for removal.
+                    boolean interrupted = Thread.interrupted();
+                    try { SafeFileOperations.delete(destDir); }
+                    catch (IOException cleanup) { new ErrorUtil(context).showError(cleanup); }
+                    finally { if (interrupted) Thread.currentThread().interrupt(); }
+                }
+                pm.reportError(e);
+            } finally {
                 pm.dismiss();
                 context.handler.post(() -> context.loadFolderInPane(parent, adapter.pane1));
-            } catch (Exception e) {
-                pm.dismiss();
-                new ErrorUtil(context).showError(e);
             }
-        }).start();
+        });
     }
 
 }

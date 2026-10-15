@@ -33,6 +33,8 @@ public class StorageUtil {
         public long totalBytes;
         public long freeBytes;
         public long usedBytes;
+        public boolean addedLocalStorage;
+        public String description;
 
         public int usedPercent() {
             if (totalBytes <= 0) return 0;

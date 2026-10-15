@@ -21,7 +21,6 @@ import androidx.preference.PreferenceManager;
 
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.google.android.material.textfield.TextInputEditText;
-import com.reandroid.apkeditor.Util;
 
 import net.lingala.zip4j.ZipFile;
 import net.lingala.zip4j.model.FileHeader;
@@ -167,7 +166,9 @@ public class EntryDialogs {
                         File target = new File(file.getParentFile(), name);
                         if (!file.equals(target)) {
                             if (target.exists()) throw new java.io.IOException("Destination already exists.");
-                            if (AccessManager.fileOpsOn(context)) {
+                            if (io.github.abdurazaaqmohammed.utils.LocalStorage.isPath(file)) {
+                                if (!file.renameTo(target)) throw new IOException(context.getString(R.string.failed_to_renamex, fileName));
+                            } else if (AccessManager.fileOpsOn(context)) {
                                 AccessManager.rename(context, file.getAbsolutePath(), target.getAbsolutePath(), true);
                             } else if (!file.renameTo(target)) {
                                 throw new java.io.IOException(context.getString(R.string.failed_to_renamex, fileName));
@@ -194,6 +195,11 @@ public class EntryDialogs {
     }
 
     private void deleteWithProgress(File file, boolean elevated) throws IOException {
+        if (io.github.abdurazaaqmohammed.utils.LocalStorage.isPath(file)) {
+            io.github.abdurazaaqmohammed.domain.files.SafeFileOperations.delete(
+                    io.github.abdurazaaqmohammed.utils.LocalStorage.file(file));
+            return;
+        }
         if (elevated) {
             try {
                 AccessManager.delete(context, file.getAbsolutePath(), true);
@@ -232,9 +238,10 @@ public class EntryDialogs {
             SignWrapper[] wrapper = new SignWrapper[1];
             Runnable doDelete = () -> {
                 pm.show();
-                new Thread(() -> {
+                pm.startWorker(() -> {
                     io.github.abdurazaaqmohammed.domain.files.FileWorkProgress.Scope progressScope = null;
                     try {
+                        pm.checkCancelled();
                         pm.setText(context.getString(R.string.progress_counting));
                         boolean useElevatedForDelete = AccessManager.fileOpsOn(context);
                         long planned = isInZip ? Math.max(1, zipFile.length()) + (sign[0] ? 1 : 0) : 0;
@@ -243,6 +250,7 @@ public class EntryDialogs {
                             if (multi) for (int index : selectedPositions) targets.add((File) values[index]);
                             else targets.add(file);
                             for (File target : targets) {
+                                pm.checkCancelled();
                                 long count = useElevatedForDelete ? 1 : io.github.abdurazaaqmohammed.domain.files.FileWorkProgress.deleteUnits(target);
                                 planned = Math.addExact(planned, count);
                             }
@@ -260,6 +268,7 @@ public class EntryDialogs {
                             if (!isInZip) {
                                 File selectedFile = null;
                                 for (int i : selectedPositions) {
+                                    pm.checkCancelled();
                                     selectedFile = (File) values[i];
                                     File finalSelectedFile1 = selectedFile;
                                     if (finalSelectedFile1 != null)
@@ -278,10 +287,12 @@ public class EntryDialogs {
                                 List<ZipEntryInfo> selected = new ArrayList<>();
                                 for (int i : selectedPositions) selected.add((ZipEntryInfo) values[i]);
                                 fileOps.deleteZipEntry(selected.toArray(new ZipEntryInfo[0]));
+                                pm.checkCancelled();
                                 if (sign[0]) wrapper[0].signApk(zipFile);
                                 context.handler.post(state::clearSelection);
                             }
                         } else if (!isInZip) {
+                            pm.checkCancelled();
                             pm.setText(context.rss.getString(R.string.deleting, file.getName()));
 
                             deleteWithProgress(file, useElevatedForDelete);
@@ -290,7 +301,9 @@ public class EntryDialogs {
                                 context.loadFolderInPane(file.getParentFile(), pane1);
                             });
                         } else {
+                            pm.checkCancelled();
                             fileOps.deleteZipEntry(entry);
+                            pm.checkCancelled();
                             if (sign[0]) wrapper[0].signApk(zipFile);
                             context.handler.post(state::clearSelection);
                         }
@@ -298,12 +311,12 @@ public class EntryDialogs {
                         pm.setProgress(total, total);
                         pm.dismiss();
                     } catch (Exception e) {
-                        pm.dismiss();
-                        new ErrorUtil(context).showError(e);
+                        pm.reportError(e);
                     } finally {
                         if (progressScope != null) progressScope.close();
+                        context.handler.post(context::refreshAllPanes);
                     }
-                }).start();
+                });
             };
             Runnable checkAndRun = () -> {
                 boolean inKeyDir = false;
@@ -412,113 +425,94 @@ public class EntryDialogs {
     private void runCompress(File outputZip, String format, File file, String fileName, boolean multi, View compressView, ProgressManager pm) {
         Object[] values = state.values();
         Set<Integer> selectedPositions = new java.util.HashSet<>(state.selectedPositions());
-        pm.show();
+        List<File> sources = new ArrayList<>();
+        if (multi) for (int index : selectedPositions) sources.add((File) values[index]);
+        else sources.add(file);
         SharedPreferences settings = PreferenceManager.getDefaultSharedPreferences(context);
-        new Thread(() -> {
-
-                List<File> sources = new ArrayList<>();
-                if (multi) {
-                    for (int i : selectedPositions) sources.add((File) values[i]);
-                } else sources.add(file);
-
-                boolean compressElevated = AccessManager.fileOpsOn(context);
-                File compressStageTmp = null;
-                List<File> readableSources = sources;
+        CompressionLevel level = CompressionLevel.valueOf(settings.getString("compressLevel", CompressionLevel.NO_COMPRESSION.name()));
+        // Capture inputs on the UI thread before the dialog is dismissed.
+        String password = ((TextView) compressView.findViewById(R.id.pw_edittext)).getText().toString();
+        pm.show();
+        pm.startWorker(() -> {
+            File stage = null;
+            File zipWork = null;
+            try {
+                pm.checkCancelled();
+                List<File> readableSources = new ArrayList<>();
                 File effectiveOutput = outputZip;
                 boolean outputToRoot = false;
-                if (compressElevated) {
-                    boolean anyNeedStage = false;
-                    for (File s : sources) {
-                        if (RootStaging.needsStaging(context, s)) { anyNeedStage = true; break; }
-                    }
-                    if (anyNeedStage) {
-                        try {
-                            compressStageTmp = new File(context.getCacheDir(), "compress_stage_" + System.currentTimeMillis());
-                            //noinspection ResultOfMethodCallIgnored
-                            compressStageTmp.mkdirs();
-                            readableSources = new ArrayList<>();
-                            for (File s : sources) {
-                                if (RootStaging.needsStaging(context, s)) {
-                                    File stagedChild = new File(compressStageTmp, s.getName());
-                                    if (s.isDirectory()) AccessManager.stageTree(context, s.getAbsolutePath(), stagedChild);
-                                    else AccessManager.stageFile(context, s.getAbsolutePath(), stagedChild);
-                                    readableSources.add(stagedChild);
-                                } else readableSources.add(s);
-                            }
-                        } catch (Exception e) {
-                            pm.dismiss();
-                            new ErrorUtil(context).showError(e);
-                            return;
-                        }
-                    }
-                    File outParent = outputZip.getParentFile();
-                    if (outParent != null && !outParent.canWrite()
-                            && AccessManager.exists(context, outParent.getAbsolutePath())) {
-                        outputToRoot = true;
-                        if (compressStageTmp == null) {
-                            compressStageTmp = new File(context.getCacheDir(),
-                                    "compress_stage_" + System.currentTimeMillis());
-                            //noinspection ResultOfMethodCallIgnored
-                            compressStageTmp.mkdirs();
-                        }
-                        effectiveOutput = new File(compressStageTmp, outputZip.getName());
-                    }
+                boolean elevated = AccessManager.fileOpsOn(context);
+                for (File input : sources) {
+                    pm.checkCancelled();
+                    io.github.abdurazaaqmohammed.domain.files.SafeFileOperations.validateDestination(input, outputZip);
+                    if (elevated && RootStaging.needsStaging(context, input)) {
+                        if (stage == null) stage = createCompressionStage();
+                        File staged = new File(stage, input.getName());
+                        if (input.isDirectory()) AccessManager.stageTree(context, input.getAbsolutePath(), staged);
+                        else AccessManager.stageFile(context, input.getAbsolutePath(), staged);
+                        readableSources.add(staged);
+                    } else readableSources.add(input);
                 }
-                final List<File> finalSources = readableSources;
-                final File finalOutput = effectiveOutput;
-                final boolean finalToRoot = outputToRoot;
-                final File finalStageTmp = compressStageTmp;
-
-                if (format.equals(".zip")) {
-                    ZipParameters zipParameters = new ZipParameters();
-                    CompressionLevel compressionLevel = CompressionLevel.valueOf(settings.getString("compressLevel", CompressionLevel.NO_COMPRESSION.name()));
-                    zipParameters.setCompressionLevel(compressionLevel);
-                    if (compressionLevel == CompressionLevel.NO_COMPRESSION)
-                        zipParameters.setCompressionMethod(CompressionMethod.STORE);
-                    CharSequence pw = ((TextView) compressView.findViewById(R.id.pw_edittext)).getText();
-
-                    try (ZipFile zf = new ZipFile(finalOutput)) {
-                        if (!TextUtils.isEmpty(pw)) {
-                            zipParameters.setEncryptFiles(true);
-                            zipParameters.setEncryptionMethod(EncryptionMethod.AES);
-                            zf.setPassword(pw.toString().toCharArray());
-                        }
-                        for (File source : finalSources) {
-                            if (source.isDirectory())
-                                zf.addFolder(source, zipParameters);
-                            else zf.addFile(source, zipParameters);
-                        }
-                        if (finalToRoot) AccessManager.uploadFile(context, finalOutput, outputZip.getAbsolutePath());
-                        pm.dismiss();
-                    } catch (Exception e) {
-                        pm.dismiss();
-                        new ErrorUtil(context).showError(e);
-                    } finally {
-                        context.handler.post(context::reloadCurrentFolder);
-                        if (finalStageTmp != null && !finalToRoot) Util.deleteDir(finalStageTmp);
-                        else if (finalStageTmp != null && finalToRoot && !finalOutput.equals(outputZip)) {
-                            // Keep only the delivered archive; drop staged sources.
-                            for (File s : finalSources) {
-                                if (s.getParentFile() != null && s.getParentFile().equals(finalStageTmp)
-                                        && !s.equals(finalOutput)) Util.deleteDir(s);
-                            }
-                            //noinspection ResultOfMethodCallIgnored
-                            finalOutput.delete();
+                File parent = outputZip.getParentFile();
+                if (elevated && parent != null && !parent.canWrite() && AccessManager.exists(context, parent.getAbsolutePath())) {
+                    if (stage == null) stage = createCompressionStage();
+                    effectiveOutput = new File(stage, outputZip.getName());
+                    outputToRoot = true;
+                    // Preserve entries when adding to an existing elevated ZIP.
+                    if (".zip".equals(format) && AccessManager.exists(context, outputZip.getAbsolutePath()))
+                        AccessManager.stageFile(context, outputZip.getAbsolutePath(), effectiveOutput);
+                }
+                pm.checkCancelled();
+                if (".zip".equals(format)) {
+                    zipWork = File.createTempFile(".hexora-zip-", ".zip", effectiveOutput.getAbsoluteFile().getParentFile());
+                    if (!zipWork.delete()) throw new IOException("Cannot prepare temporary archive");
+                    if (effectiveOutput.exists())
+                        io.github.abdurazaaqmohammed.domain.files.SafeFileOperations.copyFile(effectiveOutput, zipWork);
+                    ZipParameters parameters = new ZipParameters();
+                    parameters.setCompressionLevel(level);
+                    if (level == CompressionLevel.NO_COMPRESSION) parameters.setCompressionMethod(CompressionMethod.STORE);
+                    if (!password.isEmpty()) {
+                        parameters.setEncryptFiles(true);
+                        parameters.setEncryptionMethod(EncryptionMethod.AES);
+                    }
+                    try (ZipFile zip = new ZipFile(zipWork)) {
+                        if (!password.isEmpty()) zip.setPassword(password.toCharArray());
+                        for (File input : readableSources) {
+                            pm.checkCancelled();
+                            io.github.abdurazaaqmohammed.utils.ZipTaskProgress.run(zip, () -> {
+                                if (input.isDirectory()) zip.addFolder(input, parameters);
+                                else zip.addFile(input, parameters);
+                            }, 1);
                         }
                     }
+                    pm.checkCancelled();
+                    if (!zipWork.renameTo(effectiveOutput)) throw new IOException("Cannot finish archive: " + effectiveOutput);
                 } else {
-                    try {
-                        ArchiveUtil.create(finalOutput, finalSources);
-                        if (finalToRoot) AccessManager.uploadFile(context, finalOutput, outputZip.getAbsolutePath());
-                        pm.dismiss();
-                        context.handler.post(context::reloadCurrentFolder);
-                    } catch (Exception e) {
-                        pm.dismiss();
-                        new ErrorUtil(context).showError(e);
-                    } finally {
-                        if (finalStageTmp != null) Util.deleteDir(finalStageTmp);
-                    }
+                    ArchiveUtil.create(effectiveOutput, readableSources);
                 }
-        }).start();
+                pm.checkCancelled();
+                if (outputToRoot) AccessManager.uploadFile(context, effectiveOutput, outputZip.getAbsolutePath());
+            } catch (Exception error) {
+                pm.reportError(error);
+            } finally {
+                if (zipWork != null && zipWork.exists()) zipWork.delete();
+                if (stage != null) cleanupCompressionStage(stage);
+                ZipArchiveCache.invalidate(outputZip);
+                context.handler.post(context::refreshAllPanes);
+            }
+        });
+    }
+
+    private File createCompressionStage() throws IOException {
+        File stage = new File(context.getCacheDir(), "compress_stage_" + java.util.UUID.randomUUID());
+        if (!stage.mkdirs()) throw new IOException("Cannot prepare compression folder");
+        return stage;
+    }
+
+    private void cleanupCompressionStage(File stage) {
+        boolean interrupted = Thread.interrupted();
+        try { io.github.abdurazaaqmohammed.domain.files.SafeFileOperations.delete(stage); }
+        catch (IOException error) { new ErrorUtil(context).showError(error); }
+        finally { if (interrupted) Thread.currentThread().interrupt(); }
     }
 }

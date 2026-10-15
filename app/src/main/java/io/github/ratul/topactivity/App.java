@@ -67,6 +67,7 @@ public class App extends MultiDexApplication {
         super.onCreate();
         instance = this;
         ServiceLocator.init(this);
+        io.github.abdurazaaqmohammed.utils.SharedFileCache.initialize(this);
         io.github.abdurazaaqmohammed.utils.SafAccess.init(this);
         try {
             // Tools (except a few built-ins like Storage Manager) ship as

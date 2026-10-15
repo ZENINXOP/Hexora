@@ -102,6 +102,10 @@ public class SidebarController {
 
             @Override
             public void onEntryStorageLongPressed(SidebarAdapter.SidebarEntry entry, View view) {
+                if (entry.storage().addedLocalStorage) {
+                    showLocalStorageMenu(entry, view);
+                    return;
+                }
                 PopupMenu menu = new PopupMenu(activity, view);
                 menu.getMenu().add(0, R.string.manage_storage, 0, R.string.manage_storage);
                 menu.getMenu().add(0, R.string.open_location, 1, R.string.open_location);
@@ -204,7 +208,62 @@ public class SidebarController {
             return false;
         });
         organizeButton.setOnClickListener(v -> setSidebarOrganizeMode(!sidebarOrganizeMode));
+        activity.findViewById(R.id.sidebarMenuButton).setOnClickListener(this::showSidebarMenu);
         registerStorageRefreshReceiver();
+    }
+
+    private void showSidebarMenu(View anchor) {
+        PopupMenu menu = new PopupMenu(activity, anchor);
+        menu.getMenu().add(0, R.string.add_local_storage, 0, R.string.add_local_storage).setIcon(R.drawable.add_24px);
+        menu.getMenu().add(0, R.string.organize_sidebar, 1, R.string.organize_sidebar);
+        menu.getMenu().add(0, R.string.settings, 2, R.string.settings);
+        menu.setOnMenuItemClickListener(item -> {
+            if (item.getItemId() == R.string.add_local_storage) {
+                if (Build.VERSION.SDK_INT < 21) {
+                    Snackbar.make(anchor, R.string.local_storage_requires_lollipop, Snackbar.LENGTH_LONG).show();
+                    return true;
+                }
+                try {
+                    activity.startActivityForResult(io.github.abdurazaaqmohammed.utils.SafAccess.folderPicker(null),
+                            io.github.abdurazaaqmohammed.utils.LocalStorage.PICK_FOLDER);
+                } catch (android.content.ActivityNotFoundException e) {
+                    new io.github.abdurazaaqmohammed.utils.ErrorUtil(activity).showError(e);
+                }
+            } else if (item.getItemId() == R.string.organize_sidebar) setSidebarOrganizeMode(!sidebarOrganizeMode);
+            else openSidebarTool("settings");
+            return true;
+        });
+        menu.show();
+    }
+
+    private void showLocalStorageMenu(SidebarAdapter.SidebarEntry entry, View anchor) {
+        PopupMenu menu = new PopupMenu(activity, anchor);
+        menu.getMenu().add(0, R.string.open_location, 0, R.string.open_location);
+        menu.getMenu().add(0, R.string.remove_local_storage, 1, R.string.remove_local_storage);
+        menu.setOnMenuItemClickListener(item -> {
+            if (item.getItemId() == R.string.open_location) openSidebarEntry(entry);
+            else new com.google.android.material.dialog.MaterialAlertDialogBuilder(activity)
+                    .setTitle(R.string.remove_local_storage)
+                    .setMessage(activity.getString(R.string.remove_local_storage_message, entry.label()))
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .setPositiveButton(R.string.remove_local_storage, (dialog, which) -> new Thread(() -> {
+                        try {
+                            String root = entry.storage().path;
+                            io.github.abdurazaaqmohammed.utils.LocalStorage.remove(root);
+                            activity.handler.post(() -> {
+                                if (activity.isFinishing() || activity.isDestroyed()) return;
+                                refreshSidebar(getSidebarSectionOrder());
+                                for (boolean pane1 : new boolean[]{true, false}) {
+                                    File folder = pane1 ? activity.pane1Folder : activity.pane2Folder;
+                                    if (folder != null && (folder.getPath().equals(root) || folder.getPath().startsWith(root + "/")))
+                                        activity.loadFolderInPane(android.os.Environment.getExternalStorageDirectory(), pane1);
+                                }
+                            });
+                        } catch (Exception e) { new io.github.abdurazaaqmohammed.utils.ErrorUtil(activity).showError(e); }
+                    }, "hexora-remove-storage").start()).show();
+            return true;
+        });
+        menu.show();
     }
 
     private boolean handleOrganizeTouch(MotionEvent event) {
@@ -309,6 +368,14 @@ public class SidebarController {
             try {
                 storage = StorageUtil.getStorageInfos(activity);
             } catch (Exception ignored) {
+            }
+            for (io.github.abdurazaaqmohammed.utils.LocalStorage.Mount mount : io.github.abdurazaaqmohammed.utils.LocalStorage.mounts()) {
+                StorageUtil.StorageInfo info = new StorageUtil.StorageInfo();
+                info.name = mount.name();
+                info.path = mount.path();
+                info.description = mount.provider();
+                info.addedLocalStorage = true;
+                storage.add(info);
             }
             sidebarAdapter.setData(sectionOrder,
                     PreferenceManager.getDefaultSharedPreferences(activity).getBoolean("sidebar_show_bookmarks", true),

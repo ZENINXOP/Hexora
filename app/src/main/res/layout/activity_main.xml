@@ -246,6 +246,35 @@
                         android:layout_gravity="center"/>
             </LinearLayout>
 
+            <LinearLayout
+                android:id="@+id/storage_permission_panel"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:layout_below="@id/topBar"
+                android:background="?attr/colorSurface"
+                android:clickable="true"
+                android:focusable="true"
+                android:gravity="center"
+                android:orientation="vertical"
+                android:padding="24dp"
+                android:visibility="gone">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center"
+                    android:text="@string/storage_access_message"
+                    android:textColor="?attr/colorOnSurface"
+                    android:textSize="16sp" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/grant_storage_access"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="16dp"
+                    android:minHeight="48dp"
+                    android:text="@string/grant_storage_access" />
+            </LinearLayout>
         </RelativeLayout>
 
         <LinearLayout
@@ -389,6 +418,15 @@
                 android:textColor="?attr/colorOnSurface"
                 android:textSize="20sp"
                 android:textStyle="bold" />
+
+            <ImageButton
+                android:id="@+id/sidebarMenuButton"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@string/sidebar_menu"
+                android:src="@drawable/baseline_more_vert_24"
+                app:tint="?attr/colorOnSurface" />
 
             <ImageButton
                 android:id="@+id/sidebarOrganizeButton"

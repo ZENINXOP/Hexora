@@ -167,6 +167,7 @@ public class FileUtils {
     }
 
     public static OutputStream getOutputStream(File file) throws IOException {
+        if (LocalStorage.isPath(file)) return SafAccess.openOutput(file);
         return LegacyUtils.supportsFileChannel ?
         Files.newOutputStream(file.toPath(), StandardOpenOption.CREATE, StandardOpenOption.WRITE, StandardOpenOption.TRUNCATE_EXISTING)
                 : new FileOutputStream(file);
@@ -200,6 +201,7 @@ public class FileUtils {
     }
 
     public static InputStream getInputStream(File file) throws IOException {
+        if (LocalStorage.isPath(file)) return SafAccess.openInput(file);
         if (file instanceof SafAccess.GrantedFile) return SafAccess.openInput(file);
         if (file instanceof ShizukuFile) {
             return io.github.abdurazaaqmohammed.MPManager.shizuku.ShizukuShell.openInputStream(file.getAbsolutePath());

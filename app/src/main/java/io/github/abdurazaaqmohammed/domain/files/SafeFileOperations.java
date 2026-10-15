@@ -5,8 +5,12 @@ import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.channels.FileChannel;
+import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Set;
+import java.util.HashMap;
+import java.util.Map;
 
 /** Local file operations shared by the browser and its regression tests. */
 public final class SafeFileOperations {
@@ -126,16 +130,31 @@ public final class SafeFileOperations {
             long expectedTime = source.lastModified();
             long copied = 0;
             try (InputStream in = FileWorkProgress.openInput(source); FileOutputStream out = new FileOutputStream(temporary)) {
-                byte[] buffer = new byte[64 * 1024];
-                int count;
-                while ((count = in.read(buffer)) != -1) {
-                    checkInterrupted();
-                    out.write(buffer, 0, count);
-                    copied += count;
-                    FileWorkProgress.advance(count);
+                if (in instanceof FileInputStream local) {
+                    FileChannel input = local.getChannel();
+                    FileChannel output = out.getChannel();
+                    while (copied < expectedSize) {
+                        checkInterrupted();
+                        long count = input.transferTo(copied, Math.min(8L * 1024 * 1024, expectedSize - copied), output);
+                        if (count == 0) break; // Some storage providers do not support channel transfers.
+                        copied += count;
+                        FileWorkProgress.advance(count);
+                    }
+                    input.position(copied);
+                }
+                if (copied < expectedSize || expectedSize == 0) {
+                    byte[] buffer = new byte[256 * 1024];
+                    int count;
+                    while ((count = in.read(buffer)) != -1) {
+                        checkInterrupted();
+                        out.write(buffer, 0, count);
+                        copied += count;
+                        FileWorkProgress.advance(count);
+                    }
                 }
                 out.getFD().sync();
             }
+            checkInterrupted();
             if (copied != expectedSize || source.length() != expectedSize || source.lastModified() != expectedTime) {
                 throw new IOException("Source changed while copying: " + source);
             }
@@ -158,13 +177,21 @@ public final class SafeFileOperations {
             if (children == null || copied == null || children.length != copied.length) {
                 throw new IOException("Incomplete directory copy: " + source);
             }
-            for (File child : children) verifyCopy(child, new File(destination, child.getName()));
+            // Keep provider-backed File metadata/streams instead of reconstructing raw paths.
+            Map<String, File> targets = new HashMap<>();
+            for (File child : copied) if (targets.put(child.getName(), child) != null)
+                throw new IOException("Ambiguous destination names: " + destination);
+            for (File child : children) {
+                File target = targets.remove(child.getName());
+                if (target == null) throw new IOException("Incomplete directory copy: " + source);
+                verifyCopy(child, target);
+            }
             FileWorkProgress.advance(1);
         } else {
             if (!destination.isFile() || source.length() != destination.length()) {
                 throw new IOException("Incomplete file copy: " + source);
             }
-            try (InputStream left = FileWorkProgress.openInput(source); InputStream right = new FileInputStream(destination)) {
+            try (InputStream left = FileWorkProgress.openInput(source); InputStream right = FileWorkProgress.openInput(destination)) {
                 byte[] a = new byte[64 * 1024];
                 byte[] b = new byte[a.length];
                 int count;
@@ -176,9 +203,8 @@ public final class SafeFileOperations {
                         if (read < 0) throw new IOException("Incomplete file copy: " + source);
                         offset += read;
                     }
-                    for (int i = 0; i < count; i++) {
-                        if (a[i] != b[i]) throw new IOException("Copy verification failed: " + source);
-                    }
+                    // Unused tails are equal from the preceding verified chunk (or zero).
+                    if (!Arrays.equals(a, b)) throw new IOException("Copy verification failed: " + source);
                     FileWorkProgress.advance(count);
                 }
                 if (right.read() != -1) throw new IOException("Copy verification failed: " + source);

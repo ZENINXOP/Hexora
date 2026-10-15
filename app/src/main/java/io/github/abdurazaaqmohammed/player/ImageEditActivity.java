@@ -115,18 +115,20 @@ public class ImageEditActivity extends BaseActivity {
                 }
                 if (!name.contains(".")) name += ".jpg";
                 sharedName = name;
-                File dest = new File(getCacheDir(), "shared_" + System.currentTimeMillis() + "_" + name.replaceAll("[^a-zA-Z0-9._-]", "_"));
-                try (InputStream in = getContentResolver().openInputStream(uri);
-                     OutputStream os = new FileOutputStream(dest)) {
-                    if (in == null) throw new Exception("Cannot open shared file");
-                    byte[] buf = new byte[65536];
-                    int n;
-                    while ((n = in.read(buf)) != -1) os.write(buf, 0, n);
+                File dest;
+                try (InputStream in = getContentResolver().openInputStream(uri)) {
+                    long available = getCacheDir().getUsableSpace();
+                    dest = io.github.abdurazaaqmohammed.domain.files.SharedFileCopy.copy(in,
+                            io.github.abdurazaaqmohammed.utils.SharedFileCache.directory(this), name,
+                            available > 0 ? Math.max(0, available - 16L * 1024 * 1024) : Long.MAX_VALUE);
                 }
                 originalPath = dest.getAbsolutePath();
                 fromShared = true;
                 pm.dismiss();
-                runOnUiThread(this::initEditor);
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) dest.delete();
+                    else initEditor();
+                });
             } catch (Exception e) {
                 pm.dismiss();
                 runOnUiThread(() -> {

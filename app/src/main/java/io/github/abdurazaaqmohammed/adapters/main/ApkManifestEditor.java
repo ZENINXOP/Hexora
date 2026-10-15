@@ -175,7 +175,15 @@ public class ApkManifestEditor {
 
     public void showEditManifestDialog(File apkFile) {
         View quickEditDialog = LayoutInflater.from(context).inflate(R.layout.quick_edit_dialog, null, false);
-        quickEditDialog.findViewById(R.id.app_lancer_icon).setOnClickListener(v -> editLauncherIcon(apkFile));
+        final byte[][] pendingIcon = new byte[1][];
+        quickEditDialog.findViewById(R.id.app_lancer_icon).setOnClickListener(v -> chooseLauncherIcon(png -> {
+            pendingIcon[0] = png;
+            View preview = quickEditDialog.findViewById(R.id.app_lancer_icon);
+            if (preview instanceof ImageView image) image.setImageBitmap(android.graphics.BitmapFactory.decodeByteArray(png, 0, png.length));
+            else if (preview instanceof com.google.android.material.button.MaterialButton button)
+                button.setIcon(new android.graphics.drawable.BitmapDrawable(context.getResources(),
+                        android.graphics.BitmapFactory.decodeByteArray(png, 0, png.length)));
+        }));
 
         quickEditDialog.findViewById(R.id.install_location_dropdown);
         AutoCompleteTextView installLocationTextView = quickEditDialog.findViewById(R.id.install_location);
@@ -369,6 +377,7 @@ public class ApkManifestEditor {
                             rss.getString(R.string.me_edit_all)
                     };
 
+                    if(pendingIcon[0] != null) sb.append(options[0]).append(", ");
                     if(pkgNameChanged) sb.append(options[1]).append(", ");
                     if(appNameChanged) sb.append(options[2]).append(", ");
                     if(installLocationChanged) sb.append(options[3]).append(", ");
@@ -384,6 +393,7 @@ public class ApkManifestEditor {
 
                         new RunUtil(context.handler, context, sb, true)
                                 .runInBackground(() -> {
+                                    File edited = null;
                                     try {
                                         boolean foundMinSdk2 = false;
                                         boolean foundInstallLocation = false;
@@ -417,20 +427,26 @@ public class ApkManifestEditor {
                                             } else if (!"3".equals(installLocationSelected[0])) entries.add(4, new XMLEntry("android:installLocation", "=\"", installLocationSelected[0], "\""));
                                         }
 
-                                        if (UiPrefs.genBackup(context)) {
-                                            try {
-                                                FileUtils.copyFile(apkFile, new File(apkFile.getPath() + ".bak"));
-                                            } catch (Exception ignored) {
-                                            }
-                                        }
-                                        writeManifestEntries(apkFile, entries, resEntries);
-                                        if(sign[0]) wrapper[0].signApk(apkFile);
+                                        edited = File.createTempFile(".hexora-quick-edit-", ".apk", apkFile.getAbsoluteFile().getParentFile());
+                                        FileUtils.copyFile(apkFile, edited);
+                                        writeManifestEntries(edited, entries, resEntries);
+                                        if (pendingIcon[0] != null) io.github.abdurazaaqmohammed.utils.ApkIconEditor.replace(edited, pendingIcon[0]);
+                                        if(sign[0]) wrapper[0].signApk(edited);
+                                        if (UiPrefs.genBackup(context)) FileUtils.copyFile(apkFile, new File(apkFile.getPath() + ".bak"));
+                                        if (!edited.renameTo(apkFile)) throw new IOException("Cannot publish Quick Edit; original retained.");
+                                        if (sign[0]) wrapper[0].publishStagedV4Signature(edited, apkFile);
+                                        context.handler.post(context::refreshAllPanes);
                                         pm.dismiss();
                                         return true;
                                     } catch (Exception e) {
                                         pm.dismiss();
                                         new ErrorUtil(context).showError(e);
                                         return false;
+                                    } finally {
+                                        if (edited != null) {
+                                            if (wrapper[0] != null) wrapper[0].discardStagedV4Signature(edited);
+                                            edited.delete();
+                                        }
                                     }
                                 });
                     };
@@ -447,55 +463,66 @@ public class ApkManifestEditor {
     }
 
     public void editLauncherIcon(File apkFile) {
+        chooseLauncherIcon(png -> {
+            java.util.function.Consumer<SignWrapper> edit = signer -> {
+                ProgressManager progress = new ProgressManager(context, true).setText(R.string.saving).show();
+                progress.startWorker(() -> {
+                    File edited = null;
+                    try {
+                        edited = File.createTempFile(".hexora-icon-edit-", ".apk", apkFile.getAbsoluteFile().getParentFile());
+                        FileUtils.copyFile(apkFile, edited);
+                        io.github.abdurazaaqmohammed.utils.ApkIconEditor.replace(edited, png);
+                        if (signer != null) signer.signApk(edited);
+                        if (UiPrefs.genBackup(context)) FileUtils.copyFile(apkFile, new File(apkFile.getPath() + ".bak"));
+                        if (!edited.renameTo(apkFile)) throw new IOException("Cannot publish icon edit; original retained.");
+                        if (signer != null) signer.publishStagedV4Signature(edited, apkFile);
+                        context.handler.post(() -> { context.refreshAllPanes(); Extensions.showMessage(context, R.string.icon_changed); });
+                    } catch (Exception e) { new ErrorUtil(context).showError(e); }
+                    finally {
+                        if (edited != null) {
+                            if (signer != null) signer.discardStagedV4Signature(edited);
+                            edited.delete();
+                        }
+                        progress.dismiss();
+                    }
+                });
+            };
+            if (PreferenceManager.getDefaultSharedPreferences(context).getBoolean("autosign", true))
+                SignWrapper.requireAuth(context, edit::accept);
+            else edit.accept(null);
+        });
+    }
+
+    private void chooseLauncherIcon(java.util.function.Consumer<byte[]> selected) {
         FilePickerDialog.Properties properties = new FilePickerDialog.Properties();
         properties.selection_mode = FilePickerDialog.SINGLE_MODE;
         properties.selection_type = FilePickerDialog.FILE_SELECT;
-        properties.root = new File(Environment.getExternalStorageDirectory().getPath());
-        properties.offset = new File(Environment.getExternalStorageDirectory().getPath());
+        properties.root = Environment.getExternalStorageDirectory();
         properties.preferenceKey = "icon";
         properties.extensions = new String[]{"png", "webp", "jpg", "jpeg"};
-        FilePickerDialog fpd = new FilePickerDialog(context, properties);
-        fpd.setTitle(context.rss.getString(R.string.select_icon));
-        ProgressManager pm = new ProgressManager(context, true);
-
-        fpd.setDialogSelectionListener(files -> new Thread(() -> {
-            String iconPath = findIconPathInManifest(apkFile);
-
-            try (InputStream is = FileUtils.getInputStream(files[0])) {
-                pm.show().setText(context.rss.getString(R.string.adding, files[0]));
-                replaceZipEntry(apkFile,
-                        iconPath != null ? iconPath : "res/mipmap-xxhdpi-v4/ic_launcher.png",
-                        is);
-                pm.dismiss();
-                Extensions.showMessage(context, R.string.icon_changed);
-            } catch (Exception e) {
-                pm.dismiss();
-                context.handler.post(() -> new ErrorUtil(context).showError(e));
-            }
-        }).start());
-        fpd.show();
-    }
-
-    private String findIconPathInManifest(File apkFile) {
-        try (ZipFile zf = new ZipFile(apkFile)) {
-            FileHeader manifestEntry = zf.getFileHeader("AndroidManifest.xml");
-            if (manifestEntry == null) return null;
-            try (InputStream mis = zf.getInputStream(manifestEntry)) {
-                APKParser apkParser = new APKParser();
-                apkParser.parse(apkFile.getPath(), context);
-                List<ResEntry> decodedResources = apkParser.getDecodedResources();
-
-                List<XMLEntry> entries = new aXMLDecoder(mis, decodedResources).decode();
-                for (XMLEntry e : entries) {
-                    if (e.getTag().contains("android:icon")) {
-                        String val = e.getValue();
-                        // This is not changing it on all screens sizes fix this
-                        if (val.startsWith("res/")) return val;
-                    }
-                }
-            }
-        } catch (Exception ignored) {}
-        return null;
+        FilePickerDialog picker = new FilePickerDialog(context, properties);
+        picker.setTitle(context.getString(R.string.select_icon));
+        picker.setDialogSelectionListener(files -> new Thread(() -> {
+            try {
+                android.graphics.BitmapFactory.Options bounds = new android.graphics.BitmapFactory.Options();
+                bounds.inJustDecodeBounds = true;
+                android.graphics.BitmapFactory.decodeFile(files[0], bounds);
+                if (bounds.outWidth <= 0 || bounds.outHeight <= 0) throw new IOException("Select a readable image.");
+                android.graphics.BitmapFactory.Options options = new android.graphics.BitmapFactory.Options();
+                options.inSampleSize = 1;
+                while (Math.max(bounds.outWidth, bounds.outHeight) / options.inSampleSize > 1024) options.inSampleSize *= 2;
+                android.graphics.Bitmap bitmap = android.graphics.BitmapFactory.decodeFile(files[0], options);
+                if (bitmap == null) throw new IOException("Cannot decode this image.");
+                byte[] png;
+                try {
+                    java.io.ByteArrayOutputStream output = new java.io.ByteArrayOutputStream();
+                    if (!bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, output)) throw new IOException("Cannot encode the icon.");
+                    png = output.toByteArray();
+                } finally { bitmap.recycle(); }
+                context.handler.post(() -> selected.accept(png));
+            } catch (Exception e) { new ErrorUtil(context).showError(e); }
+        }, "hexora-icon-image").start());
+        picker.show();
     }
 
     public void editAllManifestEntries(File apkFile) {

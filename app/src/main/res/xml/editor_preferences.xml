@@ -3,6 +3,14 @@
                   xmlns:app="http://schemas.android.com/apk/res-auto">
 
     <PreferenceCategory android:title="Display Settings">
+        <ListPreference
+            android:key="pref_dex_theme"
+            android:title="@string/dex_editor_theme"
+            android:entries="@array/dex_editor_theme_entries"
+            android:entryValues="@array/dex_editor_theme_values"
+            android:defaultValue="app"
+            app:useSimpleSummaryProvider="true" />
+
         <DropDownPreference
             android:key="pref_theme"
             android:title="Theme"

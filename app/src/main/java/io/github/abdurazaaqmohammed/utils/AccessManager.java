@@ -76,6 +76,7 @@ public final class AccessManager {
 
     public static boolean exists(Context context, String absPath) {
         if (absPath == null) return false;
+        if (LocalStorage.isPath(new File(absPath))) return LocalStorage.resolve(new File(absPath), false) != null;
         try {
             if (new File(absPath).exists()) return true;
         } catch (Exception ignored) {
@@ -91,6 +92,10 @@ public final class AccessManager {
 
     public static boolean isDirectory(Context context, String absPath) {
         if (absPath == null) return false;
+        if (LocalStorage.isPath(new File(absPath))) {
+            try { return LocalStorage.file(new File(absPath)).isDirectory(); }
+            catch (IOException e) { return false; }
+        }
         if (new File(absPath).isDirectory()) return true;
         try {
             if (active(context) == Backend.ROOT) return RootManager.getInstance(context).isDirectory(absPath);
@@ -111,6 +116,10 @@ public final class AccessManager {
     }
 
     public static long getSize(Context context, String absPath) {
+        if (absPath != null && LocalStorage.isPath(new File(absPath))) {
+            try { return LocalStorage.file(new File(absPath)).length(); }
+            catch (IOException e) { return -1; }
+        }
         Backend backend = active(context);
         if (backend == Backend.ROOT) return RootManager.getInstance(context).getFileSize(absPath);
         if (backend == Backend.SHIZUKU) return ShizukuManager.getFileSize(context, absPath);
@@ -122,6 +131,10 @@ public final class AccessManager {
     }
 
     public static long getMtime(Context context, String absPath) {
+        if (absPath != null && LocalStorage.isPath(new File(absPath))) {
+            try { return LocalStorage.file(new File(absPath)).lastModified(); }
+            catch (IOException e) { return 0; }
+        }
         Backend backend = active(context);
         if (backend == Backend.ROOT) {
             RootManager.RootEntry e = RootManager.getInstance(context).statEntry(absPath);
@@ -218,6 +231,14 @@ public final class AccessManager {
     }
 
     public static void copyFile(Context context, String src, String dest, boolean useElevated) throws IOException {
+        if (LocalStorage.isPath(new File(src)) || LocalStorage.isPath(new File(dest))) {
+            File source = LocalStorage.file(new File(src));
+            File destination = new File(dest);
+            if (LocalStorage.isPath(destination)) destination = LocalStorage.resolve(destination, false) == null
+                    ? LocalStorage.create(destination.getParentFile(), destination.getName(), false) : LocalStorage.file(destination);
+            FileUtils.copyFile(source, destination);
+            return;
+        }
         if (useElevated) {
             Backend backend = active(context);
             if (backend == Backend.ROOT) {
@@ -264,6 +285,10 @@ public final class AccessManager {
     }
 
     public static void delete(Context context, String path, boolean useElevated) throws IOException {
+        if (LocalStorage.isPath(new File(path))) {
+            io.github.abdurazaaqmohammed.domain.files.SafeFileOperations.delete(LocalStorage.file(new File(path)));
+            return;
+        }
         if (useElevated) {
             Backend backend = active(context);
             if (backend == Backend.ROOT) {
@@ -284,6 +309,10 @@ public final class AccessManager {
     }
 
     public static void rename(Context context, String oldPath, String newPath, boolean useElevated) throws IOException {
+        if (LocalStorage.isPath(new File(oldPath))) {
+            if (!LocalStorage.file(new File(oldPath)).renameTo(new File(newPath))) throw new IOException("Rename is not supported by this storage.");
+            return;
+        }
         if (useElevated) {
             Backend backend = active(context);
             if (backend == Backend.ROOT) {

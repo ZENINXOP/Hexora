@@ -202,6 +202,7 @@ public class TextEditorActivity extends BaseActivity implements UnifiedEditorFra
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
+        if (io.github.abdurazaaqmohammed.utils.ProgressManager.isRestoreIntent(intent)) return;
         setIntent(intent);
         if (!EditorMinimizer.ACTION_RESUME.equals(intent.getAction())) {
             if (sessionRestoring) pendingIntents.add(intent);
@@ -1568,7 +1569,8 @@ public class TextEditorActivity extends BaseActivity implements UnifiedEditorFra
         try {
             if (!UiPrefs.genBackup(this)) return;
             if (rootOriginal != null) {
-                if (AccessManager.fileOpsOn(this) && AccessManager.exists(this, rootOriginal)) {
+                if ((io.github.abdurazaaqmohammed.utils.LocalStorage.isPath(new File(rootOriginal))
+                        || AccessManager.fileOpsOn(this)) && AccessManager.exists(this, rootOriginal)) {
                     AccessManager.copyFile(this, rootOriginal, rootOriginal + ".bak", true);
                 }
             } else if (directFile != null && directFile.isFile()) {

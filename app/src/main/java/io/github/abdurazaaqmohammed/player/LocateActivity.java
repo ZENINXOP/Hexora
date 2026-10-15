@@ -100,8 +100,8 @@ public class LocateActivity extends BaseActivity {
         catch (Exception ignored) { }
         String extension = mime == null ? null : MimeTypeMap.getSingleton().getExtensionFromMimeType(mime);
         if (name == null || name.trim().isEmpty()) name = uri.getLastPathSegment();
-        File directory = new File(getFilesDir(), "Shared files");
-        long available = getFilesDir().getUsableSpace();
+        File directory = io.github.abdurazaaqmohammed.utils.SharedFileCache.directory(this);
+        long available = getCacheDir().getUsableSpace();
         long budget = available > 0 ? Math.max(0, available - 16L * 1024 * 1024) : Long.MAX_VALUE;
         try (InputStream input = getContentResolver().openInputStream(uri)) {
             return SharedFileCopy.copy(input, directory, SharedFileCopy.safeName(name, extension), budget);

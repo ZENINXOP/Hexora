@@ -660,6 +660,10 @@ public class APKExtractorActivity extends BaseActivity {
         iconList.add(R.drawable.baseline_info_24);
         actionIds.add(101);
 
+        displayList.add(getString(R.string.app_storage_details));
+        iconList.add(R.drawable.baseline_info_24);
+        actionIds.add(108);
+
         displayList.add(getString(R.string.uninstall));
         iconList.add(R.drawable.baseline_delete_24);
         actionIds.add(102);
@@ -783,6 +787,9 @@ public class APKExtractorActivity extends BaseActivity {
             } else {
                 String packageName = ai.packageName;
                 switch (actionId) {
+                    case 108:
+                        AppStorageDetails.show(this, ai);
+                        break;
                     case 100: // Launch
                         Intent launchIntent = getPackageManager().getLaunchIntentForPackage(packageName);
                         if (launchIntent == null)

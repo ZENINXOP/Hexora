@@ -302,6 +302,7 @@ public class FileSearchController {
             }); }
             finally { progress.dismiss(); }
         }));
+        if (cancelled.get() && worker.get() != null) worker.get().interrupt();
     }
 
     private void openArchiveContent(io.github.abdurazaaqmohammed.domain.files.ArchiveSearch.Hit hit,
