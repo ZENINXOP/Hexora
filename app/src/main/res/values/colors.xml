@@ -2,7 +2,7 @@
 
 <resources>
     <color name="md_theme_primary">#AAC7FF</color>
-    <color name="hexora_icon_background">#303F75</color>
+    <color name="hexora_icon_background">#0B0C0E</color>
     <color name="hexora_accent_light">#3569B5</color>
     <color name="hexora_accent_dark">#8AB4F8</color>
     <color name="hexora_surface_light">#FFFFFF</color>

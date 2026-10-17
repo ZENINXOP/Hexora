@@ -57,18 +57,23 @@ public class ArchiveUtil {
     }
 
     public static void extract(File archive, File destDir, boolean preserveTime) throws IOException {
+        extract(archive, destDir, preserveTime, true);
+    }
+
+    /** Internal storage policy: materialize links when native filesystem links are unavailable. */
+    static void extract(File archive, File destDir, boolean preserveTime, boolean allowNativeLinks) throws IOException {
         if (!destDir.exists()) destDir.mkdirs();
         String lower = archive.getName().toLowerCase(Locale.ROOT);
         if (lower.endsWith(".zip")) extractZip(archive, destDir, preserveTime);
         else if (lower.endsWith(".7z")) extract7z(archive, destDir, preserveTime);
         else if (lower.endsWith(".rar")) extractRar(archive, destDir, preserveTime);
-        else if (lower.endsWith(".tar")) extractTar(new FileInputStream(archive), destDir, preserveTime);
-        else if (lower.endsWith(".tgz")) extractTar(new GzipCompressorInputStream(new FileInputStream(archive), true), destDir, preserveTime);
-        else if (lower.endsWith(".tar.gz")) extractTar(new GzipCompressorInputStream(new FileInputStream(archive), true), destDir, preserveTime);
-        else if (lower.endsWith(".tbz2")) extractTar(new BZip2CompressorInputStream(new FileInputStream(archive), true), destDir, preserveTime);
-        else if (lower.endsWith(".tar.bz2")) extractTar(new BZip2CompressorInputStream(new FileInputStream(archive), true), destDir, preserveTime);
-        else if (lower.endsWith(".txz")) extractTar(new XZCompressorInputStream(new FileInputStream(archive), true), destDir, preserveTime);
-        else if (lower.endsWith(".tar.xz")) extractTar(new XZCompressorInputStream(new FileInputStream(archive), true), destDir, preserveTime);
+        else if (lower.endsWith(".tar")) extractTar(new FileInputStream(archive), destDir, preserveTime, allowNativeLinks);
+        else if (lower.endsWith(".tgz")) extractTar(new GzipCompressorInputStream(new FileInputStream(archive), true), destDir, preserveTime, allowNativeLinks);
+        else if (lower.endsWith(".tar.gz")) extractTar(new GzipCompressorInputStream(new FileInputStream(archive), true), destDir, preserveTime, allowNativeLinks);
+        else if (lower.endsWith(".tbz2")) extractTar(new BZip2CompressorInputStream(new FileInputStream(archive), true), destDir, preserveTime, allowNativeLinks);
+        else if (lower.endsWith(".tar.bz2")) extractTar(new BZip2CompressorInputStream(new FileInputStream(archive), true), destDir, preserveTime, allowNativeLinks);
+        else if (lower.endsWith(".txz")) extractTar(new XZCompressorInputStream(new FileInputStream(archive), true), destDir, preserveTime, allowNativeLinks);
+        else if (lower.endsWith(".tar.xz")) extractTar(new XZCompressorInputStream(new FileInputStream(archive), true), destDir, preserveTime, allowNativeLinks);
         else if (lower.endsWith(".gz")) extractSingleCompressed(new GzipCompressorInputStream(new FileInputStream(archive), true), destDir, archive.getName(), ".gz");
         else if (lower.endsWith(".bz2")) extractSingleCompressed(new BZip2CompressorInputStream(new FileInputStream(archive), true), destDir, archive.getName(), ".bz2");
         else if (lower.endsWith(".xz")) extractSingleCompressed(new XZCompressorInputStream(new FileInputStream(archive), true), destDir, archive.getName(), ".xz");
@@ -252,7 +257,7 @@ public class ArchiveUtil {
         }
     }
 
-    private static void extractTar(InputStream tarInput, File destDir, boolean preserveTime) throws IOException {
+    private static void extractTar(InputStream tarInput, File destDir, boolean preserveTime, boolean allowNativeLinks) throws IOException {
         List<TarLink> links = new ArrayList<>();
         try (TarArchiveInputStream tais = new TarArchiveInputStream(tarInput)) {
             TarArchiveEntry entry;
@@ -286,7 +291,7 @@ public class ArchiveUtil {
         }
         // Resolve forward references after ordinary entries. No archive-created
         // symlink can redirect writes made while reading the TAR stream.
-        extractTarLinks(destDir, links, preserveTime);
+        extractTarLinks(destDir, links, preserveTime, allowNativeLinks);
     }
 
     private static final class TarLink {
@@ -316,7 +321,7 @@ public class ArchiveUtil {
             throw new IOException("Archive link leaves destination: " + file);
     }
 
-    private static void extractTarLinks(File directory, List<TarLink> pending, boolean preserveTime) throws IOException {
+    private static void extractTarLinks(File directory, List<TarLink> pending, boolean preserveTime, boolean allowNativeLinks) throws IOException {
         while (!pending.isEmpty()) {
             boolean advanced = false;
             for (Iterator<TarLink> iterator = pending.iterator(); iterator.hasNext();) {
@@ -343,7 +348,7 @@ public class ArchiveUtil {
                 if (!parent.isDirectory() && !parent.mkdirs()) throw new IOException("Cannot create: " + parent);
                 requireInsideExtraction(directory, parent);
                 checkExtractionCancelled();
-                boolean created = android.os.Build.VERSION.SDK_INT >= 21 && TarLinksApi21.create(target, link);
+                boolean created = allowNativeLinks && android.os.Build.VERSION.SDK_INT >= 21 && TarLinksApi21.create(target, link);
                 if (!created) copyTarLinkTarget(directory, target, link.output, preserveTime, new HashSet<>());
                 iterator.remove();
                 advanced = true;

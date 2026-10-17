@@ -14,6 +14,7 @@ import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream;
 import org.apache.commons.compress.archivers.tar.TarConstants;
 import static org.junit.Assert.*;
 
+/** JVM cases use portable materialized links; native Android links require device tests. */
 public class ArchiveUtilRegressionTest {
     @Rule public TemporaryFolder tmp = new TemporaryFolder();
 
@@ -24,7 +25,7 @@ public class ArchiveUtilRegressionTest {
         File archive = new File(tmp.getRoot(), "test" + extension);
         ArchiveUtil.create(archive, Collections.singletonList(src));
         File output = tmp.newFolder("output" + extension.replace('.', '-'));
-        ArchiveUtil.extract(archive, output, true);
+        ArchiveUtil.extract(archive, output, true, false);
         assertEquals("archive contents", new String(Files.readAllBytes(new File(output, src.getName() + "/nested/note.txt").toPath()), StandardCharsets.UTF_8));
         assertTrue(new File(output, src.getName() + "/nested/empty").isDirectory());
     }
@@ -41,7 +42,7 @@ public class ArchiveUtilRegressionTest {
             File archive = new File(tmp.getRoot(), "note.txt" + ext);
             ArchiveUtil.create(archive, Collections.singletonList(src));
             File output = tmp.newFolder("output" + ext);
-            ArchiveUtil.extract(archive, output);
+            ArchiveUtil.extract(archive, output, false, false);
             assertArrayEquals(content, Files.readAllBytes(new File(output, "note.txt").toPath()));
         }
     }
@@ -97,7 +98,7 @@ public class ArchiveUtilRegressionTest {
             addTarFile(tar, folder + "liblto_plugin.so.0", library);
         }
         File output = tmp.newFolder("ndk");
-        ArchiveUtil.extract(archive, output, true);
+        ArchiveUtil.extract(archive, output, true, false);
         assertArrayEquals(library, Files.readAllBytes(new File(output, folder + "liblto_plugin.so").toPath()));
     }
 
@@ -111,7 +112,7 @@ public class ArchiveUtilRegressionTest {
             addTarFile(tar, "lib/target", content);
         }
         File output = tmp.newFolder("chain");
-        ArchiveUtil.extract(archive, output);
+        ArchiveUtil.extract(archive, output, false, false);
         assertArrayEquals(content, Files.readAllBytes(new File(output, "bin/plugin").toPath()));
         assertArrayEquals(content, Files.readAllBytes(new File(output, "bin/hard").toPath()));
     }
@@ -125,7 +126,7 @@ public class ArchiveUtilRegressionTest {
             addTarFile(tar, "real/target.h", content);
         }
         File output = tmp.newFolder("directory-link");
-        ArchiveUtil.extract(archive, output);
+        ArchiveUtil.extract(archive, output, false, false);
         assertArrayEquals(content, Files.readAllBytes(new File(output, "include/target.h").toPath()));
         assertArrayEquals(content, Files.readAllBytes(new File(output, "include/alias.h").toPath()));
     }
@@ -183,7 +184,7 @@ public class ArchiveUtilRegressionTest {
             addTarFile(tar, "nested.jar", packed);
         }
         File output = tmp.newFolder("outer");
-        ArchiveUtil.extract(archive, output);
+        ArchiveUtil.extract(archive, output, false, false);
         assertArrayEquals(packed, Files.readAllBytes(new File(output, "nested.zip").toPath()));
         assertArrayEquals(packed, Files.readAllBytes(new File(output, "nested.jar").toPath()));
         assertFalse(new File(output, "inside.txt").exists());

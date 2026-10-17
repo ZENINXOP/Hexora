@@ -3,7 +3,10 @@ package io.github.abdurazaaqmohammed.plugins.packs;
 import android.app.DownloadManager;
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.content.pm.PackageInfo;
+import android.database.Cursor;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Environment;
 
 import dalvik.system.DexClassLoader;
@@ -19,12 +22,14 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
+import java.io.IOException;
 import java.io.OutputStream;
 import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * Installs, verifies, loads and removes downloadable tool packs.
@@ -42,7 +47,7 @@ public final class PackManager {
     /** packId -> loaded tool ids, for unregister on remove/update. */
     private static final Map<String, List<String>> LOADED = new HashMap<>();
 
-    /** packId -> version reported by the loaded pack APK itself. */
+    /** packId -> versionCode read from the loaded APK manifest. */
     private static final Map<String, Integer> PACK_VERSIONS = new HashMap<>();
 
     /** packId -> loaded extensions, for unregister on remove/update. */
@@ -108,6 +113,7 @@ public final class PackManager {
      */
     public static synchronized List<String> loadPack(Context context, File apk, String entryClass, String packId) {
         List<String> loaded = new ArrayList<>();
+        sLoadError = null;
         if (apk == null || !apk.exists() || entryClass == null || entryClass.isEmpty()) return loaded;
         // Same-signer gate: in-process code inherits every host permission
         // (root, Shizuku, all files, network), so only first-party packs may
@@ -121,6 +127,7 @@ public final class PackManager {
             return loaded;
         }
         try {
+            int version = archiveVersion(context, apk);
             if (packId != null && !packId.isEmpty()) {
                 // Load the pack's own resources.arsc so its strings.xml is
                 // available to the tools for translation. Failure is tolerated:
@@ -138,7 +145,10 @@ public final class PackManager {
             ToolPack pack = (ToolPack) instance;
             if (packId != null && !packId.isEmpty() && !packId.equals(pack.packId())) return loaded;
             if (packId != null && !packId.isEmpty()) {
-                PACK_VERSIONS.put(packId, pack.version());
+                // Older published packs hardcode ToolPack.version() to 1 even
+                // when their APK versionCode is newer. The signed APK manifest
+                // is the release version, not that independent Java constant.
+                PACK_VERSIONS.put(packId, version);
             }
             for (ToolPlugin tool : pack.tools()) {
                 try {
@@ -192,16 +202,29 @@ public final class PackManager {
             req.setDescription("Tool pack download");
             req.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
             req.setDestinationInExternalFilesDir(context, Environment.DIRECTORY_DOWNLOADS,
-                    "pack-" + pack.id + ".apk");
+                    "pack-" + pack.id + "-" + pack.version + "-" + UUID.randomUUID() + ".apk");
             return dm.enqueue(req);
         } catch (Exception e) {
             return -1;
         }
     }
 
-    public static File downloadOutput(Context context, String packId) {
-        return new File(context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS),
-                "pack-" + packId + ".apk");
+    public static File downloadOutput(Context context, long downloadId) throws IOException {
+        DownloadManager manager = (DownloadManager) context.getSystemService(Context.DOWNLOAD_SERVICE);
+        try (Cursor cursor = manager.query(new DownloadManager.Query().setFilterById(downloadId))) {
+            if (cursor == null || !cursor.moveToFirst()
+                    || cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS)) != DownloadManager.STATUS_SUCCESSFUL)
+                throw new IOException("The pack download did not complete.");
+            String location = cursor.getString(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_LOCAL_URI));
+            Uri uri = location == null ? null : Uri.parse(location);
+            if (uri == null || !"file".equals(uri.getScheme()) || uri.getPath() == null)
+                throw new IOException("The downloaded pack file is unavailable.");
+            File file = new File(uri.getPath()).getCanonicalFile();
+            File directory = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS);
+            if (directory == null || !directory.getCanonicalFile().equals(file.getParentFile()) || !file.isFile())
+                throw new IOException("The downloaded pack file is unavailable.");
+            return file;
+        }
     }
 
     /**
@@ -236,9 +259,19 @@ public final class PackManager {
                 return "Checksum mismatch, pack rejected";
             }
         }
+        try {
+            int downloadedVersion = archiveVersion(context, downloaded);
+            if (downloadedVersion != pack.version) {
+                return context.getString(io.github.abdurazaaqmohammed.MPManager.R.string.pack_download_version_mismatch,
+                        pack.title, downloadedVersion, pack.version);
+            }
+        } catch (Exception error) {
+            return "Cannot read the downloaded pack APK: " + error.getMessage();
+        }
         File dest = packFile(context, pack.id);
         File backup = new File(dest.getParentFile(), pack.id + ".apk.bak");
         boolean hadPrevious = dest.exists();
+        boolean replacing = false;
         int previousVersion = installedVersion(context, pack.id);
         String previousEntry = installedEntry(context, pack.id);
         try {
@@ -251,16 +284,14 @@ public final class PackManager {
             // installed APK has to end up read-only. Grant write back first:
             // the previous APK is already read-only and would not be
             // overwriteable.
+            replacing = true;
             if (hadPrevious && !dest.setWritable(true)) dest.delete();
             copy(downloaded, dest);
             dest.setWritable(false);
             dest.setReadable(true, false);
-            prefs(context).edit()
-                    .putInt(KEY_PREFIX + pack.id + "_version", pack.version)
-                    .putString(KEY_PREFIX + pack.id + "_entry", pack.entryClass)
-                    .apply();
             unloadPack(pack.id);
-            loadPack(context, dest, pack.entryClass, pack.id);
+            PackSignatures.takeRefusal();
+            List<String> loadedTools = loadPack(context, dest, pack.entryClass, pack.id);
             String refusal = PackSignatures.takeRefusal();
             if (refusal != null) {
                 throw new IllegalStateException(refusal);
@@ -274,18 +305,22 @@ public final class PackManager {
                                 + pack.entryClass + " not found).");
             }
             if (loadedVersion != pack.version) {
-                throw new IllegalStateException("The pack APK is version "
-                        + loadedVersion + " but the catalog expects " + pack.version
-                        + ". The hosted APK is outdated — upload the latest build to the pack URL.");
+                throw new IllegalStateException(context.getString(
+                        io.github.abdurazaaqmohammed.MPManager.R.string.pack_download_version_mismatch,
+                        pack.title, loadedVersion, pack.version));
             }
             List<String> missing = new ArrayList<>();
             for (PackDescriptor.ToolMeta tool : pack.tools) {
-                if (PluginRegistry.findCustom(tool.id) == null) missing.add(tool.id);
+                if (!loadedTools.contains(tool.id)) missing.add(tool.id);
             }
             if (!missing.isEmpty()) {
                 throw new IllegalStateException("The pack build is missing tools: "
                         + missing + ". The hosted APK does not match the catalog.");
             }
+            prefs(context).edit()
+                    .putInt(KEY_PREFIX + pack.id + "_version", loadedVersion)
+                    .putString(KEY_PREFIX + pack.id + "_entry", pack.entryClass)
+                    .apply();
             backup.delete();
             try {
                 downloaded.delete();
@@ -293,6 +328,13 @@ public final class PackManager {
             }
             return null;
         } catch (Exception e) {
+            String message = e.getMessage() != null ? e.getMessage() : e.toString();
+            if (!replacing) {
+                // A failed backup must not delete the still-working installed APK.
+                backup.delete();
+                return message;
+            }
+            unloadPack(pack.id);
             try {
                 dest.delete();
             } catch (Exception ignored) {
@@ -307,7 +349,12 @@ public final class PackManager {
                             .apply();
                     unloadPack(pack.id);
                     loadPack(context, dest, previousEntry, pack.id);
-                } catch (Exception ignored) {
+                } catch (Exception recovery) {
+                    prefs(context).edit()
+                            .remove(KEY_PREFIX + pack.id + "_version")
+                            .remove(KEY_PREFIX + pack.id + "_entry")
+                            .apply();
+                    return message + " Previous pack backup retained at " + backup.getAbsolutePath();
                 }
             } else {
                 try {
@@ -323,7 +370,7 @@ public final class PackManager {
                 backup.delete();
             } catch (Exception ignored) {
             }
-            return e.getMessage() != null ? e.getMessage() : e.toString();
+            return message;
         }
     }
 
@@ -380,6 +427,14 @@ public final class PackManager {
     }
 
     // ---------- helpers ----------
+
+    private static int archiveVersion(Context context, File apk) throws IOException {
+        PackageInfo info = context.getPackageManager().getPackageArchiveInfo(apk.getAbsolutePath(), 0);
+        if (info == null) throw new IOException("Not a readable APK.");
+        long version = Build.VERSION.SDK_INT >= 28 ? info.getLongVersionCode() : info.versionCode;
+        if (version <= 0 || version > Integer.MAX_VALUE) throw new IOException("Unsupported pack version code: " + version);
+        return (int) version;
+    }
 
     private static SharedPreferences prefs(Context context) {
         return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);

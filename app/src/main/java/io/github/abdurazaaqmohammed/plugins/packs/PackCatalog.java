@@ -30,7 +30,7 @@ public final class PackCatalog {
 
     /** Remote catalog location; update on release. */
     public static final String REMOTE_URL =
-            "https://github.com/AbdurazaaqMohammed/MP-Manager/releases/download/tool-packs-v1/packs.json";
+            "https://github.com/ZENINXOP/Hexora/releases/latest/download/packs.json";
 
     /** Detached base64 signature of the remote catalog (same release). */
     public static final String REMOTE_SIG_URL = REMOTE_URL + ".sig";
@@ -41,16 +41,16 @@ public final class PackCatalog {
      * a new key in an app update, never over the wire.
      */
     private static final String CATALOG_PUBLIC_KEY_B64 =
-            "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA1Pn0LrDvw7GAo9Rfulmw4cxAcv4hVPWyPYF/ZBFYVFUJP1jlgLnVx4E1+nz4dMyogz9awEI7pvFi5C63XMBEAxqJ1H4fA/tw+DrGKu/02ZU9ww85AItsbNOE8sVIKOPyEMujuarNbJx0VVV8yRBDYKA5oWBfHEqzZwFRzF/ni+s3HAVg8En0St3lry0gZsvQjDMmLFGm9ogyKcg6X/+B5rwVaVdi27XTz7EB/GfSs0zQOGWVkGllt1h0VJ+NmR8kvDDPs3sjbUum4QsODD6Llg5PkdmsjIs2hyQMUpJCfThh+0zyJD9Yr2k8FjLkQcCyh9fk9nMe4KnjBA6k9cxXlQIDAQAB";
+            "MIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEAvz3P53ZG/4Y0tjWIBpJ3FrvTE6Xv2Z8Y8Z7M9fGYZ+UA6rzqkOWUGAhuL+2/NT9hO2+GZTeQOBysmMHvRdDz5EqwAa5K7TIgnLejK5/2Ph87U06tYo7Ic00QLg3uJxRxvsY1ZnlnZ7fB8w4XHUnD+f+zzOXrs15feCkqVpgSSOpIwxJLKWhE6ImCV9tjP1B4fb4KJKOh0p97iS4PU3VwnswplPUSwNHzZnqcXCXA+Qr6+5e6lOoTeleD3EHk8yrdqcqDC0BFlgs+kPFAu3SFT48LZKiMWg7zYhI7xQfNmwuV59344MejXj3e97yLvZH2xGScCxoc4I/6WOGp0wfrJKI/HF1X2echNa9N+nTVPMPTdXAGrLlBWvxz5XoZ9BylhsfGW6/nxGE+KFloKOQxZUyi5U1tIhtbI7nIht0h7GJPPiTdAEJNLjnEuZ3XQ6PCDHnp96V7I2vqbH34AAF7OmlGtlnHoK6om1gY5Kf/3EkT+upw7rFZldj4K5rJw9ZIrSneEjmEeiPRQgAfJLEH7B2SleYeV/i5tmvLHtHEhzwhn1k/lSvltJGECMRPCiwdsWxpNLWj92GgLqIpJUMTT5yrIu8PQhTBLYkqC56V8zv543gjt3d+VWcqd9lJhNSV6jNCYsaILDj5FLzsHJbetDHjYKvGhCC1zJpQUjs1W50CAwEAAQ==";
 
-    private static final String CACHE_NAME = "packs-catalog.json";
+    private static final String CACHE_NAME = "packs-catalog-hexora.json";
 
     private PackCatalog() {
     }
 
     public static List<PackDescriptor> load(Context context) {
         List<PackDescriptor> out = loadFile(cachedFile(context));
-        if (!out.isEmpty()) return out;
+        if (!out.isEmpty()) return PackCatalogReconciliation.withBundledCorrections(out, loadAsset(context));
         return loadAsset(context);
     }
 
@@ -76,7 +76,7 @@ public final class PackCatalog {
                 if (body != null && sig != null && !sig.isEmpty()
                         && verifySignature(body, sig)) {
                     String text = new String(body, "UTF-8");
-                    fresh = parse(text);
+                    fresh = PackCatalogReconciliation.withBundledCorrections(parse(text), loadAsset(context));
                     if (!fresh.isEmpty()) {
                         writeFile(cachedFile(context), text);
                     }

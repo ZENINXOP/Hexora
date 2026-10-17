@@ -1,4 +1,10 @@
 <resources>
+    <string name="pack_install_failed">Pack could not be installed</string>
+    <string name="pack_download_version_mismatch">%1$s downloaded version %2$d, but the catalog requires version %3$d. Refresh the pack list and try again. If this continues, the publisher needs to update the download. Your installed packs were not changed.</string>
+    <string name="keep_both">Keep both</string>
+    <string name="file_conflict_title">File already exists</string>
+    <string name="file_conflict_message">“%1$s” already exists in this folder. Replace it or keep both files?</string>
+    <string name="file_conflict_same_source">“%1$s” is already in this folder. Replace keeps this item unchanged. Keep both creates a separate copy.</string>
     <string name="app_storage_details">Package and data details</string>
     <string name="app_storage_directories">Open directory</string>
     <string name="app_storage_package_directory">Package directory</string>
@@ -1431,6 +1437,11 @@ Layout Inspector
     <string name="sigkill_patch_sign">Patch and sign</string>
     <string name="sigkill_mode_intro">Choose a method. Each saves a separate signed APK and keeps the original. No method works with every app.</string>
     <string name="sigkill_mode_java">Java checks · lightweight</string>
+    <string name="sigkill_mode_parcel">Certificate runtime · Parcel</string>
+    <string name="sigkill_parcel_description">Hooks Java PackageInfo certificate queries for the patched app. Preserves the original Application lifecycle and saves a separate signed APK. Uses a Parcel creator hook instead of LSPatch.\n\nThe output requires Android 9 or newer. Native APK reads, system and server checks, packed loaders, final Application classes, multiple signers and rotated keys are unsupported. Checks in the original Application static initializer run before this hook. Startup compatibility varies; test the patched copy.</string>
+    <string name="sigkill_parcel_result">%1$s\n\nSaved with the Parcel certificate runtime. APK signature and alignment were checked. Startup compatibility has not been verified; test the patched copy. The original APK was kept.</string>
+    <string name="sigkill_parcel_packing">Adding certificate runtime…</string>
+    <string name="sigkill_parcel_packed">This APK uses a native packed startup path that the Parcel certificate runtime cannot handle. No output was saved.</string>
     <string name="sigkill_mode_advanced">Advanced · LSPatch</string>
     <string name="sigkill_mode_native">Native reads · experimental, arm64</string>
     <string name="sigkill_advanced_description">LSPatch v1.2 hooks certificate queries and redirects common APK reads to an embedded copy of the original. Covers more checks, including some packed apps.\n\nThe output requires Android 9 or newer and needs extra storage for the original APK and runtime. Native or server-side protection may still reject it. Multiple signers and rotated signing keys are unsupported in this mode.</string>
@@ -1449,7 +1460,7 @@ Layout Inspector
     <string name="sigkill_saved">Patched APK saved</string>
     <string name="sigkill_result">Patched %1$d supported API references.\n\n%2$s\n\nThe original APK was kept. Run the patched app to check whether its verification is covered.</string>
     <string name="sigkill_no_checks">No supported signature checks found. This APK may use native, reflection-based or other verification methods.</string>
-    <string name="sigkill_native_packed">Native packed loader: %1$s\n\nJava checks cannot handle this startup path. Choose Advanced to try the runtime method; some packers may still reject it.\n\nNo output was saved. Start from the original APK.</string>
+    <string name="sigkill_native_packed">Native packed loader: %1$s\n\nThe available certificate patchers cannot handle this startup path. No output was saved. Start from the original APK.</string>
     <string name="sigkill_original_required">A valid original signing certificate is required. Start from the original signed APK.</string>
     <string name="sigkill_standalone_required">Select a standalone APK with classes.dex. Split APKs and APK bundles must be merged first.</string>
     <string name="sigkill_already_patched">This APK already contains the signature patch. Start from the original signed APK to avoid replacing its original certificate.</string>

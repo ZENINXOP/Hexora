@@ -1,6 +1,6 @@
 # Hexora
 
-<img src="docs/branding/hexora-icon.png" width="88" alt="Hexora app icon">
+<img src="docs/branding/hexora-icon.png" width="128" alt="Hexora black folder app icon with a white and blue H">
 
 An Android dual-pane file manager with archive browsing, a built-in editor,
 and APK tools. Hexora is developed by [ZENIN](https://github.com/ZENINXOP),
@@ -11,23 +11,23 @@ based on the open-source [MP-Manager](https://github.com/AbdurazaaqMohammed/MP-M
 [Report an issue](https://github.com/ZENINXOP/Hexora/issues) ·
 [Telegram channel](https://t.me/Hexora_x)
 
-**Latest release:** [Hexora 0.1.2](https://github.com/ZENINXOP/Hexora/releases/tag/v0.1.2) ·
-[Download signed APK](https://github.com/ZENINXOP/Hexora/releases/download/v0.1.2/Hexora.0.1.2.apk) ·
-[Changes from 0.1.1](docs/releases/0.1.2.md)
+**Latest release:** [Hexora 0.1.3](https://github.com/ZENINXOP/Hexora/releases/tag/v0.1.3) ·
+[Download signed APK](https://github.com/ZENINXOP/Hexora/releases/download/v0.1.3/Hexora.0.1.3.apk) ·
+[Changes from 0.1.2](docs/releases/0.1.3.md)
 
-Version 0.1.2 uses the new package `com.hexora.zenin` and installs alongside
-0.1.1. Private preferences, folder grants and editor sessions are separate.
+Version 0.1.3 updates 0.1.2 in place using package `com.hexora.zenin` and the
+same signing certificate. Version 0.1.1 uses a separate package; its private
+preferences, folder grants and editor sessions remain separate.
 
 ## Screenshots
 
 <p align="center">
-  <img src="docs/screenshots/hexora-main-light.png" width="280" alt="Hexora dual-pane file browser in the light theme">
-  <img src="docs/screenshots/hexora-main-dark.png" width="280" alt="Hexora dual-pane file browser in the black theme">
+  <img src="docs/screenshots/hexora-0.1.3-light.png" width="280" alt="Hexora dual-pane file browser in the light theme">
+  <img src="docs/screenshots/hexora-0.1.3-dark.png" width="280" alt="Hexora dual-pane file browser in the black theme">
 </p>
 
-Captured directly from the owner's phone on October 9, 2026, using Hexora
-0.1.0 and demo files. These show the installed version; subsequent local source
-changes will appear after the next build and installation.
+Captured from the signed Hexora 0.1.3 release on an isolated Android 16 QA
+emulator on October 17, 2026. Only disposable sample files are shown.
 
 ## Features
 
@@ -82,12 +82,13 @@ they are separate from the published release linked above.
 
 Bundled LSPatch runtime provenance and its pinned recursive corresponding
 source are available in [third_party/lspatch](third_party/lspatch/README.md).
-Build and MuMu validation for the published release are recorded in
-[the release notes](docs/releases/0.1.2.md). Historical QA reports retain their
+Build and emulator validation for the published release are recorded in
+[the release notes](docs/releases/0.1.3.md). Historical QA reports retain their
 original source-only status and failed attempts where applicable.
 
-The updater remains inactive until `UPDATE_REPOSITORY` in `app/build.gradle`
-is configured for Hexora. Release APK filenames must start with `Hexora.`.
+The updater checks this repository's GitHub releases. Release APK filenames
+start with `Hexora.`. Downloadable tool packs and their signed catalog are
+published with the same release and use Hexora's signing certificate.
 
 ## Contributors
 

@@ -196,21 +196,20 @@ public final class LocalStorage {
 
     /** Copies into or out of a provider; a move verifies the copy before deleting its source. */
     public static void transfer(File source, File folder, boolean move) throws IOException {
+        transferTo(source, new File(folder, source.getName()), move);
+    }
+
+    public static void transferTo(File source, File destination, boolean move) throws IOException {
         source = file(source);
-        folder = file(folder);
+        File folder = file(destination.getParentFile());
         guardDestination(source, folder);
-        File destination = new File(folder, source.getName());
         SafeFileOperations.validateDestination(source, destination);
         Set<String> names = new HashSet<>();
         File[] children = folder.listFiles();
         if (children == null) throw new IOException("Cannot list the destination folder.");
         for (File child : children) names.add(child.getName());
-        String name = source.getName();
-        int dot = source.isDirectory() ? -1 : name.lastIndexOf('.');
-        String base = dot > 0 ? name.substring(0, dot) : name, suffix = dot > 0 ? name.substring(dot) : "";
-        for (int i = 1; names.contains(name); i++) name = base + "_" + i + suffix;
-        destination = new File(folder, name);
-        SafeFileOperations.validateDestination(source, destination);
+        String name = destination.getName();
+        if (names.contains(name)) throw new IOException("Destination already exists: " + name);
         if (isPath(folder)) destination = copyIntoProvider(source, folder, name, new HashSet<>());
         else if (source.isDirectory()) SafeFileOperations.copyDirectory(source, destination);
         else SafeFileOperations.copyFile(source, destination);

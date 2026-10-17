@@ -9,14 +9,18 @@ android {
     defaultConfig {
         applicationId 'io.github.abdurazaaqmohammed.packs.network'
         minSdk 19
-        versionCode 1
-        versionName '1.0'
+        versionCode 2
+        versionName '1.1'
     }
 
     buildTypes {
         release {
             minifyEnabled false
         }
+    }
+
+    buildFeatures {
+        buildConfig true
     }
 
     compileOptions {

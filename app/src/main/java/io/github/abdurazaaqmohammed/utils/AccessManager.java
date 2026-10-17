@@ -309,11 +309,21 @@ public final class AccessManager {
     }
 
     public static void rename(Context context, String oldPath, String newPath, boolean useElevated) throws IOException {
+        File source = new File(oldPath), destination = new File(newPath);
+        if (source.getAbsolutePath().equals(destination.getAbsolutePath())) return;
         if (LocalStorage.isPath(new File(oldPath))) {
             if (!LocalStorage.file(new File(oldPath)).renameTo(new File(newPath))) throw new IOException("Rename is not supported by this storage.");
             return;
         }
-        if (useElevated) {
+        // Shared storage and app-private files should not depend on a running Shizuku service.
+        if (source.renameTo(destination)) return;
+        android.net.Uri granted = SafAccess.resolve(source, true);
+        if (granted != null && source.getParentFile() != null
+                && source.getParentFile().equals(destination.getParentFile())) {
+            try { if (SafAccess.stat(source, granted).renameTo(destination)) return; }
+            catch (IOException unavailable) { /* Try the selected backend if the grant is stale. */ }
+        }
+        if (useElevated && fileOpsOn(context)) {
             Backend backend = active(context);
             if (backend == Backend.ROOT) {
                 RootManager.getInstance(context).rename(oldPath, newPath);
@@ -324,7 +334,7 @@ public final class AccessManager {
                 return;
             }
         }
-        if (!new File(oldPath).renameTo(new File(newPath))) throw new IOException("rename failed");
+        throw new IOException("Cannot rename " + source.getName() + ". Check folder write access.");
     }
 
     public static void touch(Context context, String path, boolean useElevated) throws IOException {

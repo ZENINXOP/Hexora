@@ -76,6 +76,7 @@ public class UIHelper {
                 new AboutLibrary("Sora Editor", "Rosemoe", "https://github.com/Rosemoe/sora-editor", "LGPL-2.1", "LGPL-2.1.txt"),
                 new AboutLibrary("zip4j", "Srikanth Lingala", "https://github.com/srikanth-lingala/zip4j", "Apache-2.0", "Apache-2.0.txt"),
                 new AboutLibrary("aXML", "APK Explorer & Editor", "https://github.com/apk-editor/aXML", "GPL-3.0", "GPL-3.0+.txt"),
+                new AboutLibrary("AndroidHiddenApiBypass 6.1", "LSPosed contributors", "https://github.com/LSPosed/AndroidHiddenApiBypass", "Apache-2.0", "Apache-2.0.txt"),
                 new AboutLibrary("LSPatch v1.2 runtime", "JingMatrix and LSPosed contributors", "https://github.com/JingMatrix/LSPatch/tree/v1.2", "GPL-3.0", "GPL-3.0+.txt"),
                 new AboutLibrary("Commons Collections", "Apache Software Foundation", "https://github.com/apache/commons-collections", "Apache-2.0", "Apache-2.0.txt"),
                 new AboutLibrary("Material Design Icons", "Google", "https://github.com/google/material-design-icons", "Apache-2.0", "Apache-2.0.txt"),

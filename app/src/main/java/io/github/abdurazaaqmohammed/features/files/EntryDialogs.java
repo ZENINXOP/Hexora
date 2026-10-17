@@ -31,6 +31,7 @@ import net.lingala.zip4j.model.enums.EncryptionMethod;
 
 import org.apache.commons.io.FilenameUtils;
 
+
 import io.github.abdurazaaqmohammed.MPManager.MainActivity;
 import io.github.abdurazaaqmohammed.MPManager.R;
 import io.github.abdurazaaqmohammed.adapters.main.FileOperationsHelper;
@@ -117,7 +118,13 @@ public class EntryDialogs {
         renameInput.setText(fileName);
         renameInput.requestFocus();
         renameInput.post(() -> {
-            renameInput.setSelection(0, (isInZip ? !entry.isDirectory() : file.isFile()) && fileName.contains(".") ? fileName.indexOf(FilenameUtils.getExtension(fileName)) - 1 : fileName.length());
+            String currentName = renameInput.getText().toString();
+            int extensionDot = currentName.lastIndexOf('.');
+            boolean isFile = isInZip ? !entry.isDirectory() : file.isFile();
+            // Only exclude a nonempty extension; trailing dots and dotfiles select the full name.
+            int selectionEnd = isFile && extensionDot > 0 && extensionDot < currentName.length() - 1
+                    ? extensionDot : currentName.length();
+            renameInput.setSelection(0, selectionEnd);
             InputMethodManager imm = (InputMethodManager) context.getSystemService(Context.INPUT_METHOD_SERVICE);
             if (imm != null) imm.showSoftInput(renameInput, InputMethodManager.SHOW_IMPLICIT);
         });
@@ -143,9 +150,6 @@ public class EntryDialogs {
             String name = renameInput.getText().toString().trim();
             try {
                 io.github.abdurazaaqmohammed.domain.files.SafeFileOperations.validateName(name);
-                if (!isInZip && !name.equals(file.getName()) && new File(file.getParentFile(), name).exists()) {
-                    throw new java.io.IOException("Destination already exists.");
-                }
             } catch (java.io.IOException e) {
                 renameInput.setError(e.getMessage());
                 return;
@@ -154,7 +158,7 @@ public class EntryDialogs {
             ProgressManager progress = new ProgressManager(context, true);
             progress.setText(context.getString(R.string.rename));
             progress.show();
-            new Thread(() -> {
+            progress.startWorker(() -> {
                 try {
                     if (isInZip) {
                         File archive = entry.getZipFile();
@@ -163,22 +167,12 @@ public class EntryDialogs {
                         ZipArchiveCache.invalidate(archive);
                         context.loadZipFolderInPane(archive, state.currentZipPath(), pane1, false);
                     } else {
-                        File target = new File(file.getParentFile(), name);
-                        if (!file.equals(target)) {
-                            if (target.exists()) throw new java.io.IOException("Destination already exists.");
-                            if (io.github.abdurazaaqmohammed.utils.LocalStorage.isPath(file)) {
-                                if (!file.renameTo(target)) throw new IOException(context.getString(R.string.failed_to_renamex, fileName));
-                            } else if (AccessManager.fileOpsOn(context)) {
-                                AccessManager.rename(context, file.getAbsolutePath(), target.getAbsolutePath(), true);
-                            } else if (!file.renameTo(target)) {
-                                throw new java.io.IOException(context.getString(R.string.failed_to_renamex, fileName));
-                            }
-                        }
+                        io.github.abdurazaaqmohammed.utils.FileConflictResolver.rename(context, file, name);
                         context.handler.post(context::refreshAllPanes);
                     }
-                } catch (Exception e) { new ErrorUtil(context).showError(e); }
+                } catch (Exception e) { progress.reportError(e); }
                 finally { progress.dismiss(); }
-            }, "hexora-rename").start();
+            });
         });
         ad.getButton(AlertDialog.BUTTON_NEUTRAL)
                 .setOnClickListener(v6 -> {

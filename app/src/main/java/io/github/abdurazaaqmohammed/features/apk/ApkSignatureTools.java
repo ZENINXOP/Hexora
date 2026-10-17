@@ -21,7 +21,7 @@ import io.github.abdurazaaqmohammed.utils.SignWrapper;
 import io.github.abdurazaaqmohammed.utils.SignatureKeyDialog;
 import io.github.abdurazaaqmohammed.utils.SignatureStripUtil;
 import io.github.abdurazaaqmohammed.utils.SignatureBypassPatcher;
-import io.github.abdurazaaqmohammed.utils.LspatchSignaturePatcher;
+import io.github.abdurazaaqmohammed.utils.ParcelSignaturePatcher;
 import io.github.codehasan.colorpicker.extensions.Extensions;
 
 import java.io.File;
@@ -121,10 +121,9 @@ public class ApkSignatureTools {
         TextView description = options.findViewById(R.id.signature_mode_description);
         modes.setOnCheckedChangeListener((group, checkedId) -> description.setText(
                 checkedId == R.id.signature_mode_java ? R.string.sigkill_description
-                        : checkedId == R.id.signature_mode_native ? R.string.sigkill_native_description
-                        : R.string.sigkill_advanced_description));
+                        : R.string.sigkill_parcel_description));
         modes.check(android.os.Build.VERSION.SDK_INT >= 28
-                ? R.id.signature_mode_advanced : R.id.signature_mode_java);
+                ? R.id.signature_mode_parcel : R.id.signature_mode_java);
         dialogUtil.getDialogBuilder()
                 .setTitle(R.string.kill_signature_verification)
                 .setView(options)
@@ -144,9 +143,8 @@ public class ApkSignatureTools {
                                         output = result.file;
                                         message = context.getString(R.string.sigkill_result, result.checks, output.getAbsolutePath());
                                     } else {
-                                        output = LspatchSignaturePatcher.patch(context, apk, fileName, signer,
-                                                progress, selection == R.id.signature_mode_native ? 3 : 2);
-                                        message = context.getString(R.string.sigkill_advanced_result, output.getAbsolutePath());
+                                        output = ParcelSignaturePatcher.patch(context, apk, fileName, signer, progress);
+                                        message = context.getString(R.string.sigkill_parcel_result, output.getAbsolutePath());
                                     }
                                     progress.dismiss();
                                     context.handler.post(() -> {

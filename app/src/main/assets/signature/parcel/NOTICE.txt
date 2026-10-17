@@ -1,0 +1,21 @@
+Hexora PackageInfo certificate runtime
+Independent implementation; AI-assisted contribution: OpenAI Codex.
+
+Research reference (not bundled code):
+L-JINBIN/ApkSignatureKillerEx https://github.com/L-JINBIN/ApkSignatureKillerEx
+Its PackageInfo.CREATOR demonstration informed the method. No native libraries,
+keys, source files or binaries from that project are distributed here.
+This is not MT Manager's proprietary implementation or a claim of parity.
+
+Bundled dependency: org.lsposed.hiddenapibypass:hiddenapibypass:6.1
+https://github.com/LSPosed/AndroidHiddenApiBypass
+Copyright (C) 2021-2025 LSPosed
+Apache License, Version 2.0; see HiddenApiBypass-LICENSE.txt.
+The patcher adapts empty List.of() calls to Collections.emptyList() for runtime
+portability; the dependency sources are otherwise unmodified.
+
+Only process-local Java PackageInfo certificate queries for the patched package
+are covered. Native APK reads, platform verification, server checks and checks
+in the original Application's static initializer are outside this method.
+Application constructors and lifecycle methods continue through the original
+Application superclass. Android and application startup compatibility varies.

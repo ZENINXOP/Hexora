@@ -337,6 +337,7 @@ public class ShizukuFileService extends IFileService.Stub {
 
     @Override
     public boolean renamePath(String from, String to) {
+        error = "";
         File s = checked(from);
         File d = checked(to);
         if (s == null || d == null) return false;
@@ -344,7 +345,10 @@ public class ShizukuFileService extends IFileService.Stub {
             fail("Refusing protected path");
             return false;
         }
-        return s.renameTo(d);
+        if (s.renameTo(d)) return true;
+        fail(!s.exists() ? "The source file no longer exists."
+                : "Cannot rename " + s.getName() + ". Check write access to both folders.");
+        return false;
     }
 
     @Override

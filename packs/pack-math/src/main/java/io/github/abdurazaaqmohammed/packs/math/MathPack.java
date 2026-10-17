@@ -19,7 +19,7 @@ public class MathPack implements ToolPack {
 
     @Override
     public int version() {
-        return 1;
+        return BuildConfig.VERSION_CODE;
     }
 
     @Override

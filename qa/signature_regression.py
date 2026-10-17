@@ -66,7 +66,10 @@ def patch(mode, suffix):
     assert original_on_device == FIXTURE.read_bytes(), 'Original APK was altered'
     with zipfile.ZipFile(local) as z:
         assert 'assets/hexora/signature-patch.properties' in z.namelist()
-        if mode == 'advanced': assert z.read('assets/lspatch/origin.apk') == FIXTURE.read_bytes()
+        if mode == 'parcel':
+            assert 'assets/lspatch/origin.apk' not in z.namelist()
+            assert 'engine=parcel' in z.read('assets/hexora/signature-patch.properties').decode()
+            assert 'assets/hexora/parcel/HiddenApiBypass-LICENSE.txt' in z.namelist()
     snapshot('patch-' + mode + '-saved')
     result = launch_fixture(local)
     for check in ('legacy', 'current', 'history', 'multiple', 'past', 'no-flags', 'other-package'):
@@ -74,12 +77,6 @@ def patch(mode, suffix):
     # Static Java rewriting does not cover reflective field access.
     assert ('FAIL ' if mode == 'java' else 'PASS ') + 'reflection' in result, result
     return result
-
-
-def native_guard():
-    begin_patch('original.apk', 'native')
-    wait_for(lambda: any('arm64' in n.get('text', '') for n in tree().iter('node')))
-    assert 'original_sigkill_native.apk' not in adb('shell', 'ls', r.ROOT)
 
 
 def repeated_patch_guard():
@@ -95,8 +92,7 @@ if __name__ == '__main__':
     for name, check in [
         ('original-signature-fixture', baseline),
         ('java-patch-install-launch', lambda: patch('java', '_sigkill')),
-        ('advanced-patch-install-launch', lambda: patch('advanced', '_sigkill_advanced')),
-        ('unsupported-native-no-output', native_guard),
+        ('parcel-patch-install-launch', lambda: patch('parcel', '_sigkill_parcel')),
         ('repeated-patch-no-output', repeated_patch_guard),
     ]: r.scenario(name, check)
     (ARTIFACTS / 'signature-results.json').write_text(json.dumps({'fixture': r.ROOT, 'original_sha256': hashlib.sha256(FIXTURE.read_bytes()).hexdigest(), 'results': r.RESULTS}, indent=2))

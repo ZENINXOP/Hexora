@@ -163,15 +163,6 @@ public class RenameUtil {
     }
 
     private static void resolveConflicts(List<RenamePlan> plans) {
-        Set<String> originalNames = new HashSet<>();
-        File parent = null;
-        for (RenamePlan p : plans) {
-            originalNames.add(p.originalName);
-            if (p.item instanceof File) parent = ((File) p.item).getParentFile();
-        }
-        Set<String> existing = new HashSet<>();
-        File[] files = parent == null ? null : parent.listFiles();
-        if (files != null) for (File f : files) existing.add(f.getName());
         Set<String> used = new HashSet<>();
         for (RenamePlan p : plans) {
             String name = p.newName;
@@ -187,13 +178,18 @@ public class RenameUtil {
             }
             String candidate = name;
             int counter = 1;
-            while (used.contains(candidate) || (existing.contains(candidate) && !originalNames.contains(candidate))) {
+            while (used.contains(candidate)) {
                 candidate = name + " (" + counter + ")";
                 counter++;
             }
             used.add(candidate);
             if (!candidate.equals(name)) p.newName = candidate;
         }
+    }
+
+    private static void rename(MainActivity context, File source, File destination) throws IOException {
+        if (FileConflictResolver.exists(context, destination)) throw new IOException("Destination already exists: " + destination);
+        AccessManager.rename(context, source.getAbsolutePath(), destination.getAbsolutePath(), true);
     }
 
     private static void executeRenameFiles(MainActivity context, List<RenamePlan> plans, boolean pane1) {
@@ -203,50 +199,89 @@ public class RenameUtil {
             return;
         }
         ProgressManager pm = new ProgressManager(context, true).show();
-        Handler handler = context.handler;
-        new Thread(() -> {
-            Map<File, File> oldToTemp = new LinkedHashMap<>();
-            Map<File, File> tempToOld = new HashMap<>();
-            Map<File, File> tempToFinal = new HashMap<>();
-            Map<File, File> finalToTemp = new HashMap<>();
-            int t = 0;
-            for (RenamePlan p : plans) {
-                if (p.noop || p.error != null) continue;
-                File temp;
-                do {
-                    temp = new File(parent, "__MP_RENAME_TMP_" + (t++) + "_");
-                } while (temp.exists());
-                oldToTemp.put((File) p.item, temp);
-                tempToOld.put(temp, (File) p.item);
-                tempToFinal.put(temp, new File(parent, p.newName));
-                finalToTemp.put(new File(parent, p.newName), temp);
-            }
+        pm.startWorker(() -> {
+            Map<File, File> staged = new LinkedHashMap<>();
+            Map<File, File> published = new LinkedHashMap<>();
+            Map<File, File> preserved = new LinkedHashMap<>();
+            Map<File, File> targets = new LinkedHashMap<>();
+            Map<File, File> temporary = new LinkedHashMap<>();
+            Set<String> replacements = new HashSet<>();
+            Set<String> movingSources = new HashSet<>();
+            Set<String> reserved = new HashSet<>();
+            boolean complete = false;
             try {
-                for (Map.Entry<File, File> e : oldToTemp.entrySet()) {
-                    pm.setText(context.getString(R.string.renaming));
-                    if (!e.getKey().renameTo(e.getValue())) {
-                        for (Map.Entry<File, File> r : tempToOld.entrySet()) r.getKey().renameTo(r.getValue());
-                        throw new IOException(context.getString(R.string.rename_failed, e.getKey().getName()));
+                for (RenamePlan plan : plans)
+                    if (!plan.noop && plan.error == null) movingSources.add(((File) plan.item).getAbsolutePath());
+                // Resolve every external collision before changing any file.
+                for (RenamePlan plan : plans) {
+                    if (plan.noop || plan.error != null) continue;
+                    File source = (File) plan.item, target = new File(parent, plan.newName);
+                    if (!movingSources.contains(target.getAbsolutePath())) {
+                        FileConflictResolver.Choice choice = FileConflictResolver.resolve(context, source, target);
+                        target = choice.destination();
+                        if (choice.replace()) replacements.add(target.getAbsolutePath());
+                    }
+                    String base = target.getName();
+                    for (int i = 1; reserved.contains(target.getAbsolutePath()); i++)
+                        target = FileConflictResolver.unused(context, new File(parent, base + "_" + i), source.isDirectory());
+                    reserved.add(target.getAbsolutePath());
+                    targets.put(source, target);
+                    temporary.put(source, new File(parent, ".hexora-rename-" + java.util.UUID.randomUUID()));
+                }
+                for (Map.Entry<File, File> entry : targets.entrySet()) {
+                    File target = entry.getValue();
+                    if (!movingSources.contains(target.getAbsolutePath()) && FileConflictResolver.exists(context, target)) {
+                        if (!replacements.contains(target.getAbsolutePath()))
+                            throw new IOException("Destination appeared while waiting: " + target + ". Try again.");
+                        File backup = new File(parent, ".hexora-replaced-" + java.util.UUID.randomUUID());
+                        rename(context, target, backup);
+                        preserved.put(target, backup);
                     }
                 }
-                for (Map.Entry<File, File> e : tempToFinal.entrySet()) {
+                for (Map.Entry<File, File> entry : temporary.entrySet()) {
+                    pm.checkCancelled();
                     pm.setText(context.getString(R.string.renaming));
-                    if (!e.getKey().renameTo(e.getValue())) {
-                        for (Map.Entry<File, File> r : finalToTemp.entrySet()) r.getKey().renameTo(r.getValue());
-                        for (Map.Entry<File, File> r : tempToOld.entrySet()) r.getKey().renameTo(r.getValue());
-                        throw new IOException(context.getString(R.string.rename_failed, e.getKey().getName()));
-                    }
+                    rename(context, entry.getKey(), entry.getValue());
+                    staged.put(entry.getKey(), entry.getValue());
                 }
-                pm.dismiss();
-                handler.post(() -> {
+                for (Map.Entry<File, File> entry : targets.entrySet()) {
+                    pm.checkCancelled();
+                    File temp = temporary.get(entry.getKey());
+                    rename(context, temp, entry.getValue());
+                    published.put(entry.getValue(), temp);
+                }
+                complete = true;
+                for (File backup : preserved.values()) FileConflictResolver.discard(context, backup);
+                context.handler.post(() -> {
                     context.clearPaneSelection(pane1);
-                    context.loadFolderInPane(parent, pane1, false);
+                    context.refreshAllPanes();
                 });
-            } catch (Exception e) {
-                pm.dismiss();
-                new ErrorUtil(context).showError(e);
+            } catch (Exception error) {
+                boolean interrupted = Thread.interrupted();
+                List<String> retained = new ArrayList<>();
+                try {
+                    if (!complete) {
+                        for (Map.Entry<File, File> entry : published.entrySet()) {
+                            try { rename(context, entry.getKey(), entry.getValue()); }
+                            catch (IOException recovery) { retained.add(entry.getKey().getPath()); error.addSuppressed(recovery); }
+                        }
+                        for (Map.Entry<File, File> entry : staged.entrySet()) {
+                            try { rename(context, entry.getValue(), entry.getKey()); }
+                            catch (IOException recovery) { retained.add(entry.getValue().getPath()); error.addSuppressed(recovery); }
+                        }
+                        for (Map.Entry<File, File> entry : preserved.entrySet()) {
+                            try { rename(context, entry.getValue(), entry.getKey()); }
+                            catch (IOException recovery) { retained.add(entry.getValue().getPath()); error.addSuppressed(recovery); }
+                        }
+                    } else for (File backup : preserved.values())
+                        if (FileConflictResolver.exists(context, backup)) retained.add(backup.getPath());
+                    if (!retained.isEmpty()) new ErrorUtil(context).showError(new IOException(
+                            "Rename recovery needs attention. Retained files: " + android.text.TextUtils.join(", ", retained), error));
+                    else if (!interrupted) pm.reportError(error);
+                    context.handler.post(context::refreshAllPanes);
+                } finally { if (interrupted) Thread.currentThread().interrupt(); }
             }
-        }).start();
+        });
     }
 
     private static void executeRenameZip(MainActivity context, List<RenamePlan> plans, String currentZipPath, boolean pane1) {

@@ -1,4 +1,6 @@
 -dontwarn org.xmlpull.v1.**
+-keep class io.github.abdurazaaqmohammed.signature.runtime.** { *; }
+-keep class org.lsposed.hiddenapibypass.** { *; }
 -dontwarn org.kxml2.io.**
 -dontwarn android.content.res.**
 -dontwarn org.**

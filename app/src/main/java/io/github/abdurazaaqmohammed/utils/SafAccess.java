@@ -241,12 +241,21 @@ public final class SafAccess {
             catch (Exception ignored) { return false; }
         }
         @Override public boolean renameTo(File destination) {
-            if (!LocalStorage.isPath(this)) return super.renameTo(destination);
+            if (!LocalStorage.isPath(this) && super.renameTo(destination)) return true;
             if ((flags & DocumentsContract.Document.FLAG_SUPPORTS_RENAME) == 0 || resolve(this, true) == null
                     || getParentFile().equals(this) || !getParentFile().equals(destination.getParentFile())) return false;
             try {
                 io.github.abdurazaaqmohammed.domain.files.SafeFileOperations.validateName(destination.getName());
-                if (LocalStorage.resolve(destination, false) != null) return false;
+                if (LocalStorage.isPath(destination)) {
+                    if (LocalStorage.resolve(destination, false) != null) return false;
+                } else {
+                    if (destination.exists()) return false;
+                    Uri target = resolve(destination, false);
+                    if (target != null) {
+                        try { stat(destination, target); return false; }
+                        catch (IOException missing) { }
+                    }
+                }
                 Uri renamed = DocumentsContract.renameDocument(application.getContentResolver(), uri, destination.getName());
                 if (renamed == null) return false;
                 LocalStorage.invalidate(this);

@@ -126,6 +126,7 @@ public final class PackPrompts {
                 } catch (Exception ignored) {
                 }
                 if (!ok) {
+                    if (dm != null) try { dm.remove(downloadId); } catch (Exception ignored) { }
                     Toast.makeText(activity, "Download failed", Toast.LENGTH_SHORT).show();
                     if (action != null) {
                         try {
@@ -135,15 +136,29 @@ public final class PackPrompts {
                     }
                     return;
                 }
-                File downloaded = PackManager.downloadOutput(activity, pack.id);
                 new Thread(() -> {
-                    String error = PackManager.installDownloadedPack(activity, pack, downloaded);
+                    String result;
+                    try {
+                        File downloaded = PackManager.downloadOutput(activity, downloadId);
+                        result = PackManager.installDownloadedPack(activity, pack, downloaded);
+                    } catch (Exception error) {
+                        result = "Cannot install " + pack.title + ": " + error.getMessage();
+                    } finally {
+                        // Failed verification must not leave an old APK blocking retries.
+                        if (dm != null) try { dm.remove(downloadId); } catch (Exception ignored) { }
+                    }
+                    final String error = result;
                     activity.runOnUiThread(() -> {
+                        if (activity.isFinishing() || activity.isDestroyed()) return;
                         if (error == null) {
                             Toast.makeText(activity, pack.title + " installed", Toast.LENGTH_SHORT).show();
                             if (onInstalled != null) onInstalled.run();
                         } else {
-                            Toast.makeText(activity, error, Toast.LENGTH_LONG).show();
+                            new MaterialAlertDialogBuilder(activity)
+                                    .setTitle(io.github.abdurazaaqmohammed.MPManager.R.string.pack_install_failed)
+                                    .setMessage(error)
+                                    .setPositiveButton(android.R.string.ok, null)
+                                    .show();
                             if (action != null) action.setEnabled(true);
                         }
                     });

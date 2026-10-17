@@ -15,7 +15,9 @@ public interface ToolPack {
     /** Stable pack id, e.g. "math". Must match the catalog entry. */
     String packId();
 
-    /** Pack version code. Must match the catalog entry to install. */
+    /** Pack version code; return the pack module's BuildConfig.VERSION_CODE.
+     * The host validates releases using the APK manifest so older packs with
+     * a stale Java constant can still load when the signed APK matches. */
     int version();
 
     /** Tool implementations shipped in this pack. */

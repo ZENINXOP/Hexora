@@ -7,11 +7,9 @@ import android.content.SharedPreferences;
 import android.text.TextUtils;
 import android.view.LayoutInflater;
 import android.view.View;
-import android.view.inputmethod.InputMethodManager;
 import android.widget.ArrayAdapter;
 import android.widget.AutoCompleteTextView;
 import android.widget.CheckBox;
-import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
@@ -49,7 +47,6 @@ import io.github.abdurazaaqmohammed.domain.files.SafeFileOperations;
 import io.github.abdurazaaqmohammed.MPManager.MainActivity;
 import io.github.abdurazaaqmohammed.MPManager.R;
 import io.github.abdurazaaqmohammed.features.dex.DexTools;
-import io.github.abdurazaaqmohammed.MPManager.shizuku.ShizukuFileOps;
 import io.github.abdurazaaqmohammed.adapters.FtpFilesArrayAdapter;
 import io.github.abdurazaaqmohammed.domain.files.ZipEntryInfo;
 import io.github.abdurazaaqmohammed.utils.ArchiveUtil;
@@ -338,76 +335,21 @@ public class FileOperationsHelper {
             return true;
         }
 
-        boolean useElevated = AccessManager.fileOpsOn(context);
-
         for (Object item : items) {
             checkOperationCancelled();
             if (item instanceof File f) {
                 long targetWork = completedWork + (deferredMoveSizing ? 1
                         : cachedCopyWork(f) * 2 + cachedDeleteWork(f));
                 if (isSameDirectory(f, destinationFolder)) { finishItemWork(targetWork); continue; }
-                if (io.github.abdurazaaqmohammed.utils.LocalStorage.isPath(f)
-                        || io.github.abdurazaaqmohammed.utils.LocalStorage.isPath(destinationFolder)) {
+                long[] target = {targetWork};
+                io.github.abdurazaaqmohammed.utils.FileTransfers.transfer(context, f, destinationFolder, true, () -> {
                     if (deferredMoveSizing) {
-                        long work = cachedCopyWork(f) * 2 + cachedDeleteWork(f);
+                        long work = Math.addExact(Math.multiplyExact(cachedCopyWork(f), 2), cachedDeleteWork(f));
                         totalWork = Math.addExact(totalWork, work - 1);
-                        targetWork = completedWork + work;
+                        target[0] = completedWork + work;
                     }
-                    io.github.abdurazaaqmohammed.utils.LocalStorage.transfer(f, destinationFolder, true);
-                    finishItemWork(targetWork);
-                    continue;
-                }
-                File dest = getUnusedDest(destinationFolder, f.getName(), useElevated);
-                SafeFileOperations.validateDestination(f, dest);
-                if (f.renameTo(dest)) { finishItemWork(targetWork); continue; }
-                if (useElevated) {
-                    try {
-                        AccessManager.rename(context, f.getAbsolutePath(), dest.getAbsolutePath(), true);
-                        finishItemWork(targetWork);
-                        continue;
-                    } catch (IOException ignored) { }
-                }
-                if (ShizukuFileOps.involvesShizukuPath(f, destinationFolder) && ShizukuFileOps.shellMove(f, destinationFolder, dest.getName())) {
-                    finishItemWork(targetWork);
-                    continue;
-                }
-                if (useElevated) {
-                    try {
-                        if (f.isDirectory()) AccessManager.copyDir(context, f.getAbsolutePath(), dest.getAbsolutePath(), true);
-                        else AccessManager.copyFile(context, f.getAbsolutePath(), dest.getAbsolutePath(), true);
-                        AccessManager.preserveTime(context, f.getAbsolutePath(), dest.getAbsolutePath());
-                        checkOperationCancelled();
-                        AccessManager.delete(context, f.getAbsolutePath(), true);
-                        finishItemWork(targetWork);
-                        continue;
-                    } catch (Exception e) {
-                    }
-                }
-                if (deferredMoveSizing) {
-                    long work = cachedCopyWork(f) * 2 + cachedDeleteWork(f);
-                    totalWork = Math.addExact(totalWork, work - 1);
-                    targetWork = completedWork + work;
-                }
-                if (f.isDirectory()) {
-                    if (useElevated) {
-                        try {
-                            AccessManager.mkdir(context, dest.getAbsolutePath(), true);
-                        } catch (Exception ignored) {
-                            //noinspection ResultOfMethodCallIgnored
-                            dest.mkdir();
-                        }
-                    } else {
-                        //noinspection ResultOfMethodCallIgnored
-                        dest.mkdir();
-                    }
-                    FileUtils.copyFolder(f, dest);
-                } else {
-                    SafeFileOperations.copyFile(f, dest);
-                    AccessManager.preserveTime(context, f.getAbsolutePath(), dest.getAbsolutePath());
-                }
-                SafeFileOperations.verifyCopy(f, dest);
-                SafeFileOperations.delete(f);
-                finishItemWork(targetWork);
+                });
+                finishItemWork(target[0]);
             } else if (item instanceof ZipEntryInfo) {
                 extractZipEntry((ZipEntryInfo) item, destinationFolder);
             }
@@ -428,23 +370,6 @@ public class FileOperationsHelper {
         return true;
     }
 
-    private File getUnusedDest(File destDir, String name, boolean useElevated) {
-        File first = FileUtils.getUnusedFile(destDir, name);
-        if (!useElevated) return first;
-        try {
-            if (!AccessManager.exists(context, first.getAbsolutePath())) return first;
-            String base = FilenameUtils.getBaseName(name);
-            String ext = FilenameUtils.getExtension(name);
-            for (int i = 1; i < 1000; i++) {
-                String candidate = ext.isEmpty() ? base + " (" + i + ")" : base + " (" + i + ")." + ext;
-                File c = new File(destDir, candidate);
-                if (!AccessManager.exists(context, c.getAbsolutePath())) return c;
-            }
-        } catch (Exception ignored) {
-        }
-        return first;
-    }
-
     private boolean copyToDestination(List<Object> items) throws IOException {
         File destinationFolder = adapter.pane1 ? context.pane2Folder : context.pane1Folder;
         RecyclerView.Adapter rvAdapter = ((RecyclerView) context.findViewById(adapter.pane1 ? R.id.listViewPane2 : R.id.listViewPane1)).getAdapter();
@@ -462,52 +387,11 @@ public class FileOperationsHelper {
     }
 
     private boolean copyToRegularFolder(List<Object> items, File destinationFolder) throws IOException {
-        boolean useElevated = AccessManager.fileOpsOn(context);
-
         for (Object item : items) {
             checkOperationCancelled();
             if (item instanceof File f) {
                 long targetWork = completedWork + cachedCopyWork(f);
-                if (io.github.abdurazaaqmohammed.utils.LocalStorage.isPath(f)
-                        || io.github.abdurazaaqmohammed.utils.LocalStorage.isPath(destinationFolder)) {
-                    io.github.abdurazaaqmohammed.utils.LocalStorage.transfer(f, destinationFolder, false);
-                    finishItemWork(targetWork);
-                    continue;
-                }
-                File dest = isSameDirectory(f, destinationFolder) ? promptForDuplicateName(f, destinationFolder) : getUnusedDest(destinationFolder, f.getName(), useElevated);
-                if (dest == null || dest.equals(f)) { finishItemWork(targetWork); continue; }
-                SafeFileOperations.validateDestination(f, dest);
-                if (useElevated) {
-                    try {
-                        if (f.isDirectory()) AccessManager.copyDir(context, f.getAbsolutePath(), dest.getAbsolutePath(), true);
-                        else AccessManager.copyFile(context, f.getAbsolutePath(), dest.getAbsolutePath(), true);
-                        AccessManager.preserveTime(context, f.getAbsolutePath(), dest.getAbsolutePath());
-                        finishItemWork(targetWork);
-                        continue;
-                    } catch (Exception e) {
-                    }
-                }
-                if (ShizukuFileOps.involvesShizukuPath(f, destinationFolder) && ShizukuFileOps.shellCopy(f, destinationFolder, dest.getName()) != null) {
-                    finishItemWork(targetWork);
-                    continue;
-                }
-                if (f.isDirectory()) {
-                    if (useElevated) {
-                        try {
-                            AccessManager.mkdir(context, dest.getAbsolutePath(), true);
-                        } catch (Exception ignored) {
-                            //noinspection ResultOfMethodCallIgnored
-                            dest.mkdir();
-                        }
-                    } else {
-                        //noinspection ResultOfMethodCallIgnored
-                        dest.mkdir();
-                    }
-                    FileUtils.copyFolder(f, dest);
-                } else {
-                    SafeFileOperations.copyFile(f, dest);
-                    AccessManager.preserveTime(context, f.getAbsolutePath(), dest.getAbsolutePath());
-                }
+                io.github.abdurazaaqmohammed.utils.FileTransfers.transfer(context, f, destinationFolder, false);
                 finishItemWork(targetWork);
             } else if (item instanceof ZipEntryInfo) {
                 extractZipEntry((ZipEntryInfo) item, destinationFolder);
@@ -527,69 +411,6 @@ public class FileOperationsHelper {
         } catch (IOException e) {
             return parent.getAbsolutePath().equals(destinationFolder.getAbsolutePath());
         }
-    }
-
-    private String getDuplicateName(String fileName, File destinationFolder) {
-        String base = FilenameUtils.getBaseName(fileName);
-        String ext = FilenameUtils.getExtension(fileName);
-        boolean useElevated = false;
-        try {
-            useElevated = AccessManager.fileOpsOn(context);
-        } catch (Exception ignored) {
-        }
-        int i = 1;
-        String candidate;
-        do {
-            candidate = ext.isEmpty() ? base + " (" + i + ")" : base + " (" + i + ")." + ext;
-            i++;
-        } while (new File(destinationFolder, candidate).exists()
-                || (useElevated && AccessManager.exists(context, new File(destinationFolder, candidate).getAbsolutePath())));
-        return candidate;
-    }
-
-    private File promptForDuplicateName(File sourceFile, File destinationFolder) throws IOException {
-        final CountDownLatch latch = new CountDownLatch(1);
-        final File[] result = new File[1];
-        final String defaultName = getDuplicateName(sourceFile.getName(), destinationFolder);
-        dismissActiveProgress();
-        context.handler.post(() -> {
-            View view = LayoutInflater.from(context).inflate(R.layout.enter_name, null);
-            EditText input = view.findViewById(R.id.m_et_edittext);
-            input.setText(defaultName);
-            input.setSelection(0, defaultName.length());
-            input.requestFocus();
-            MaterialAlertDialogBuilder builder = dialogUtil.getDialogBuilder()
-                    .setTitle(context.rss.getString(R.string.enter_name_for_copy))
-                    .setView(view)
-                    .setPositiveButton(android.R.string.ok, null)
-                    .setNegativeButton(android.R.string.cancel, (d, w) -> latch.countDown());
-            AlertDialog dialog = builder.create();
-            dialog.setOnDismissListener(d -> latch.countDown());
-            dialogUtil.styleAlertDialog(dialog);
-            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
-                try {
-                    String name = input.getText().toString().trim();
-                    SafeFileOperations.validateName(name);
-                    File target = new File(destinationFolder, name);
-                    if (target.exists()) throw new IOException("Destination already exists.");
-                    result[0] = target;
-                    dialog.dismiss();
-                } catch (IOException e) { input.setError(e.getMessage()); }
-            });
-            dialog.setOnShowListener(d -> {
-                input.requestFocus();
-                InputMethodManager imm = (InputMethodManager) context.getSystemService(Context.INPUT_METHOD_SERVICE);
-                if (imm != null) imm.showSoftInput(input, InputMethodManager.SHOW_IMPLICIT);
-            });
-        });
-        try {
-            latch.await();
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new IOException(e);
-        }
-        if (result[0] != null) showActiveProgress(context.rss.getString(R.string.copying, sourceFile));
-        return result[0];
     }
 
     public boolean copyToZip(List items, File zipFile, String currentPath) throws IOException {
@@ -863,11 +684,19 @@ public class FileOperationsHelper {
     }
 
     public void extractZipEntry(ZipEntryInfo zipEntry, File destinationFolder) throws IOException {
+        if (zipEntry.getFullPath() == null) return;
+        SafeFileOperations.validateName(zipEntry.getName());
+        var choice = io.github.abdurazaaqmohammed.utils.FileConflictResolver.resolveDestination(context,
+                new File(destinationFolder, zipEntry.getName()), zipEntry.isDirectory());
+        io.github.abdurazaaqmohammed.utils.FileConflictResolver.apply(context, choice,
+                target -> extractZipEntryTo(zipEntry, destinationFolder, target));
+    }
+
+    private void extractZipEntryTo(ZipEntryInfo zipEntry, File destinationFolder, File target) throws IOException {
         String destinationPath = destinationFolder.getPath();
         String zipEntryPath = zipEntry.getFullPath();
         if (zipEntryPath == null) return;
         SafeFileOperations.validateName(zipEntry.getName());
-        File target = FileUtils.getUnusedFile(destinationFolder, zipEntry.getName());
         try (ZipFile zf = io.github.abdurazaaqmohammed.domain.files.ArchivePasswords.open(zipEntry.getZipFile())) {
             // zip4j preserves the entry's internal path when extracting, so a file inside
             // "docs/" would land in destination/docs/. Pass an explicit name to avoid that.
