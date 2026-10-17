@@ -22,7 +22,8 @@ public final class ArchiveSearch {
                 && !Arrays.asList(path.split("/")).contains("..");
     }
     private static Pattern matcher(String query,boolean matchCase,boolean regex) {
-        return Pattern.compile(regex ? query : Pattern.quote(query),matchCase ? 0 : Pattern.CASE_INSENSITIVE|Pattern.UNICODE_CASE);
+        return regex ? SearchPattern.compile(query, matchCase ? 0 : Pattern.CASE_INSENSITIVE|Pattern.UNICODE_CASE)
+                : Pattern.compile(Pattern.quote(query), matchCase ? 0 : Pattern.CASE_INSENSITIVE|Pattern.UNICODE_CASE);
     }
     private static void interrupted() throws InterruptedIOException {
         if (Thread.currentThread().isInterrupted()) throw new InterruptedIOException("Search cancelled");
@@ -73,12 +74,12 @@ public final class ArchiveSearch {
                 interrupted(); String path=entry.getFullPath();
                 if (!path.startsWith(prefix) || path.equals(prefix)) continue;
                 String relative=path.substring(prefix.length()).replaceAll("/+$","");
-                if (!recursive && relative.indexOf('/')>=0 || !names.matcher(entry.getName()).find()) continue;
+                if (!recursive && relative.indexOf('/')>=0 || !SearchPattern.find(names, entry.getName())) continue;
                 if (!entry.isDirectory() && (minSize>=0 && entry.getSize()<minSize || maxSize>=0 && entry.getSize()>maxSize)) continue;
                 if (content!=null && !content.isEmpty()) {
                     if (entry.isDirectory()) continue;
                     String text=text(zip,headers.get(path),budget);
-                    if (text==null || !inside.matcher(text).find()) continue;
+                    if (text==null || !SearchPattern.find(inside, text)) continue;
                 }
                 hits.add(entry);
                 if (hits.size()>=FileSearch.MAX_HITS) { budget.limited=true; break; }
@@ -102,7 +103,7 @@ public final class ArchiveSearch {
                     while ((line=reader.readLine())!=null) {
                         interrupted(); number++;
                         if (number>FileSearch.MAX_LINES_PER_FILE) { budget.limited=true; break; }
-                        if (pattern.matcher(line).find()) {
+                        if (SearchPattern.find(pattern, line)) {
                             String snippet=line.trim();
                             if (snippet.length()>FileSearch.SNIPPET_LEN) snippet=snippet.substring(0,FileSearch.SNIPPET_LEN)+"…";
                             hits.add(new Hit(new ZipEntryInfo(header,archive,""),number,snippet));

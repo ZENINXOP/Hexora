@@ -55,4 +55,35 @@ public class FileSearchTest {
     @Test public void missingDirectoryAndNullListerFailGracefully() {
         assertTrue(FileSearch.searchByName(new File(tmp.getRoot(),"missing"),"x",true,false,false,"",-1,-1,null).isEmpty());
     }
+
+    @Test public void nameSearchCapsResults() throws Exception {
+        for (int i = 0; i < FileSearch.MAX_HITS + 20; i++) file("match-" + i, "x");
+        assertEquals(FileSearch.MAX_HITS, search("match-", true, false, false, "", -1, -1).size());
+    }
+
+    @Test public void deepDirectoryTreeUsesNoRecursiveJavaCalls() {
+        File root = new File("virtual-0") {
+            @Override public String getCanonicalPath() { return "virtual-root"; }
+            @Override public File[] listFiles() { return new File[]{new DeepDirectory(1)}; }
+        };
+        assertEquals(1, FileSearch.searchByName(root, "found", true, true, false, "", -1, -1, null).size());
+    }
+
+    private static final class DeepDirectory extends File {
+        final int depth;
+        DeepDirectory(int depth) { super("virtual-" + depth); this.depth = depth; }
+        @Override public String getCanonicalPath() { return getPath(); }
+        @Override public boolean isDirectory() { return true; }
+        @Override public boolean isFile() { return false; }
+        @Override public File[] listFiles() {
+            return depth < 20000 ? new File[]{new DeepDirectory(depth + 1)} : new File[]{new File("found")};
+        }
+    }
+
+    @Test public void oversizedLinesDoNotAllocateUnboundedSearchStrings() throws Exception {
+        char[] chars = new char[128 * 1024];
+        java.util.Arrays.fill(chars, 'a');
+        file("long.txt", new String(chars));
+        assertTrue(FileSearch.findInFiles(tmp.getRoot(), "missing", true, false, null).isEmpty());
+    }
 }

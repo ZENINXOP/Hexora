@@ -69,10 +69,19 @@ public final class ShizukuManager {
     public static void requestPermission(Activity activity,
                                          Shizuku.OnRequestPermissionResultListener listener) {
         try {
-            if (Shizuku.isPreV11()) return;
+            if (!isRunning()) {
+                listener.onRequestPermissionResult(PERMISSION_CODE, PackageManager.PERMISSION_DENIED);
+                return;
+            }
+            if (hasPermission()) {
+                listener.onRequestPermissionResult(PERMISSION_CODE, PackageManager.PERMISSION_GRANTED);
+                return;
+            }
             Shizuku.addRequestPermissionResultListener(listener);
             Shizuku.requestPermission(PERMISSION_CODE);
         } catch (Throwable ignored) {
+            removePermissionListener(listener);
+            listener.onRequestPermissionResult(PERMISSION_CODE, PackageManager.PERMISSION_DENIED);
         }
     }
 
@@ -100,6 +109,14 @@ public final class ShizukuManager {
         IFileService s = ShizukuConnection.peek();
         if (s == null) throw new IOException("Shizuku service starting, try again");
         return s;
+    }
+
+    private static IFileService metadataService(Context context) throws IOException {
+        // The native grant can arrive before the user service finishes binding.
+        // Workers continue once it connects; UI metadata reads remain nonblocking.
+        if (android.os.Looper.myLooper() != android.os.Looper.getMainLooper()) return serviceSync(context);
+        ShizukuConnection.ensureBackground(context);
+        return serviceFast();
     }
 
     private static String serviceError(IFileService s) {
@@ -158,7 +175,7 @@ public final class ShizukuManager {
         if (ShizukuConnection.peek() == null) ShizukuConnection.ensureBackground(context);
         try {
             requireAllowed(path);
-            return serviceFast().pathExists(path);
+            return metadataService(context).pathExists(path);
         } catch (Throwable e) {
             return false;
         }
@@ -168,7 +185,7 @@ public final class ShizukuManager {
         if (ShizukuConnection.peek() == null) ShizukuConnection.ensureBackground(context);
         try {
             requireAllowed(path);
-            return serviceFast().pathIsDir(path);
+            return metadataService(context).pathIsDir(path);
         } catch (Throwable e) {
             return false;
         }
@@ -178,7 +195,7 @@ public final class ShizukuManager {
         if (ShizukuConnection.peek() == null) ShizukuConnection.ensureBackground(context);
         try {
             requireAllowed(path);
-            return serviceFast().pathIsFile(path);
+            return metadataService(context).pathIsFile(path);
         } catch (Throwable e) {
             return false;
         }
@@ -187,7 +204,7 @@ public final class ShizukuManager {
     public static long getFileSize(Context context, String path) {
         try {
             requireAllowed(path);
-            return serviceFast().pathSize(path);
+            return metadataService(context).pathSize(path);
         } catch (Throwable e) {
             return -1;
         }
@@ -196,7 +213,7 @@ public final class ShizukuManager {
     public static long getMtime(Context context, String path) {
         try {
             requireAllowed(path);
-            return serviceFast().pathMtime(path);
+            return metadataService(context).pathMtime(path);
         } catch (Throwable e) {
             return 0;
         }

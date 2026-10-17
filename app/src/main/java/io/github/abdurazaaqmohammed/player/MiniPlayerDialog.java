@@ -2,8 +2,6 @@ package io.github.abdurazaaqmohammed.player;
 
 import android.app.Activity;
 import android.app.Dialog;
-import android.graphics.BitmapFactory;
-import android.media.MediaMetadataRetriever;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.widget.ImageButton;
@@ -95,8 +93,11 @@ public class MiniPlayerDialog {
         dialog = new MaterialAlertDialogBuilder(activity)
                 .setView(view)
                 .setOnDismissListener(d -> {
+                    if (!isShowing) return;
                     isShowing = false;
                     playerManager.unregisterCallback(callback);
+                    playerManager.decrementUIVisible();
+                    artworkView.setTag(null);
                 })
                 .show();
 
@@ -113,9 +114,6 @@ public class MiniPlayerDialog {
     public void dismiss() {
         if (dialog != null && dialog.isShowing()) {
             dialog.dismiss();
-            isShowing = false;
-            playerManager.unregisterCallback(callback);
-            playerManager.decrementUIVisible();
         }
     }
 
@@ -130,13 +128,6 @@ public class MiniPlayerDialog {
         titleView.setText(item.title != null ? item.title : activity.getString(R.string.media_unknown));
         artistView.setText(item.artist != null ? item.artist : activity.getString(R.string.music_unknown_artist));
 
-        if (item.path != null) try (MediaMetadataRetriever mmr = new MediaMetadataRetriever()) {
-            mmr.setDataSource(activity, item.uri);
-            byte[] art = mmr.getEmbeddedPicture();
-            if (art == null) artworkView.setImageResource(android.R.drawable.ic_menu_gallery);
-            else artworkView.setImageBitmap(BitmapFactory.decodeByteArray(art, 0, art.length));
-        } catch (Exception e) {
-            artworkView.setImageResource(android.R.drawable.ic_menu_gallery);
-        }
+        MediaArtwork.loadInto(activity, item, artworkView);
     }
 }

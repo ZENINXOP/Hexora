@@ -11,11 +11,11 @@ based on the open-source [MP-Manager](https://github.com/AbdurazaaqMohammed/MP-M
 [Report an issue](https://github.com/ZENINXOP/Hexora/issues) ·
 [Telegram channel](https://t.me/Hexora_x)
 
-**Latest release:** [Hexora 0.1.3](https://github.com/ZENINXOP/Hexora/releases/tag/v0.1.3) ·
-[Download signed APK](https://github.com/ZENINXOP/Hexora/releases/download/v0.1.3/Hexora.0.1.3.apk) ·
-[Changes from 0.1.2](docs/releases/0.1.3.md)
+**Latest release:** [Hexora 0.1.4](https://github.com/ZENINXOP/Hexora/releases/tag/v0.1.4) ·
+[Download signed APK](https://github.com/ZENINXOP/Hexora/releases/download/v0.1.4/Hexora.0.1.4.apk) ·
+[Changes from 0.1.3](docs/releases/0.1.4.md)
 
-Version 0.1.3 updates 0.1.2 in place using package `com.hexora.zenin` and the
+Version 0.1.4 updates 0.1.3 and 0.1.2 in place using package `com.hexora.zenin` and the
 same signing certificate. Version 0.1.1 uses a separate package; its private
 preferences, folder grants and editor sessions remain separate.
 
@@ -37,7 +37,7 @@ emulator on October 17, 2026. Only disposable sample files are shown.
 - Text, XML, Smali, DEX, and resource tools, plus APK information and installation.
 - Built-in image viewing and audio/video playback.
 - Root and Shizuku support for locations requiring elevated access.
-- Light, dark, black, and system themes, with configurable file rows and menus.
+- Light and dark themes, with an animated sidebar toggle and configurable file rows and menus.
 - Telegram/shared attachment imports, split-APK bundle merging, and a script
   console with arguments, input, Stop and timeout controls.
 - Local file clipboard, password-protected ZIP browsing/editing, and archive
@@ -83,7 +83,7 @@ they are separate from the published release linked above.
 Bundled LSPatch runtime provenance and its pinned recursive corresponding
 source are available in [third_party/lspatch](third_party/lspatch/README.md).
 Build and emulator validation for the published release are recorded in
-[the release notes](docs/releases/0.1.3.md). Historical QA reports retain their
+[the release notes](docs/releases/0.1.4.md). Historical QA reports retain their
 original source-only status and failed attempts where applicable.
 
 The updater checks this repository's GitHub releases. Release APK filenames

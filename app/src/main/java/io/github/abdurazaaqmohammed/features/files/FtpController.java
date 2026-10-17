@@ -53,7 +53,7 @@ import java.util.List;
 public class FtpController {
 
     private final MainActivity activity;
-    private IEZFtpClient ftpClient;
+    private volatile IEZFtpClient ftpClient;
     private MaterialAutoCompleteTextView profileSpinner;
     private ImageButton profileManageButton;
     private BroadcastReceiver ftpStopReceiver;
@@ -237,12 +237,14 @@ public class FtpController {
 
                     if (ftpClient != null) ftpClient.release();
                     ftpClient = new EZFtpClient();
+                    IEZFtpClient connectingClient = ftpClient;
                     boolean selectedPane1 = activity.lastPaneSelected == 1;
                     clientDialog.dismiss();
-                    ftpClient.connect(ip, port, user, pass, securityType, new OnEZFtpCallBack<>() {
+                    connectingClient.connect(ip, port, user, pass, securityType, new OnEZFtpCallBack<>() {
                         @Override
                         public void onSuccess(Void response) {
                             activity.runOnUiThread(() -> {
+                                if (connectingClient != ftpClient || activity.isFinishing() || activity.isDestroyed()) return;
                                 Extensions.showMessage(activity, activity.rss.getString(R.string.connected_to_ftp));
                                 fetchFtpDirAndLoad(File.separator, selectedPane1);
                             });
@@ -250,7 +252,10 @@ public class FtpController {
 
                         @Override
                         public void onFail(int code, String msg) {
-                            activity.runOnUiThread(() -> Extensions.showMessage(activity, activity.rss.getString(R.string.ftp_connect_failed, msg)));
+                            activity.runOnUiThread(() -> {
+                                if (connectingClient == ftpClient && !activity.isFinishing() && !activity.isDestroyed())
+                                    Extensions.showMessage(activity, activity.rss.getString(R.string.ftp_connect_failed, msg));
+                            });
                         }
                     });
                 });
@@ -267,8 +272,9 @@ public class FtpController {
 
     public void close() {
         clearStopReceiver();
-        if (ftpClient != null) ftpClient.release();
+        IEZFtpClient client = ftpClient;
         ftpClient = null;
+        if (client != null) client.release();
     }
 
     private void clearStopReceiver() {
@@ -289,15 +295,19 @@ public class FtpController {
     }
 
     public void fetchFtpDirAndLoad(String path, boolean pane1) {
-        if (ftpClient == null || !ftpClient.isConnected()) return;
+        IEZFtpClient client = ftpClient;
+        if (client == null || !client.isConnected() || activity.isFinishing() || activity.isDestroyed()) return;
+        int request = activity.beginPaneTask(pane1);
 
-        ftpClient.changeDirectory(path, new OnEZFtpCallBack<>() {
+        client.changeDirectory(path, new OnEZFtpCallBack<>() {
             @Override
             public void onSuccess(String newPath) {
-                ftpClient.getCurDirFileList(new OnEZFtpCallBack<>() {
+                if (client != ftpClient || !activity.isPaneTaskCurrent(pane1, request)) return;
+                client.getCurDirFileList(new OnEZFtpCallBack<>() {
                     @Override
                     public void onSuccess(List<EZFtpFile> response) {
                         activity.runOnUiThread(() -> {
+                            if (client != ftpClient || !activity.isPaneTaskCurrent(pane1, request)) return;
                             List<FTPFileWrapper> files = new ArrayList<>();
                             files.add(new FTPFileWrapper(newPath, new EZFtpFile("..", "", 0, 0, new Date())));
                             int foldersCount = 0;
@@ -310,7 +320,7 @@ public class FtpController {
                                 }
                             }
                             activity.replacePaneListing(pane1, "ftp:" + newPath,
-                                    new FtpFilesArrayAdapter(activity, files.toArray(new FTPFileWrapper[0]), pane1, ftpClient));
+                                    new FtpFilesArrayAdapter(activity, files.toArray(new FTPFileWrapper[0]), pane1, client));
                             if (activity.lastPaneSelected == (pane1 ? 1 : 2)) {
                                 activity.setCurrentPane(pane1 ? 1 : 2);
                             }
@@ -320,14 +330,16 @@ public class FtpController {
 
                     @Override
                     public void onFail(int code, String msg) {
-                        Extensions.showMessage(activity, activity.rss.getString(R.string.ftp_connect_failed, msg));
+                        if (client == ftpClient && activity.isPaneTaskCurrent(pane1, request))
+                            Extensions.showMessage(activity, activity.rss.getString(R.string.ftp_connect_failed, msg));
                     }
                 });
             }
 
             @Override
             public void onFail(int code, String msg) {
-                Extensions.showMessage(activity, activity.rss.getString(R.string.ftp_connect_failed, msg));
+                if (client == ftpClient && activity.isPaneTaskCurrent(pane1, request))
+                    Extensions.showMessage(activity, activity.rss.getString(R.string.ftp_connect_failed, msg));
             }
         });
     }
@@ -352,7 +364,7 @@ public class FtpController {
     public void loadFtpFolderInPane(FTPFileWrapper folder, boolean pane1) {
         if (folder.getName().equals("..")) {
             if (ftpClient != null) {
-                ftpParent(activity.lastPaneSelected == 1);
+                ftpParent(pane1);
             }
         } else if (folder.isDirectory()) {
             fetchFtpDirAndLoad(folder.getFtpFile().getName(), pane1);

@@ -196,7 +196,7 @@ public class TreeAdapter extends RecyclerView.Adapter<TreeAdapter.ViewHolder> {
                         Objects.equals(oldNode.getName(), newNode.getName()) &&
                         oldNode.getDepth() == newNode.getDepth();
             }
-        }).dispatchUpdatesTo(this);
+        }, false).dispatchUpdatesTo(this);
     }
 
     private void addVisibleNodesRecursive(List<TreeNode> nodes, int depth) {
@@ -975,6 +975,7 @@ public class TreeAdapter extends RecyclerView.Adapter<TreeAdapter.ViewHolder> {
     }
 
     private void toggleNode(TreeNode node, int position) {
+        if (position < 0 || position >= visibleNodes.size() || visibleNodes.get(position) != node) return;
         if (node.isExpanded()) {
             collapseNode(node, position);
         } else {
@@ -1013,13 +1014,14 @@ public class TreeAdapter extends RecyclerView.Adapter<TreeAdapter.ViewHolder> {
     private void collapseNode(TreeNode node, int position) {
         node.setExpanded(false);
         int nextPos = position + 1;
-        int count = 0;
         while (nextPos < visibleNodes.size() && isDescendant(node, visibleNodes.get(nextPos))) {
-            visibleNodes.remove(nextPos);
-            count++;
+            nextPos++;
         }
-
+        int count = nextPos - position - 1;
         if (count > 0) {
+            // One array shift, rather than shifting the entire class list once
+            // per descendant (quadratic when collapsing a large package).
+            visibleNodes.subList(position + 1, nextPos).clear();
             notifyItemRangeRemoved(position + 1, count);
         }
     }

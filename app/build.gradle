@@ -16,8 +16,8 @@ android {
         // Compile against current APIs while retaining system folder grants.
         targetSdk 28
         multiDexEnabled true
-        versionCode 14
-        versionName "0.1.3"
+        versionCode 15
+        versionName "0.1.4"
         // GitHub release assets are signed by the existing Hexora release key.
         buildConfigField "String", "UPDATE_REPOSITORY", '"ZENINXOP/Hexora"'
     }

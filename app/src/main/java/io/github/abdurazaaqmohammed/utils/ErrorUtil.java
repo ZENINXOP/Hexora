@@ -14,6 +14,9 @@ import io.github.abdurazaaqmohammed.MPManager.R;
 import io.github.codehasan.colorpicker.extensions.Extensions;
 
 public class ErrorUtil {
+    private static final java.util.concurrent.ExecutorService REPORTS = new java.util.concurrent.ThreadPoolExecutor(
+            1, 1, 0L, java.util.concurrent.TimeUnit.MILLISECONDS, new java.util.concurrent.ArrayBlockingQueue<>(16),
+            new java.util.concurrent.ThreadPoolExecutor.DiscardOldestPolicy());
     private final Activity context;
     private final DialogUtil dialogUtil;
     public ErrorUtil (Activity c) {
@@ -26,14 +29,20 @@ public class ErrorUtil {
     }
 
     public void showError(String s) {
-        MaterialAlertDialogBuilder b = dialogUtil.getDialogBuilder()
+        context.runOnUiThread(() -> {
+        if (context.isFinishing() || context.isDestroyed()) return;
+        dialogUtil.getDialogBuilder()
                 .setMessage(s)
                 .setNegativeButton(android.R.string.cancel, null)
-                .setNeutralButton(R.string.copy_log, (dialog, which) -> copyText(s));
-        context.runOnUiThread(b::show);
+                .setNeutralButton(R.string.copy_log, (dialog, which) -> copyText(s)).show();
+        });
     }
 
     public void showError(Throwable e) {
+        REPORTS.execute(() -> prepareError(e));
+    }
+
+    private void prepareError(Throwable e) {
         try {
             AppLogs.writeCrash(e, context);
         } catch (Exception ignored) {}
@@ -50,6 +59,8 @@ public class ErrorUtil {
             currentVer = "1.0";
         }
         stackTrace.append(currentVer).append('\n').append("Storage permission granted: ").append(!doesNotHaveStoragePerm(context));
+        context.runOnUiThread(() -> {
+        if (context.isFinishing() || context.isDestroyed()) return;
         MaterialAlertDialogBuilder b = dialogUtil.getDialogBuilder()
                 .setTitle(R.string.error)
                 .setNegativeButton(R.string.close, null)
@@ -58,8 +69,6 @@ public class ErrorUtil {
                         dialogUtil.getDialogBuilder().setTitle(R.string.hexora_error_details)
                                 .setMessage(stackTrace).setPositiveButton(R.string.close, null)
                                 .setNeutralButton(R.string.copy_log, (details, button) -> copyText(stackTrace)).show());
-        context.runOnUiThread(() -> {
-            if (context.isFinishing() || (Build.VERSION.SDK_INT >= 17 && context.isDestroyed())) return;
             b.setMessage(e.getMessage() == null ? mainErr : e.getMessage()).show();
         });
     }

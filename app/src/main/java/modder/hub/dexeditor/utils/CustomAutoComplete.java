@@ -143,6 +143,18 @@ public class CustomAutoComplete extends EmptyLanguage {
 	public int getIndentAdvance(@NonNull ContentReference content, int line, int column) {
 		return getIndentAdvance(content.getLine(line).substring(0, column));
 	}
+
+    public void configureIndentation(boolean tabs, int size) {
+        if (mLanguage instanceof TextMateLanguage tm) {
+            tm.useTab(tabs);
+            tm.setTabSize(size);
+        }
+    }
+
+    @Override public void destroy() {
+        if (mLanguage != null) mLanguage.destroy();
+        super.destroy();
+    }
 	
 	public int getIndentAdvance(String line) {
 		if (mIndentationRules == null || mIndentationRules.increaseIndentPattern == null) {

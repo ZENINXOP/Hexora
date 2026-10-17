@@ -53,10 +53,15 @@ public class BottomBarButtonAdapter extends BaseAdapter {
         TextView textAction = convertView.findViewById(R.id.text_action);
         ImageButton btnEdit = convertView.findViewById(R.id.btn_edit);
         ImageButton btnDelete = convertView.findViewById(R.id.btn_delete);
-        String action = obj.optString("action");
-        String label = obj.optString("label", action);
+        if (obj == null) return convertView;
+        String action = obj.optString("action", "");
+        String hold = obj.optString("longAction", "");
+        String label = obj.optString("label", action.isEmpty() ? hold : action);
+        if (label.trim().isEmpty()) label = action.isEmpty() ? hold : action;
         textLabel.setText(label);
-        textAction.setText(action);
+        String detail = action.isEmpty() ? "" : context.getString(R.string.ep_tap_action, action);
+        if (!hold.isEmpty()) detail += (detail.isEmpty() ? "" : "\n") + context.getString(R.string.ep_hold_action, hold);
+        textAction.setText(detail);
         btnEdit.setOnClickListener(v -> listener.onEdit(position, obj));
         btnDelete.setOnClickListener(v -> listener.onDelete(position));
         return convertView;

@@ -39,9 +39,9 @@ package modder.hub.dexeditor.activity;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.os.Bundle;
-import android.widget.Toast;
 
-import androidx.appcompat.widget.Toolbar;
+import com.google.android.material.appbar.MaterialToolbar;
+import com.google.android.material.color.MaterialColors;
 import androidx.recyclerview.widget.ItemTouchHelper;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
@@ -83,18 +83,22 @@ public class EditFloatingMenusActivity extends BaseActivity implements StartDrag
 
 
     private void initialize(Bundle _savedInstanceState) {
-        Toolbar _toolbar = findViewById(R.id._toolbar);
+        MaterialToolbar _toolbar = findViewById(R.id._toolbar);
         setSupportActionBar(_toolbar);
         Objects.requireNonNull(getSupportActionBar()).setDisplayHomeAsUpEnabled(true);
         getSupportActionBar().setHomeButtonEnabled(true);
-        _toolbar.setNavigationOnClickListener(_v -> onBackPressed());
+        // AppCompat installs its own home drawable; tint the final icon as well.
+        int foreground = MaterialColors.getColor(_toolbar, com.google.android.material.R.attr.colorOnSurface);
+        _toolbar.setTitleTextColor(foreground);
+        _toolbar.setNavigationIcon(R.drawable.ic_left_arrow_mt);
+        _toolbar.setNavigationIconTint(foreground);
+        _toolbar.setNavigationOnClickListener(_v -> finish());
 
         recyclerView = findViewById(R.id.recyclerView);
     }
 
     private void initializeLogic() {
-        setTitle(getString(R.string.edit_floating_menus));
-        Toast.makeText(this, R.string.menu_seq, Toast.LENGTH_LONG).show();
+        setTitle(R.string.ep_floating);
         _load_shortcut_keys();
     }
 
@@ -136,10 +140,19 @@ public class EditFloatingMenusActivity extends BaseActivity implements StartDrag
 	public void _load_shortcut_keys() {
         SharedPreferences prefs = getSharedPreferences("editor_prefs", Context.MODE_PRIVATE);
         String jsonConfig = prefs.getString("menu_order", null);
-        ArrayList<HashMap<String, Object>> menu_items = new Gson().fromJson(jsonConfig, new TypeToken<ArrayList<HashMap<String, Object>>>() {
-        }.getType());
-        if (menu_items == null) menu_items = new ArrayList<>();
-        boolean changed = insertMissingButton(menu_items, "id_btn", "ID", "panel_btn_paste");
+        ArrayList<HashMap<String, Object>> menu_items;
+        try {
+            menu_items = new Gson().fromJson(jsonConfig, new TypeToken<ArrayList<HashMap<String, Object>>>() { }.getType());
+        } catch (RuntimeException invalid) { menu_items = null; }
+        boolean seeded = menu_items == null;
+        if (seeded) menu_items = new Gson().fromJson(
+                io.github.abdurazaaqmohammed.ui.editor.FloatingMenuDefaults.create().toString(),
+                new TypeToken<ArrayList<HashMap<String, Object>>>() { }.getType());
+        int previousSize = menu_items.size();
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        menu_items.removeIf(item -> item == null || !(item.get("id") instanceof String id) || id.isEmpty() || !seen.add(id));
+        boolean changed = seeded | (previousSize != menu_items.size());
+        changed |= insertMissingButton(menu_items, "id_btn", "ID", "panel_btn_paste");
         changed |= insertMissingButton(menu_items, "goto_id_btn", "Goto ID", "id_btn");
         // Third-party editor actions: appended once so users can reorder,
         // disable, or hide them in this editor like built-ins.

@@ -17,6 +17,12 @@
     <string name="app_storage_usage_access">Usage access</string>
     <string name="app_storage_access_needed">Allow Usage access to read app storage sizes, or enable elevated file access to inspect private data directories.</string>
     <string name="sidebar_menu">Sidebar menu</string>
+    <string name="theme_label">Theme</string>
+    <string name="theme_light_label">Light</string>
+    <string name="theme_dark_label">Dark</string>
+    <string name="theme_switch_to_light">Switch to light theme</string>
+    <string name="theme_switch_to_dark">Switch to dark theme</string>
+    <string name="theme_change_busy">Finish the current operation or close the minimized editor before changing theme.</string>
     <string name="add_local_storage">Add local storage</string>
     <string name="remove_local_storage">Remove storage</string>
     <string name="remove_local_storage_message">Remove “%1$s” from local storage? Files in this folder will be kept.</string>
@@ -1670,14 +1676,4 @@ Layout Inspector
     <string name="grant_storage_access">Grant storage access</string>
     <string name="dex_code_theme">Code theme</string>
     <string name="dex_editor_theme">DEX / Smali theme</string>
-    <string-array name="dex_editor_theme_entries">
-        <item>Follow app theme</item>
-        <item>Light (white)</item>
-        <item>Dark</item>
-    </string-array>
-    <string-array name="dex_editor_theme_values">
-        <item>app</item>
-        <item>light</item>
-        <item>dark</item>
-    </string-array>
 </resources>

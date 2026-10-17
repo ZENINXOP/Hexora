@@ -2,7 +2,6 @@ package io.github.abdurazaaqmohammed.adapters;
 
 import android.content.Context;
 import android.content.res.Resources;
-import android.graphics.Color;
 import android.graphics.drawable.Drawable;
 import android.text.TextUtils;
 import android.util.TypedValue;
@@ -20,8 +19,6 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.core.content.res.ResourcesCompat;
 
-import com.google.android.material.card.MaterialCardView;
-import com.google.android.material.color.MaterialColors;
 
 import java.io.File;
 import java.util.Collections;
@@ -87,7 +84,7 @@ public class SidebarAdapter extends ArrayAdapter<SidebarAdapter.SidebarEntry> {
     private String animateToggleSection;
 
     public SidebarAdapter(Context context, Callbacks callbacks) {
-        super(context, R.layout.item_dropdown_option);
+        super(context, R.layout.item_sidebar_entry);
         this.context = context;
         this.callbacks = callbacks;
         sectionOrder.add("storage");
@@ -415,7 +412,7 @@ public class SidebarAdapter extends ArrayAdapter<SidebarAdapter.SidebarEntry> {
             TextView title = view.findViewById(R.id.sidebarSectionTitle);
             title.setText(entry.label);
             ImageView dragHandle = view.findViewById(R.id.sidebarSectionDragHandle);
-            dragHandle.setVisibility(organizeMode ? View.VISIBLE : View.INVISIBLE);
+            dragHandle.setVisibility(organizeMode ? View.VISIBLE : View.GONE);
             dragHandle.setOnTouchListener((v, event) -> {
                 if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
                     callbacks.onEntryDragHandleTouched(entry, v);
@@ -424,12 +421,12 @@ public class SidebarAdapter extends ArrayAdapter<SidebarAdapter.SidebarEntry> {
             });
             ImageView toggle = view.findViewById(R.id.sidebarSectionToggle);
             boolean collapsed = isCollapsed(entry.section);
-            Drawable d = ResourcesCompat.getDrawable(context.getResources(), collapsed ? R.drawable.arrow_drop_up_24px : R.drawable.arrow_drop_down_24px, null);
+            Drawable d = ResourcesCompat.getDrawable(context.getResources(), R.drawable.arrow_drop_down_24px, null);
             toggle.setImageDrawable(d.mutate());
             toggle.setContentDescription(context.getString(collapsed ? R.string.sidebar_expand : R.string.sidebar_collapse));
             ((View) toggle.getParent()).setOnClickListener(v -> callbacks.onHeaderToggle(entry));
             toggle.animate().cancel();
-            toggle.setRotation(0f);
+            toggle.setRotation(collapsed ? -90f : 0f);
             if (entry.section.equals(animateToggleSection)) {
                 animateToggleSection = null;
                 toggle.setAlpha(0.45f);
@@ -445,10 +442,11 @@ public class SidebarAdapter extends ArrayAdapter<SidebarAdapter.SidebarEntry> {
         }
         if (type == 1) {
             View view = convertView;
-            if (view == null) view = LayoutInflater.from(context).inflate(R.layout.item_storage, parent, false);
+            if (view == null) view = LayoutInflater.from(context).inflate(R.layout.item_sidebar_storage, parent, false);
             StorageUtil.StorageInfo info = entry.storage;
             ((TextView) view.findViewById(R.id.tvStorageName)).setText(info.name);
-            ((TextView) view.findViewById(R.id.tvUsedPercent)).setText(context.getString(R.string.usedpt, info.usedPercent()));
+            ((ImageView) view.findViewById(R.id.sidebarStorageIcon)).setImageResource(
+                    info.addedLocalStorage ? R.drawable.folder_24px : R.drawable.ic_sidebar_storage);
             ((TextView) view.findViewById(R.id.tvUsedFree)).setText(context.getString(R.string.used,
                     FileSize.getHumanReadableFileSize(info.usedBytes), FileSize.getHumanReadableFileSize(info.freeBytes)));
             ((ProgressBar) view.findViewById(R.id.pbUsed)).setProgress(info.usedPercent());
@@ -462,7 +460,7 @@ public class SidebarAdapter extends ArrayAdapter<SidebarAdapter.SidebarEntry> {
             return view;
         }
         View view = convertView;
-        if (view == null) view = LayoutInflater.from(context).inflate(R.layout.item_dropdown_option, parent, false);
+        if (view == null) view = LayoutInflater.from(context).inflate(R.layout.item_sidebar_entry, parent, false);
         ImageView icon = view.findViewById(R.id.optionIcon);
         TextView text = view.findViewById(R.id.optionText);
         ImageView dragHandle = view.findViewById(R.id.optionDragHandle);
@@ -472,12 +470,14 @@ public class SidebarAdapter extends ArrayAdapter<SidebarAdapter.SidebarEntry> {
         icon.setEnabled(!hidden);
         icon.setAlpha(hidden ? 0.55f : 1f);
         text.setText(entry.label);
+        view.setContentDescription(entry.type == EntryType.BOOKMARK && entry.file != null
+                ? entry.label + ", " + entry.file.getPath() : null);
         text.setEnabled(!hidden);
         text.setAlpha(hidden ? 0.55f : 1f);
         view.setAlpha(hidden ? 0.7f : 1f);
         view.setTranslationY(0f);
-        dragHandle.setVisibility(organizeMode && entry.type != EntryType.STORAGE ? View.VISIBLE : View.INVISIBLE);
-        hideButton.setVisibility(organizeMode && entry.type != EntryType.STORAGE ? View.VISIBLE : View.INVISIBLE);
+        dragHandle.setVisibility(organizeMode && entry.type != EntryType.STORAGE ? View.VISIBLE : View.GONE);
+        hideButton.setVisibility(organizeMode && entry.type != EntryType.STORAGE ? View.VISIBLE : View.GONE);
         hideButton.setContentDescription(context.getString(hidden ? R.string.restore_sidebar_item : R.string.hide));
         hideButton.setOnClickListener(v -> callbacks.onEntryHideRequested(entry));
         dragHandle.setOnTouchListener((v, event) -> {
@@ -488,7 +488,7 @@ public class SidebarAdapter extends ArrayAdapter<SidebarAdapter.SidebarEntry> {
         });
         TypedValue value = new TypedValue();
         Resources.Theme theme = context.getTheme();
-        theme.resolveAttribute(com.google.android.material.R.attr.colorPrimary, value, true);
+        theme.resolveAttribute(com.google.android.material.R.attr.colorOnSurfaceVariant, value, true);
         Drawable drawable = icon.getDrawable();
         if (drawable != null) {
             drawable = drawable.mutate();
@@ -500,8 +500,6 @@ public class SidebarAdapter extends ArrayAdapter<SidebarAdapter.SidebarEntry> {
             callbacks.onEntryLongPressed(entry, v);
             return true;
         });
-        int surfaceColor = MaterialColors.getColor(view, com.google.android.material.R.attr.colorSurfaceContainer, Color.TRANSPARENT);
-        if (view instanceof MaterialCardView card) card.setCardBackgroundColor(surfaceColor);
         return view;
     }
 }

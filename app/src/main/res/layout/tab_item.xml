@@ -8,6 +8,7 @@
         android:id="@+id/menu_view"
         android:layout_width="wrap_content"
         android:layout_height="match_parent"
+        android:background="?attr/colorSurfaceContainerHigh"
         android:orientation="horizontal">
 
         <ImageView
@@ -18,7 +19,8 @@
             android:scaleType="centerInside"
             android:padding="16dp"
             android:src="@drawable/ic_close_mt"
-            app:tint="#FFFFFF" />
+            android:contentDescription="@string/close_file"
+            app:tint="?attr/colorOnSurface" />
 
         <ImageView
             android:id="@+id/menu_locate"
@@ -28,13 +30,16 @@
             android:scaleType="centerInside"
             android:padding="16dp"
             android:src="@drawable/ic_locate"
-            app:tint="#FFFFFF" />
+            android:contentDescription="@string/locate"
+            app:tint="?attr/colorOnSurface" />
     </LinearLayout>
 
     <LinearLayout
         android:id="@+id/main_view"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:minHeight="48dp"
+        android:background="@drawable/bg_dex_drawer_row"
         android:orientation="horizontal"
         android:padding="12dp"
         android:gravity="center_vertical"
@@ -60,6 +65,7 @@
                 android:layout_height="wrap_content"
 
                 android:textSize="14sp"
+                android:textColor="?attr/colorOnSurface"
                 android:ellipsize="end"
                 android:singleLine="true" />
 
@@ -67,7 +73,7 @@
                 android:id="@+id/tab_path"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:textColor="?attr/colorOnSurface"
+                android:textColor="?attr/colorOnSurfaceVariant"
                 android:textSize="11sp"
                 android:ellipsize="start"
                 android:singleLine="true" />

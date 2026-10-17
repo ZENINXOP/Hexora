@@ -34,7 +34,12 @@ public class RootManager {
 
     private static volatile RootManager instance;
     private final Context context;
-    private Boolean rootAvailable = null;
+    private volatile Boolean rootAvailable = null;
+    private volatile long rootCheckedAt;
+    private volatile boolean rootAutoEnabled;
+    private final java.util.concurrent.atomic.AtomicInteger rootGeneration = new java.util.concurrent.atomic.AtomicInteger();
+    private final Object rootCheckLock = new Object();
+    private final Object rootCacheLock = new Object();
     private Process suProcess;
     private DataOutputStream suStdin;
     private BufferedReader suStdout;
@@ -156,21 +161,24 @@ public class RootManager {
 
     public boolean autoEnableRootIfAvailable() {
         try {
-            SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(context);
-            boolean modeTouched = prefs.contains("working_mode");
-            boolean opsTouched = prefs.contains("root_file_ops");
-            if (modeTouched && opsTouched) return false;
+            // Never launch su or wait for its permission dialog on the UI thread.
+            if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) return false;
             if (!isRootAvailable()) return false;
-            boolean changed = false;
-            if (!modeTouched) {
-                setWorkingMode(WorkingMode.ROOT);
-                changed = true;
+            synchronized (rootCheckLock) {
+                synchronized (rootCacheLock) {
+                    if (rootAutoEnabled || !hasCachedRootAccess()) return false;
+                    SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(context);
+                    // Existing defaults must not hide a grant made in Magisk/KernelSU.
+                    // Prefer a selected, ready Shizuku session; enable root otherwise.
+                    SharedPreferences.Editor edit = prefs.edit().putBoolean("root_file_ops", true);
+                    if (getWorkingMode() != WorkingMode.SHIZUKU || !ShizukuManager.ready()) {
+                        edit.putString("working_mode", WorkingMode.ROOT.key);
+                    }
+                    edit.apply();
+                    rootAutoEnabled = true;
+                    return true;
+                }
             }
-            if (!opsTouched) {
-                prefs.edit().putBoolean("root_file_ops", true).apply();
-                changed = true;
-            }
-            return changed;
         } catch (Exception e) {
             return false;
         }
@@ -198,13 +206,39 @@ public class RootManager {
     }
 
     public boolean isRootAvailable() {
-        if (rootAvailable != null) return rootAvailable;
-        rootAvailable = checkRoot();
-        return rootAvailable;
+        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) return hasCachedRootAccess();
+        synchronized (rootCheckLock) {
+            // A denial is temporary: retry after returning from the root manager.
+            int generation;
+            synchronized (rootCacheLock) {
+                Boolean cached = rootAvailable;
+                if (cached != null && android.os.SystemClock.elapsedRealtime() - rootCheckedAt < 15000)
+                    return cached;
+                generation = rootGeneration.get();
+            }
+            boolean available = checkRoot();
+            synchronized (rootCacheLock) {
+                if (generation != rootGeneration.get() || Thread.currentThread().isInterrupted()) return false;
+                rootAvailable = available;
+                rootCheckedAt = android.os.SystemClock.elapsedRealtime();
+                if (!available) rootAutoEnabled = false;
+                return available;
+            }
+        }
+    }
+
+    public boolean hasCachedRootAccess() {
+        return Boolean.TRUE.equals(rootAvailable);
     }
 
     public void refreshRootCache() {
-        rootAvailable = null;
+        // This short lock is separate from the lock held while su is running.
+        synchronized (rootCacheLock) {
+            rootGeneration.incrementAndGet();
+            rootAvailable = null;
+            rootCheckedAt = 0;
+            rootAutoEnabled = false;
+        }
     }
 
     public boolean isSilentInstallEnabled() {
@@ -223,16 +257,22 @@ public class RootManager {
     }
 
     private boolean checkRoot() {
+        Process process = null;
         try {
-            Process process = Runtime.getRuntime().exec(new String[]{suBinary(), "-c", "id"});
-            BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
-            String line = reader.readLine();
-            boolean hasRoot = line != null && line.contains("uid=0");
-            process.waitFor(5, TimeUnit.SECONDS);
-            process.destroy();
-            return hasRoot;
+            process = Runtime.getRuntime().exec(new String[]{suBinary(), "-c", "id"});
+            // Waiting before readLine prevents a stalled su prompt from blocking forever.
+            if (!process.waitFor(10, TimeUnit.SECONDS)) return false;
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+                String line = reader.readLine();
+                return process.exitValue() == 0 && line != null && line.contains("uid=0");
+            }
+        } catch (InterruptedException cancelled) {
+            Thread.currentThread().interrupt();
+            return false;
         } catch (Exception e) {
             return false;
+        } finally {
+            if (process != null) process.destroy();
         }
     }
 

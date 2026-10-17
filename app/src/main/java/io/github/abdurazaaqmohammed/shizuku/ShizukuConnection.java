@@ -49,7 +49,7 @@ public final class ShizukuConnection {
 
         @Override
         public void onServiceDisconnected(ComponentName name) {
-            service = null;
+            reset();
         }
     };
 
@@ -73,11 +73,13 @@ public final class ShizukuConnection {
     }
 
     public static IFileService peek() {
+        IFileService current = service;
+        if (current != null && !current.asBinder().pingBinder()) reset();
         return service;
     }
 
     public static IFileService await(Context context, long timeoutMs) {
-        IFileService s = service;
+        IFileService s = peek();
         if (s != null) return s;
         ensureBackground(context);
         try {
@@ -89,13 +91,20 @@ public final class ShizukuConnection {
         return service;
     }
 
+    public static synchronized void reset() {
+        service = null;
+        binding = false;
+        CountDownLatch waiting = latch;
+        if (waiting != null) waiting.countDown();
+        latch = null;
+    }
+
     public static void unbind(Context context) {
         try {
             Shizuku.unbindUserService(args(context.getApplicationContext()), CONNECTION, true);
         } catch (Throwable ignored) {
         } finally {
-            service = null;
-            binding = false;
+            reset();
         }
     }
 }

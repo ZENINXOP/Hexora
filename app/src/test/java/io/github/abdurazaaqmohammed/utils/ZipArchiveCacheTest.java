@@ -52,6 +52,79 @@ public class ZipArchiveCacheTest {
         return result;
     }
 
+    private void put(ZipOutputStream zip, String path, long time, int size) throws IOException {
+        ZipEntry entry = new ZipEntry(path);
+        entry.setTime(time);
+        zip.putNextEntry(entry);
+        if (!path.endsWith("/")) zip.write(new byte[size]);
+        zip.closeEntry();
+    }
+
+    private ZipEntryInfo child(ZipArchiveCache.Archive archive, String parent, String name) {
+        for (ZipEntryInfo entry : archive.children(parent)) if (entry.getName().equals(name)) return entry;
+        throw new AssertionError("Missing archive child: " + parent + name);
+    }
+
+    @Test public void implicitApkFoldersHaveDescendantDatesAndExpandedSizes() throws Exception {
+        File file = temp.newFile("implicit.apk");
+        long older = 1791540000000L, newer = older + 60000;
+        try (ZipOutputStream zip = new ZipOutputStream(new FileOutputStream(file))) {
+            put(zip, "res/layout/main.xml", older, 13);
+            put(zip, "res/drawable/icon.png", newer, 29);
+            put(zip, "classes.dex", older, 17);
+        }
+        ZipArchiveCache.Archive index = ZipArchiveCache.get(file);
+        ZipEntryInfo res = child(index, "", "res");
+        assertEquals(42, res.getSize());
+        assertTrue(Math.abs(newer - res.getLastModified()) < 2000);
+        assertEquals(13, child(index, "res/", "layout").getSize());
+        assertTrue(Math.abs(older - child(index, "res/", "layout").getLastModified()) < 2000);
+        ZipEntryInfo dex = child(index, "", "classes.dex");
+        assertEquals(17, dex.getSize());
+        assertTrue(Math.abs(older - dex.getLastModified()) < 2000);
+    }
+
+    @Test public void explicitFolderDatesSurviveBeforeOrAfterChildren() throws Exception {
+        long folderTime = 1791540000000L, childTime = folderTime + 60000;
+        for (boolean folderFirst : new boolean[]{true, false}) {
+            File file = temp.newFile();
+            try (ZipOutputStream zip = new ZipOutputStream(new FileOutputStream(file))) {
+                if (folderFirst) put(zip, "assets/", folderTime, 0);
+                put(zip, "assets/nested/data.bin", childTime, 31);
+                if (!folderFirst) put(zip, "assets/", folderTime, 0);
+                put(zip, "empty/", folderTime, 0);
+            }
+            ZipArchiveCache.Archive index = ZipArchiveCache.get(file);
+            ZipEntryInfo assets = child(index, "", "assets");
+            assertTrue(Math.abs(folderTime - assets.getLastModified()) < 2000);
+            assertEquals(31, assets.getSize());
+            ZipEntryInfo empty = child(index, "", "empty");
+            assertEquals(0, empty.getSize());
+            assertTrue(Math.abs(folderTime - empty.getLastModified()) < 2000);
+            assertEquals(new HashSet<>(Arrays.asList("assets", "empty")), names(index.children("")));
+        }
+    }
+
+    @Test public void entryDatesNeverFallBackToArchiveFilesystemDate() throws Exception {
+        File file = temp.newFile();
+        try (ZipOutputStream zip = new ZipOutputStream(new FileOutputStream(file))) {
+            put(zip, "assets/data.bin", 0L, 23);
+            put(zip, "empty/", 0L, 0);
+        }
+        long archiveTime = 1791540000000L;
+        assertTrue(file.setLastModified(archiveTime));
+        ZipArchiveCache.Archive index = ZipArchiveCache.get(file);
+        assertEquals(23, child(index, "", "assets").getSize());
+        try (net.lingala.zip4j.ZipFile zip = new net.lingala.zip4j.ZipFile(file)) {
+            long entryTime = Math.max(0L, zip.getFileHeader("assets/data.bin").getLastModifiedTimeEpoch());
+            assertEquals(entryTime, child(index, "", "assets").getLastModified());
+            assertEquals(entryTime, child(index, "assets/", "data.bin").getLastModified());
+            assertEquals(Math.max(0L, zip.getFileHeader("empty/").getLastModifiedTimeEpoch()),
+                    child(index, "", "empty").getLastModified());
+        }
+        assertNotEquals(archiveTime, child(index, "", "assets").getLastModified());
+    }
+
     @Test public void listsDirectChildrenAndSynthesizesMissingFolders() throws Exception {
         File file = archive("docs/deep/notes.txt", "docs/other.txt", "docs/", "empty/", "root.txt");
         ZipArchiveCache.Archive index = ZipArchiveCache.get(file);

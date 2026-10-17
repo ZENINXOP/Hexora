@@ -51,14 +51,26 @@ public class FileSearchController {
 
     private final MainActivity activity;
     private Thread searchWorker;
+    private ProgressManager activeSearch;
 
     public void cancel() {
+        if (activeSearch != null) activeSearch.cancel();
         if (searchWorker != null) searchWorker.interrupt();
     }
 
-    private Thread startSearch(Runnable operation) {
+    private Thread startSearch(Runnable operation, ProgressManager progress) {
         cancel();
-        searchWorker = new Thread(operation, "hexora-file-search");
+        activeSearch = progress;
+        searchWorker = new Thread(() -> {
+            try {
+                progress.checkCancelled();
+                operation.run();
+            } catch (java.io.InterruptedIOException ignored) {
+            } catch (Exception | OutOfMemoryError | StackOverflowError error) {
+                progress.reportError(error);
+            } finally { progress.dismiss(); }
+        }, "hexora-file-search");
+        progress.onCancel(searchWorker::interrupt);
         searchWorker.start();
         return searchWorker;
     }
@@ -166,7 +178,7 @@ public class FileSearchController {
         }
         if (regex) {
             try {
-                Pattern.compile(query, mCase ? 0 : Pattern.CASE_INSENSITIVE);
+                io.github.abdurazaaqmohammed.domain.files.SearchPattern.compile(query, mCase ? 0 : Pattern.CASE_INSENSITIVE);
             } catch (Exception e) {
                 Extensions.showMessage(activity, R.string.invalid_regex);
                 return;
@@ -184,6 +196,7 @@ public class FileSearchController {
         int request = activity.beginPaneTask(isPane1);
 
         startSearch(() -> {
+            Thread running = Thread.currentThread();
             List<File> results = FileSearch.searchByName(startDir, finalQuery, subfolders,
                     mCase, regex, textInside, minSize, maxSize,
                     dir -> {
@@ -201,16 +214,18 @@ public class FileSearchController {
                     });
             pm.dismiss();
             activity.handler.post(() -> {
-                if (!activity.isPaneTaskCurrent(isPane1, request)) return;
+                if (running != searchWorker || running.isInterrupted() || pm.isCancelled() || !activity.isPaneTaskCurrent(isPane1, request)) return;
+                if (results.size() >= FileSearch.MAX_HITS) Extensions.showMessage(activity, R.string.archive_search_limited);
                 if (results.isEmpty()) Extensions.showMessage(activity, R.string.no_files_found);
                 else {
                     File[] resArray = results.toArray(new File[0]);
-                    activity.setCurrentFolder(startDir.getPath() + " (Search Results)", Arrays.asList(resArray));
+                    if (activity.lastPaneSelected == (isPane1 ? 1 : 2))
+                        activity.setCurrentFolder(startDir.getPath() + " (Search Results)", Arrays.asList(resArray));
                     RecyclerView pane = activity.findViewById(isPane1 ? R.id.listViewPane1 : R.id.listViewPane2);
                     pane.setAdapter(new MainFilesArrayAdapter(activity, resArray, startDir, isPane1, false, null));
                 }
             });
-        });
+        }, pm);
     }
 
     public void showFindInFilesDialog() {
@@ -256,17 +271,14 @@ public class FileSearchController {
 
     private void runArchiveSearch(MainFilesArrayAdapter adapter,File archive,String query,boolean recursive,
             boolean matchCase,boolean regex,String content,long minSize,long maxSize,boolean findContent) {
-        if (regex) try { Pattern.compile(query,matchCase ? 0 : Pattern.CASE_INSENSITIVE); }
+        if (regex) try { io.github.abdurazaaqmohammed.domain.files.SearchPattern.compile(query,matchCase ? 0 : Pattern.CASE_INSENSITIVE); }
         catch (Exception e) { Extensions.showMessage(activity,R.string.invalid_regex); return; }
         boolean pane1=adapter.pane1; String scope=adapter.currentZipPath;
         int request=activity.beginPaneTask(pane1);
-        java.util.concurrent.atomic.AtomicBoolean cancelled=new java.util.concurrent.atomic.AtomicBoolean();
-        java.util.concurrent.atomic.AtomicReference<Thread> worker=new java.util.concurrent.atomic.AtomicReference<>();
-        ProgressManager progress=new ProgressManager(activity,true).onCancel(() -> {
-            cancelled.set(true); Thread thread=worker.get(); if (thread!=null) thread.interrupt();
-        }).show();
+        ProgressManager progress=new ProgressManager(activity,true).show();
         progress.setText(activity.getString(R.string.searching));
-        worker.set(startSearch(() -> {
+        startSearch(() -> {
+            Thread running = Thread.currentThread();
             try {
                 List<io.github.abdurazaaqmohammed.domain.files.ArchiveSearch.Hit> rows=new ArrayList<>();
                 boolean limited;
@@ -279,7 +291,7 @@ public class FileSearchController {
                     limited=result.limited();
                 }
                 activity.handler.post(() -> {
-                    if (cancelled.get() || activity.isFinishing() || activity.isDestroyed() || !activity.isPaneTaskCurrent(pane1,request)) return;
+                    if (running != searchWorker || running.isInterrupted() || progress.isCancelled() || activity.isFinishing() || activity.isDestroyed() || !activity.isPaneTaskCurrent(pane1,request)) return;
                     if (limited) Extensions.showMessage(activity,R.string.archive_search_limited);
                     if (rows.isEmpty()) { Extensions.showMessage(activity,R.string.no_files_found); return; }
                     String[] labels=new String[rows.size()];
@@ -297,12 +309,11 @@ public class FileSearchController {
                 });
             } catch (java.io.InterruptedIOException ignored) { }
             catch (Exception e) { activity.handler.post(() -> {
-                if (!cancelled.get() && !activity.isFinishing() && !activity.isDestroyed() && activity.isPaneTaskCurrent(pane1,request))
+                if (running == searchWorker && !running.isInterrupted() && !progress.isCancelled() && !activity.isFinishing() && !activity.isDestroyed() && activity.isPaneTaskCurrent(pane1,request))
                     new io.github.abdurazaaqmohammed.utils.ErrorUtil(activity).showError(e);
             }); }
             finally { progress.dismiss(); }
-        }));
-        if (cancelled.get() && worker.get() != null) worker.get().interrupt();
+        }, progress);
     }
 
     private void openArchiveContent(io.github.abdurazaaqmohammed.domain.files.ArchiveSearch.Hit hit,
@@ -329,7 +340,7 @@ public class FileSearchController {
         boolean pane1 = activity.lastPaneSelected == 1;
         if (regex) {
             try {
-                Pattern.compile(query, matchCase ? 0 : Pattern.CASE_INSENSITIVE);
+                io.github.abdurazaaqmohammed.domain.files.SearchPattern.compile(query, matchCase ? 0 : Pattern.CASE_INSENSITIVE);
             } catch (Exception e) {
                 Extensions.showMessage(activity, R.string.invalid_regex);
                 return;
@@ -339,22 +350,24 @@ public class FileSearchController {
         pm.setText(activity.rss.getString(R.string.searching));
         int request = activity.beginPaneTask(pane1);
         startSearch(() -> {
+            Thread running = Thread.currentThread();
             List<ContentHit> hits = FileSearch.findInFiles(startDir, query, matchCase, regex,
                     scanned -> {
-                        if (scanned % 50 == 0 && pm.dialog != null && pm.dialog.isShowing()) {
+                        if (scanned % 50 == 0) {
                             pm.setText(scanned + " files…");
                         }
                     });
             pm.dismiss();
             activity.handler.post(() -> {
-                if (!activity.isPaneTaskCurrent(pane1, request)) return;
+                if (running != searchWorker || running.isInterrupted() || pm.isCancelled() || !activity.isPaneTaskCurrent(pane1, request)) return;
+                if (hits.size() >= FileSearch.MAX_HITS) Extensions.showMessage(activity, R.string.archive_search_limited);
                 if (hits.isEmpty()) {
                     Extensions.showMessage(activity, R.string.no_files_found);
                     return;
                 }
                 showContentHitsDialog(hits, query, regex, matchCase);
             });
-        });
+        }, pm);
     }
 
     private void showContentHitsDialog(List<ContentHit> hits, String query, boolean regex, boolean matchCase) {

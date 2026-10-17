@@ -1,284 +1,317 @@
 package io.github.abdurazaaqmohammed.ui.activities;
 
+import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.os.Bundle;
-import androidx.preference.PreferenceManager;
+import android.os.Handler;
+import android.os.Looper;
 import android.text.TextUtils;
 import android.view.View;
-import android.widget.AdapterView;
+import android.view.ViewGroup;
 import android.widget.ArrayAdapter;
 import android.widget.EditText;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.ScrollView;
-import android.widget.Spinner;
 import android.widget.TextView;
+import android.widget.Toast;
 
-import io.github.abdurazaaqmohammed.core.ui.base.BaseActivity;
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
+import androidx.appcompat.app.AlertDialog;
+import androidx.preference.ListPreference;
 import androidx.preference.Preference;
+import androidx.preference.PreferenceCategory;
 import androidx.preference.PreferenceFragmentCompat;
+import androidx.preference.PreferenceGroup;
+import androidx.preference.PreferenceManager;
+import androidx.preference.SwitchPreferenceCompat;
 
+import com.google.android.material.appbar.MaterialToolbar;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
+import com.google.android.material.textfield.MaterialAutoCompleteTextView;
+import com.google.android.material.textfield.TextInputEditText;
+import com.google.android.material.textfield.TextInputLayout;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.io.InputStream;
+import java.util.regex.Pattern;
+
 import io.github.abdurazaaqmohammed.MPManager.R;
 import io.github.abdurazaaqmohammed.adapters.BottomBarButtonAdapter;
+import io.github.abdurazaaqmohammed.core.ui.base.BaseActivity;
+import io.github.abdurazaaqmohammed.ui.editor.EditorPreferences;
+import io.github.abdurazaaqmohammed.ui.editor.ImportedSyntax;
+import io.github.abdurazaaqmohammed.utils.ErrorUtil;
 import modder.hub.dexeditor.activity.EditFloatingMenusActivity;
 
 public class EditorSettingsActivity extends BaseActivity {
-
-    @Override
-    protected void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
-        getSupportFragmentManager()
-                .beginTransaction()
-                .replace(android.R.id.content, new SettingsFragment())
-                .commit();
-
-        if (getSupportActionBar() != null) {
-            getSupportActionBar().setDisplayHomeAsUpEnabled(true);
-            getSupportActionBar().setTitle(R.string.editor_settings);
-        }
+    @Override protected void onCreate(Bundle state) {
+        super.onCreate(state);
+        setContentView(R.layout.activity_editor_preferences);
+        MaterialToolbar toolbar = findViewById(R.id.editorPreferencesToolbar);
+        toolbar.setNavigationOnClickListener(view -> finish());
+        if (state == null) getSupportFragmentManager().beginTransaction()
+                .replace(R.id.editorPreferencesContent, new SettingsFragment()).commit();
     }
 
-    @Override
-    public boolean onSupportNavigateUp() {
-        finish();
-        return true;
-    }
+    public static class SettingsFragment extends PreferenceFragmentCompat
+            implements SharedPreferences.OnSharedPreferenceChangeListener {
+        private static final String[] ACTIONS = {"None", "Search", "Insert text", "Regex find and replace",
+                "Copy selection", "Cut selection", "Paste selection", "Copy line", "Cut line",
+                "Delete line", "Empty line", "Replace line"};
+        private final Handler main = new Handler(Looper.getMainLooper());
+        private boolean importing;
+        private final ActivityResultLauncher<String[]> syntaxPicker = registerForActivityResult(
+                new ActivityResultContracts.OpenDocument(), uri -> {
+                    if (uri == null || !isAdded()) return;
+                    Context app = requireContext().getApplicationContext();
+                    importing = true;
+                    updateImportSummary();
+                    new Thread(() -> {
+                        Exception failure = null;
+                        try (InputStream input = app.getContentResolver().openInputStream(uri)) {
+                            ImportedSyntax.install(app, ImportedSyntax.read(input));
+                        } catch (Exception error) { failure = error; }
+                        Exception result = failure;
+                        main.post(() -> {
+                            importing = false;
+                            if (!isAdded()) return;
+                            updateImportSummary();
+                            if (result != null) new ErrorUtil(requireActivity()).showError(result.getMessage());
+                            else Toast.makeText(requireContext(), R.string.ep_syntax_imported, Toast.LENGTH_SHORT).show();
+                        });
+                    }, "hexora-syntax-import").start();
+                });
 
-    public static class SettingsFragment extends PreferenceFragmentCompat {
-        @Override
-        public void onCreatePreferences(Bundle savedInstanceState, String rootKey) {
+        @Override public void onCreatePreferences(Bundle state, String rootKey) {
+            SharedPreferences prefs = EditorPreferences.get(requireContext());
+            EditorPreferences.normalize(prefs);
             getPreferenceManager().setSharedPreferencesName("editor_prefs");
             setPreferencesFromResource(R.xml.editor_preferences, rootKey);
+            style(getPreferenceScreen());
+            Preference floating = findPreference("edit_floating_menus");
+            floating.setOnPreferenceClickListener(pref -> {
+                startActivity(new Intent(requireContext(), EditFloatingMenusActivity.class));
+                return true;
+            });
+            findPreference("pref_bottom_bar_buttons").setOnPreferenceClickListener(pref -> {
+                showBottomBarManagementDialog(); return true;
+            });
+            findPreference("pref_import_syntax").setOnPreferenceClickListener(pref -> {
+                if (ImportedSyntax.name(requireContext()) == null) chooseSyntax();
+                else new MaterialAlertDialogBuilder(requireContext()).setTitle(R.string.ep_import_syntax)
+                        .setItems(new String[]{getString(R.string.ep_choose_grammar), getString(R.string.ep_remove_grammar)}, (dialog, which) -> {
+                            if (which == 0) chooseSyntax();
+                            else { ImportedSyntax.remove(requireContext()); updateImportSummary(); }
+                        }).show();
+                return true;
+            });
+            updateImportSummary();
+        }
 
-            Preference floatingMenu = findPreference("edit_floating_menus");
-            if (floatingMenu != null) {
-                floatingMenu.setOnPreferenceClickListener(pref -> {
-                    startActivity(new Intent(getActivity(), EditFloatingMenusActivity.class));
-                    return true;
-                });
+        private void style(PreferenceGroup group) {
+            for (int index = 0; index < group.getPreferenceCount(); index++) {
+                Preference pref = group.getPreference(index);
+                pref.setIconSpaceReserved(false);
+                pref.setLayoutResource(pref instanceof PreferenceCategory
+                        ? R.layout.item_editor_preference_category : R.layout.item_editor_preference);
+                if (pref instanceof SwitchPreferenceCompat)
+                    pref.setWidgetLayoutResource(R.layout.widget_editor_preference_switch);
+                if (pref instanceof PreferenceGroup children) style(children);
             }
         }
 
-        @Override
-        public boolean onPreferenceTreeClick(Preference preference) {
-            String key = preference.getKey();
-            if ("pref_bottom_bar_buttons".equals(key)) {
-                showBottomBarManagementDialog();
-                return true;
-            }
-            return super.onPreferenceTreeClick(preference);
+        @Override public void onViewCreated(View view, Bundle state) {
+            super.onViewCreated(view, state);
+            getListView().setPadding(dp(12), 0, dp(12), dp(24));
+            getListView().setClipToPadding(false);
+            setDivider(null);
+        }
+
+        @Override public void onDisplayPreferenceDialog(Preference preference) {
+            if (!(preference instanceof ListPreference list)) { super.onDisplayPreferenceDialog(preference); return; }
+            new MaterialAlertDialogBuilder(requireContext(), R.style.ThemeOverlay_Hexora_EditorPreferenceChoice).setTitle(list.getTitle())
+                    .setSingleChoiceItems(list.getEntries(), list.findIndexOfValue(list.getValue()), (dialog, which) -> {
+                        String value = list.getEntryValues()[which].toString();
+                        if (list.callChangeListener(value)) list.setValue(value);
+                        dialog.dismiss();
+                    }).setNegativeButton(android.R.string.cancel, null).show();
+        }
+
+        @Override public void onResume() {
+            super.onResume();
+            EditorPreferences.get(requireContext()).registerOnSharedPreferenceChangeListener(this);
+            updateImportSummary();
+        }
+        @Override public void onPause() {
+            EditorPreferences.get(requireContext()).unregisterOnSharedPreferenceChangeListener(this);
+            super.onPause();
+        }
+        @Override public void onSharedPreferenceChanged(SharedPreferences prefs, String key) {
+            if ("custom_syntax_revision".equals(key)) updateImportSummary();
+        }
+        private void chooseSyntax() { syntaxPicker.launch(new String[]{"application/json", "text/*", "application/octet-stream"}); }
+        private void updateImportSummary() {
+            Preference pref = findPreference("pref_import_syntax");
+            if (pref == null) return;
+            String name = importing ? null : ImportedSyntax.name(requireContext());
+            pref.setEnabled(!importing);
+            pref.setSummary(importing ? getString(R.string.ep_importing) : name == null
+                    ? getString(R.string.ep_import_syntax_summary) : getString(R.string.ep_imported_syntax, name));
         }
 
         private void showBottomBarManagementDialog() {
-            SharedPreferences prefs = PreferenceManager
-                    .getDefaultSharedPreferences(getContext());
-            String json = prefs.getString("pref_bottom_bar_buttons", "[]");
-            JSONArray array;
+            SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(requireContext());
+            JSONArray buttons = new JSONArray();
             try {
-                if (json.equals("Search,Copy,Cut,Paste")) {
-                    array = new JSONArray();
-                    array.put(new JSONObject().put("action", "Search").put("label", "Search"));
-                    array.put(new JSONObject().put("action", "Copy selection").put("label", "Copy"));
-                    array.put(new JSONObject().put("action", "Cut selection").put("label", "Cut"));
-                    array.put(new JSONObject().put("action", "Paste selection").put("label", "Paste"));
-                } else {
-                    array = new JSONArray(json);
-                }
-            } catch (Exception e) {
-                array = new JSONArray();
-            }
-
-            final JSONArray finalArray = array;
-            ListView listView = new ListView(getContext());
-            BottomBarButtonAdapter adapter = new BottomBarButtonAdapter(
-                    getContext(), finalArray,
-                    new BottomBarButtonAdapter.OnButtonActionListener() {
-                        @Override
-                        public void onEdit(int position, JSONObject button) {
-                            showAddEditButtonDialog(finalArray, position, button, () -> {
-                                prefs.edit().putString("pref_bottom_bar_buttons", finalArray.toString()).apply();
-                                showBottomBarManagementDialog(); // Refresh - ideally use a better way but this is simple
-                            });
-                        }
-
-                        @Override
-                        public void onDelete(int position) {
-                            new MaterialAlertDialogBuilder(getContext())
-                                    .setTitle(R.string.delete_button)
-                                    .setMessage(getString(R.string.confirm_delete_f, "this button"))
-                                    .setPositiveButton(R.string.delete, (dialog, which) -> {
-                                        finalArray.remove(position);
-                                        prefs.edit().putString("pref_bottom_bar_buttons", finalArray.toString()).apply();
-                                        showBottomBarManagementDialog(); // Refresh
-                                    })
-                                    .setNegativeButton(android.R.string.cancel, null)
-                                    .show();
-                        }
-                    });
-            listView.setAdapter(adapter);
-
-            new MaterialAlertDialogBuilder(getContext())
-                    .setTitle(R.string.manage_bottom_bar)
-                    .setView(listView)
-                    .setPositiveButton(R.string.add, (dialog, which) -> showAddEditButtonDialog(finalArray, -1, null, () -> {
-                        prefs.edit().putString("pref_bottom_bar_buttons", finalArray.toString()).apply();
-                        showBottomBarManagementDialog(); // Refresh
-                    }))
-                    .setNegativeButton(android.R.string.cancel, null)
-                    .show();
-        }
-
-        private void showAddEditButtonDialog(JSONArray array, int position, JSONObject existing,
-                                             Runnable onComplete) {
-            String[] actions = {
-                    "None", "Search", "Insert text", "Regex find and replace", "Copy selection", "Cut selection",
-                    "Paste selection", "Copy line", "Cut line", "Delete line", "Empty line", "Replace line"
+                String json = prefs.getString("pref_bottom_bar_buttons", "[]");
+                JSONArray saved = "Search,Copy,Cut,Paste".equals(json) ? new JSONArray() : new JSONArray(json);
+                for (int index = 0; index < saved.length(); index++)
+                    if (saved.optJSONObject(index) != null) buttons.put(saved.optJSONObject(index));
+            } catch (Exception invalid) { /* A malformed legacy list opens as an editable empty list. */ }
+            JSONArray entries = buttons;
+            ListView list = new ListView(requireContext());
+            list.setDivider(null);
+            TextView empty = new TextView(requireContext());
+            empty.setText(R.string.ep_empty_toolbar);
+            empty.setTextColor(com.google.android.material.color.MaterialColors.getColor(empty,
+                    com.google.android.material.R.attr.colorOnSurfaceVariant));
+            empty.setPadding(dp(24), dp(24), dp(24), dp(24));
+            FrameLayout box = new FrameLayout(requireContext());
+            box.addView(list, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(280)));
+            box.addView(empty);
+            BottomBarButtonAdapter[] adapter = new BottomBarButtonAdapter[1];
+            Runnable refresh = () -> {
+                prefs.edit().putString("pref_bottom_bar_buttons", entries.toString()).apply();
+                adapter[0].notifyDataSetChanged();
+                empty.setVisibility(entries.length() == 0 ? View.VISIBLE : View.GONE);
+                list.setVisibility(entries.length() == 0 ? View.GONE : View.VISIBLE);
             };
-
-            ScrollView scrollView = new ScrollView(getContext());
-            LinearLayout layout = new LinearLayout(getContext());
-            layout.setOrientation(LinearLayout.VERTICAL);
-            layout.setPadding(48, 16, 48, 16);
-            scrollView.addView(layout);
-
-            EditText labelInput = new EditText(getContext());
-            labelInput.setHint("Button Label (optional)");
-            layout.addView(labelInput);
-
-            TextView clickHeader = new TextView(getContext());
-            clickHeader.setText(getContext().getString(R.string.edsettings_click));
-            clickHeader.setPadding(0, 32, 0, 8);
-            layout.addView(clickHeader);
-
-            Spinner actionSpinner = new Spinner(getContext());
-            ArrayAdapter<String> actionAdapter = new ArrayAdapter<>(getContext(),
-                    android.R.layout.simple_spinner_item, actions);
-            actionAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
-            actionSpinner.setAdapter(actionAdapter);
-            layout.addView(actionSpinner);
-
-            EditText dataInput1 = new EditText(getContext());
-            dataInput1.setHint("Data 1");
-            dataInput1.setVisibility(View.GONE);
-            layout.addView(dataInput1);
-
-            EditText dataInput2 = new EditText(getContext());
-            dataInput2.setHint("Data 2");
-            dataInput2.setVisibility(View.GONE);
-            layout.addView(dataInput2);
-
-            setupActionSpinner(actionSpinner, dataInput1, dataInput2, actions);
-
-            TextView longHeader = new TextView(getContext());
-            longHeader.setText(getContext().getString(R.string.edsettings_long));
-            longHeader.setPadding(0, 32, 0, 8);
-            layout.addView(longHeader);
-
-            Spinner longActionSpinner = new Spinner(getContext());
-            longActionSpinner.setAdapter(actionAdapter);
-            layout.addView(longActionSpinner);
-
-            EditText longDataInput1 = new EditText(getContext());
-            longDataInput1.setHint("Long Data 1");
-            longDataInput1.setVisibility(View.GONE);
-            layout.addView(longDataInput1);
-
-            EditText longDataInput2 = new EditText(getContext());
-            longDataInput2.setHint("Long Data 2");
-            longDataInput2.setVisibility(View.GONE);
-            layout.addView(longDataInput2);
-
-            setupActionSpinner(longActionSpinner, longDataInput1, longDataInput2, actions);
-
-            if (existing != null) {
-                labelInput.setText(existing.optString("label", ""));
-
-                String action = existing.optString("action");
-                for (int i = 0; i < actions.length; i++)
-                    if (actions[i].equals(action))
-                        actionSpinner.setSelection(i);
-                dataInput1.setText(existing.optString("data1", ""));
-                dataInput2.setText(existing.optString("data2", ""));
-
-                String longAction = existing.optString("longAction");
-                for (int i = 0; i < actions.length; i++)
-                    if (actions[i].equals(longAction))
-                        longActionSpinner.setSelection(i);
-                longDataInput1.setText(existing.optString("longData1", ""));
-                longDataInput2.setText(existing.optString("longData2", ""));
-            }
-
-            new MaterialAlertDialogBuilder(getContext())
-                    .setTitle(existing == null ? getContext().getString(R.string.edsettings_add) : getContext().getString(R.string.edsettings_edit))
-                    .setView(scrollView)
-                    .setPositiveButton(getContext().getString(R.string.save), (dialog, which) -> {
-                        try {
-                            JSONObject obj = existing != null ? existing : new JSONObject();
-                            String label = labelInput.getText().toString();
-                            if (!TextUtils.isEmpty(label))
-                                obj.put("label", label);
-                            else
-                                obj.remove("label");
-
-                            String action = actionSpinner.getSelectedItem().toString();
-                            if (action.equals("None"))
-                                obj.remove("action");
-                            else
-                                obj.put("action", action);
-                            obj.put("data1", dataInput1.getText().toString());
-                            obj.put("data2", dataInput2.getText().toString());
-
-                            String longAction = longActionSpinner.getSelectedItem().toString();
-                            if (longAction.equals("None"))
-                                obj.remove("longAction");
-                            else
-                                obj.put("longAction", longAction);
-                            obj.put("longData1", longDataInput1.getText().toString());
-                            obj.put("longData2", longDataInput2.getText().toString());
-
-                            if (existing == null)
-                                array.put(obj);
-                            onComplete.run();
-                        } catch (Exception e) {
-                            e.printStackTrace();
-                        }
-                    })
-                    .setNegativeButton(android.R.string.cancel, null)
-                    .show();
-        }
-
-        private void setupActionSpinner(Spinner spinner, EditText data1,
-                                        EditText data2, String[] actions) {
-            spinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
-                @Override
-                public void onItemSelected(AdapterView<?> parent, View view, int pos,
-                                           long id) {
-                    String action = actions[pos];
-                    if (action.equals("Insert text")) {
-                        data1.setVisibility(View.VISIBLE);
-                        data1.setHint("Text to insert");
-                        data2.setVisibility(View.GONE);
-                    } else if (action.equals("Regex find and replace")) {
-                        data1.setVisibility(View.VISIBLE);
-                        data1.setHint("Find Regex");
-                        data2.setVisibility(View.VISIBLE);
-                        data2.setHint("Replace Regex");
-                    } else {
-                        data1.setVisibility(View.GONE);
-                        data2.setVisibility(View.GONE);
-                    }
-                }
-
-                @Override
-                public void onNothingSelected(AdapterView<?> parent) {
+            adapter[0] = new BottomBarButtonAdapter(requireContext(), entries, new BottomBarButtonAdapter.OnButtonActionListener() {
+                @Override public void onEdit(int position, JSONObject button) { showButtonDialog(entries, position, button, refresh); }
+                @Override public void onDelete(int position) {
+                    new MaterialAlertDialogBuilder(requireContext()).setTitle(R.string.delete_button)
+                            .setMessage(getString(R.string.confirm_delete_f, entries.optJSONObject(position).optString("label",
+                                    entries.optJSONObject(position).optString("action", ""))))
+                            .setPositiveButton(R.string.delete, (dialog, which) -> { entries.remove(position); refresh.run(); })
+                            .setNegativeButton(android.R.string.cancel, null).show();
                 }
             });
+            list.setAdapter(adapter[0]);
+            empty.setVisibility(entries.length() == 0 ? View.VISIBLE : View.GONE);
+            list.setVisibility(entries.length() == 0 ? View.GONE : View.VISIBLE);
+            AlertDialog manager = new MaterialAlertDialogBuilder(requireContext()).setTitle(R.string.ep_toolbar).setView(box)
+                    .setPositiveButton(R.string.add, null).setNegativeButton(R.string.close, null).create();
+            manager.setOnShowListener(dialog -> manager.getButton(AlertDialog.BUTTON_POSITIVE)
+                    .setOnClickListener(view -> showButtonDialog(entries, -1, null, refresh)));
+            manager.show();
+        }
+
+        private void showButtonDialog(JSONArray entries, int index, JSONObject existing, Runnable saved) {
+            LinearLayout body = new LinearLayout(requireContext());
+            body.setOrientation(LinearLayout.VERTICAL);
+            body.setPadding(dp(24), dp(8), dp(24), dp(16));
+            ScrollView scroll = new ScrollView(requireContext());
+            scroll.addView(body);
+            EditText label = field(body, R.string.ep_button_label);
+            if (existing != null) label.setText(existing.optString("label"));
+            ActionFields tap = new ActionFields(body, R.string.edsettings_click, existing, "action", "data1", "data2");
+            ActionFields hold = new ActionFields(body, R.string.edsettings_long, existing, "longAction", "longData1", "longData2");
+            AlertDialog dialog = new MaterialAlertDialogBuilder(requireContext())
+                    .setTitle(existing == null ? R.string.edsettings_add : R.string.edsettings_edit).setView(scroll)
+                    .setPositiveButton(R.string.save, null).setNegativeButton(android.R.string.cancel, null).create();
+            dialog.setOnShowListener(shown -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(view -> {
+                if (tap.action() == 0 && hold.action() == 0) { label.setError(getString(R.string.ep_choose_action)); return; }
+                if (!tap.validate() || !hold.validate()) return;
+                try {
+                    JSONObject button = new JSONObject();
+                    String title = label.getText().toString().trim();
+                    if (!title.isEmpty()) button.put("label", title);
+                    tap.write(button, "action", "data1", "data2");
+                    hold.write(button, "longAction", "longData1", "longData2");
+                    if (index < 0) entries.put(button); else entries.put(index, button);
+                    saved.run();
+                    dialog.dismiss();
+                } catch (Exception failure) { new ErrorUtil(requireActivity()).showError(failure); }
+            }));
+            dialog.show();
+        }
+
+        private EditText field(LinearLayout body, int hint) {
+            TextInputLayout input = input(body, hint);
+            TextInputEditText text = new TextInputEditText(requireContext());
+            text.setTextSize(14);
+            text.setMinHeight(dp(56));
+            input.addView(text, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+            text.setTag(input);
+            return text;
+        }
+        private TextInputLayout input(LinearLayout body, int hint) {
+            TextInputLayout input = new TextInputLayout(requireContext());
+            input.setHint(getString(hint));
+            input.setBoxBackgroundMode(TextInputLayout.BOX_BACKGROUND_OUTLINE);
+            input.setBoxCornerRadii(dp(12), dp(12), dp(12), dp(12));
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            params.topMargin = dp(12);
+            body.addView(input, params);
+            return input;
+        }
+        private int dp(int value) { return (int) (value * getResources().getDisplayMetrics().density + .5f); }
+
+        private class ActionFields {
+            final MaterialAutoCompleteTextView action;
+            final EditText first;
+            final EditText second;
+            final String[] labels = {getString(R.string.ep_no_action), getString(R.string.search), getString(R.string.insert_text),
+                    getString(R.string.regex_find_replace), getString(android.R.string.copy), getString(R.string.cut),
+                    getString(R.string.paste), getString(R.string.copy_line), getString(R.string.cut_line),
+                    getString(R.string.delete_line), getString(R.string.empty_line), getString(R.string.replace_line_with_clipboard)};
+            int selected;
+            ActionFields(LinearLayout body, int title, JSONObject existing, String key, String firstKey, String secondKey) {
+                TextInputLayout choice = input(body, title);
+                action = new MaterialAutoCompleteTextView(requireContext());
+                action.setInputType(android.text.InputType.TYPE_NULL);
+                action.setTextSize(14);
+                action.setMinHeight(dp(56));
+                choice.addView(action);
+                choice.setEndIconMode(TextInputLayout.END_ICON_DROPDOWN_MENU);
+                action.setAdapter(new ArrayAdapter<>(requireContext(), android.R.layout.simple_list_item_1, labels));
+                first = field(body, R.string.ep_insert_value);
+                second = field(body, R.string.ep_replace_regex);
+                if (existing != null) {
+                    for (int position = 0; position < ACTIONS.length; position++)
+                        if (ACTIONS[position].equals(existing.optString(key))) selected = position;
+                    first.setText(existing.optString(firstKey));
+                    second.setText(existing.optString(secondKey));
+                }
+                action.setText(labels[selected], false);
+                update();
+                action.setOnItemClickListener((parent, view, position, id) -> { selected = position; update(); });
+            }
+            int action() { return selected; }
+            void update() {
+                ((TextInputLayout) first.getTag()).setHint(getString(selected == 3 ? R.string.ep_find_regex : R.string.ep_insert_value));
+                ((View) first.getTag()).setVisibility(selected == 2 || selected == 3 ? View.VISIBLE : View.GONE);
+                ((View) second.getTag()).setVisibility(selected == 3 ? View.VISIBLE : View.GONE);
+            }
+            boolean validate() {
+                if ((selected == 2 || selected == 3) && TextUtils.isEmpty(first.getText())) {
+                    first.setError(getString(R.string.ep_value_required)); return false;
+                }
+                if (selected == 3) try { Pattern.compile(first.getText().toString()); }
+                catch (RuntimeException invalid) { first.setError(getString(R.string.ep_invalid_regex)); return false; }
+                return true;
+            }
+            void write(JSONObject target, String key, String firstKey, String secondKey) throws Exception {
+                if (selected != 0) target.put(key, ACTIONS[selected]);
+                target.put(firstKey, first.getText().toString());
+                target.put(secondKey, second.getText().toString());
+            }
         }
     }
 }

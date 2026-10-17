@@ -38,6 +38,7 @@ public abstract class BaseActivity extends AppCompatActivity {
         AppFont.installFactory(this);
         appliedFontEpoch = AppFont.currentEpoch();
         super.onCreate(savedInstanceState);
+        io.github.abdurazaaqmohammed.utils.ElevatedAccess.initialize(this);
         // Own the insets on modern Android, including enforced edge-to-edge.
         // API 19 has no window-inset dispatch, so keep its platform fitting.
         WindowCompat.setDecorFitsSystemWindows(getWindow(), Build.VERSION.SDK_INT < 21);
@@ -100,9 +101,22 @@ public abstract class BaseActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
+        io.github.abdurazaaqmohammed.utils.ElevatedAccess.onResume(this);
         io.github.abdurazaaqmohammed.utils.ProgressManager.restoreFromIntent(this, getIntent());
         // Pick up a font changed in Settings while this activity was in background.
         if (appliedFontEpoch != AppFont.currentEpoch()) recreate();
+    }
+
+    @Override
+    protected void onPause() {
+        io.github.abdurazaaqmohammed.utils.ElevatedAccess.onPause(this);
+        super.onPause();
+    }
+
+    @Override
+    protected void onDestroy() {
+        io.github.abdurazaaqmohammed.utils.ElevatedAccess.onDestroy(this);
+        super.onDestroy();
     }
 
     @Override

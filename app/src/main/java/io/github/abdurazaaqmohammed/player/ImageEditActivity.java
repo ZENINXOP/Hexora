@@ -64,12 +64,25 @@ public class ImageEditActivity extends BaseActivity {
     private int imgW;
     private int imgH;
     private MaterialToolbar toolbar;
+    private final java.util.concurrent.ThreadPoolExecutor previewWorker = new java.util.concurrent.ThreadPoolExecutor(
+            1, 1, 0L, java.util.concurrent.TimeUnit.MILLISECONDS, new java.util.concurrent.LinkedBlockingQueue<>());
+    private java.util.concurrent.Future<?> previewLoad;
+    private int previewRequest;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        originalPath = sessionPath;
+        originalPath = savedInstanceState != null ? savedInstanceState.getString("originalPath")
+                : getIntent().getStringExtra("image_path");
+        if (originalPath == null) originalPath = sessionPath;
         sessionPath = null;
+        if (savedInstanceState != null) {
+            String workingPath = savedInstanceState.getString("workingPath");
+            if (workingPath != null && new File(workingPath).isFile()) workingFile = new File(workingPath);
+            dirty = savedInstanceState.getBoolean("dirty");
+            fromShared = savedInstanceState.getBoolean("fromShared");
+            sharedName = savedInstanceState.getString("sharedName");
+        }
         Uri incoming = getIntent().getData();
         if (incoming == null && Intent.ACTION_SEND.equals(getIntent().getAction())) {
             try {
@@ -287,13 +300,16 @@ public class ImageEditActivity extends BaseActivity {
         new Thread(() -> {
             try {
                 File src = new File(originalPath);
+                if (workingFile == null) {
                 workingFile = new File(getCacheDir(), "imageedit_" + System.currentTimeMillis()
                         + (isJpeg ? ".jpg" : ".png"));
                 copyFile(src, workingFile);
                 if (isJpeg) normalizeOrientation();
+                }
                 readDims();
                 runOnUiThread(() -> {
                     pm.dismiss();
+                    if (isFinishing() || isDestroyed()) return;
                     reloadPreview();
                     resetCropToFull();
                     updateInfo();
@@ -382,19 +398,19 @@ public class ImageEditActivity extends BaseActivity {
     }
 
     private void reloadPreview() {
-        BitmapFactory.Options opts = new BitmapFactory.Options();
-        opts.inPreferredConfig = Bitmap.Config.ARGB_8888;
-        Bitmap bitmap = null;
-        try {
-            bitmap = BitmapFactory.decodeFile(workingFile.getAbsolutePath(), opts);
-        } catch (OutOfMemoryError e) {
-            opts.inSampleSize = 2;
-            try {
-                bitmap = BitmapFactory.decodeFile(workingFile.getAbsolutePath(), opts);
-            } catch (OutOfMemoryError ignored) {
-            }
-        }
-        if (bitmap != null) preview.setImageBitmap(bitmap);
+        if (isFinishing() || isDestroyed() || workingFile == null) return;
+        int request = ++previewRequest;
+        if (previewLoad != null) previewLoad.cancel(true);
+        previewWorker.purge();
+        String path = workingFile.getAbsolutePath();
+        previewLoad = previewWorker.submit(() -> {
+            Bitmap bitmap = io.github.abdurazaaqmohammed.utils.BitmapPreview.decode(path, 2048, false);
+            if (bitmap == null) return;
+            runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed() || request != previewRequest) { bitmap.recycle(); return; }
+                preview.setImageBitmap(bitmap);
+            });
+        });
     }
 
     private RectF displayedRect() {
@@ -410,7 +426,8 @@ public class ImageEditActivity extends BaseActivity {
     private void resetCropToFull() {
         RectF shown = displayedRect();
         if (shown == null) {
-            preview.post(this::resetCropToFull);
+            // The layout listener retries when dimensions become available.
+            // Reposting forever on invalid images keeps a destroyed screen alive.
             return;
         }
         overlay.setImageBounds(shown);
@@ -452,8 +469,8 @@ public class ImageEditActivity extends BaseActivity {
         ProgressManager pm = new ProgressManager(this, true).show();
         new Thread(() -> {
             try {
-                ensureJniBlocking();
                 if (isJpeg) {
+                    ensureJniBlocking();
                     int jop = op.equals("left") ? JpegtranJni.OP_ROT_270
                             : op.equals("right") ? JpegtranJni.OP_ROT_90
                             : op.equals("flipH") ? JpegtranJni.OP_FLIP_H
@@ -481,9 +498,7 @@ public class ImageEditActivity extends BaseActivity {
     }
 
     private void applyBitmapOp(String op, int[] crop) throws Exception {
-        BitmapFactory.Options opts = new BitmapFactory.Options();
-        opts.inPreferredConfig = Bitmap.Config.ARGB_8888;
-        Bitmap src = BitmapFactory.decodeFile(workingFile.getAbsolutePath(), opts);
+        Bitmap src = decodeEditable(workingFile);
         if (src == null) throw new Exception("Cannot decode image");
         Bitmap out = src;
         try {
@@ -503,9 +518,9 @@ public class ImageEditActivity extends BaseActivity {
                 }
                 out = Bitmap.createBitmap(src, 0, 0, src.getWidth(), src.getHeight(), matrix, true);
             }
-            try (FileOutputStream fos = new FileOutputStream(workingFile)) {
-                out.compress(Bitmap.CompressFormat.PNG, 100, fos);
-            }
+            compressBitmap(out, Bitmap.CompressFormat.PNG, 100, workingFile);
+        } catch (OutOfMemoryError error) {
+            throw new java.io.IOException("Not enough memory to transform this image.", error);
         } finally {
             if (out != src) out.recycle();
             src.recycle();
@@ -648,9 +663,7 @@ public class ImageEditActivity extends BaseActivity {
     }
 
     private void applyLossyCrop(File file, int x, int y, int w, int h) throws Exception {
-        BitmapFactory.Options opts = new BitmapFactory.Options();
-        opts.inPreferredConfig = Bitmap.Config.ARGB_8888;
-        Bitmap src = BitmapFactory.decodeFile(file.getAbsolutePath(), opts);
+        Bitmap src = decodeEditable(file);
         if (src == null) throw new Exception("Cannot decode image");
         try {
             x = Math.max(0, Math.min(x, src.getWidth() - 1));
@@ -659,12 +672,12 @@ public class ImageEditActivity extends BaseActivity {
             h = Math.max(1, Math.min(h, src.getHeight() - y));
             Bitmap out = Bitmap.createBitmap(src, x, y, w, h);
             try {
-                try (FileOutputStream fos = new FileOutputStream(file)) {
-                    out.compress(Bitmap.CompressFormat.JPEG, 95, fos);
-                }
+                compressBitmap(out, Bitmap.CompressFormat.JPEG, 95, file);
             } finally {
                 if (out != src) out.recycle();
             }
+        } catch (OutOfMemoryError error) {
+            throw new java.io.IOException("Not enough memory to crop this image.", error);
         } finally {
             src.recycle();
         }
@@ -707,11 +720,8 @@ public class ImageEditActivity extends BaseActivity {
                     return;
                 }
                 File original = new File(originalPath);
-                try {
-                    copyFile(original, new File(originalPath + ".bak"));
-                } catch (Exception ignored) {
-                }
-                copyFile(workingFile, original);
+                replaceCopy(original, new File(originalPath + ".bak"));
+                replaceCopy(workingFile, original);
                 pm.dismiss();
                 runOnUiThread(() -> {
                     setResult(RESULT_OK);
@@ -794,12 +804,42 @@ public class ImageEditActivity extends BaseActivity {
     }
 
     @Override
+    protected void onSaveInstanceState(Bundle state) {
+        state.putString("originalPath", originalPath);
+        state.putString("workingPath", workingFile == null ? null : workingFile.getAbsolutePath());
+        state.putBoolean("dirty", dirty);
+        state.putBoolean("fromShared", fromShared);
+        state.putString("sharedName", sharedName);
+        super.onSaveInstanceState(state);
+    }
+
+    @Override
     protected void onDestroy() {
+        previewRequest++;
+        previewWorker.shutdownNow();
+        if (preview != null) preview.setImageDrawable(null);
         try {
-            if (workingFile != null) workingFile.delete();
+            if (!isChangingConfigurations() && workingFile != null) workingFile.delete();
         } catch (Exception ignored) {
         }
         super.onDestroy();
+    }
+
+    private static Bitmap decodeEditable(File file) throws Exception {
+        BitmapFactory.Options bounds = new BitmapFactory.Options();
+        bounds.inJustDecodeBounds = true;
+        BitmapFactory.decodeFile(file.getAbsolutePath(), bounds);
+        long pixels = (long) bounds.outWidth * bounds.outHeight;
+        // Editing needs the source and transformed pixels at once. Preview
+        // sampling must never silently reduce the saved image's resolution.
+        long budget = Math.min(128L * 1024 * 1024, Runtime.getRuntime().maxMemory() / 3);
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0 || pixels > budget / 8)
+            throw new java.io.IOException("Image is too large for full-resolution editing on this device.");
+        try {
+            return BitmapFactory.decodeFile(file.getAbsolutePath());
+        } catch (OutOfMemoryError error) {
+            throw new java.io.IOException("Not enough memory to edit this image.", error);
+        }
     }
 
     private static void copyFile(File src, File dst) throws Exception {
@@ -808,6 +848,25 @@ public class ImageEditActivity extends BaseActivity {
             int n;
             while ((n = in.read(buf)) != -1) os.write(buf, 0, n);
         }
+    }
+
+    private static void replaceCopy(File source, File destination) throws Exception {
+        File temporary = File.createTempFile(".hexora-image-", ".tmp", destination.getAbsoluteFile().getParentFile());
+        try {
+            copyFile(source, temporary);
+            com.reandroid.utils.io.AtomicFileReplace.replace(temporary, destination);
+        } finally { temporary.delete(); }
+    }
+
+    private static void compressBitmap(Bitmap bitmap, Bitmap.CompressFormat format, int quality, File destination) throws Exception {
+        File temporary = File.createTempFile(".hexora-image-", ".tmp", destination.getAbsoluteFile().getParentFile());
+        try {
+            try (FileOutputStream output = new FileOutputStream(temporary)) {
+                if (!bitmap.compress(format, quality, output)) throw new java.io.IOException("Cannot encode image.");
+                output.getFD().sync();
+            }
+            com.reandroid.utils.io.AtomicFileReplace.replace(temporary, destination);
+        } finally { temporary.delete(); }
     }
 
     private void showError(String message) {

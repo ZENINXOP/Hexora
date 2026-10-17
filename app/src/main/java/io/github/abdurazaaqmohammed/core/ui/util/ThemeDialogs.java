@@ -1,7 +1,6 @@
 package io.github.abdurazaaqmohammed.core.ui.util;
 
 import android.R;
-import android.app.Activity;
 import android.content.Context;
 
 import io.github.abdurazaaqmohammed.core.ui.base.BaseDialog;
@@ -36,13 +35,7 @@ public final class ThemeDialogs {
                 .setTitle("Theme")
                 .setSingleChoiceItems(names, checked, (d, which) -> selected[0] = which)
                 .setPositiveButton(R.string.ok, (d, which) -> {
-                    ThemeRegistry.setCurrentId(context, themes.get(selected[0]).id());
-                    if (context instanceof Activity) {
-                        try {
-                            ((Activity) context).recreate();
-                        } catch (Exception ignored) {
-                        }
-                    }
+                    ThemeRegistry.applyChoice(context, themes.get(selected[0]).id());
                 })
                 .setNegativeButton(R.string.cancel, null)
                 .show();

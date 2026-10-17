@@ -130,6 +130,9 @@ public class APKExtractorActivity extends BaseActivity {
     private List<AppInfo> systemAppInfoList;
     private boolean showLaunchActivities;
     private boolean loadingApps;
+    private volatile int appsRequest;
+    private Thread appsLoadThread;
+    private volatile ExecutorService appsPool;
 
     public static File getAppFolder() {
         final File appFolder = new File(new File(Environment.getExternalStorageDirectory(), "Hexora"), "Extracted APKs");
@@ -423,18 +426,24 @@ public class APKExtractorActivity extends BaseActivity {
     private void loadApps() {
         if (loadingApps) return;
         loadingApps = true;
+        int request = ++appsRequest;
         findViewById(R.id.progressBar).setVisibility(View.VISIBLE);
-        new Thread(() -> {
+        appsLoadThread = new Thread(() -> {
             try {
             PackageManager pm = getPackageManager();
             List<PackageInfo> apps = pm.getInstalledPackages(0);
+            List<AppInfo> loadedUsers = Collections.synchronizedList(new ArrayList<>());
+            List<AppInfo> loadedSystem = Collections.synchronizedList(new ArrayList<>());
 
             ExecutorService executor = Executors
                     .newFixedThreadPool(Math.min(2, Math.max(1, Runtime.getRuntime().availableProcessors())));
+            appsPool = executor;
             for (PackageInfo app : apps) {
+                if (Thread.currentThread().isInterrupted() || appsRequest != request) { executor.shutdownNow(); return; }
                 if (app.applicationInfo == null) continue;
                 executor.execute(() -> {
                     try {
+                        if (Thread.currentThread().isInterrupted() || appsRequest != request) return;
                         AppInfo appInfo = new AppInfo(
                                 app.applicationInfo.sourceDir,
                                 app.applicationInfo.loadLabel(pm).toString(),
@@ -451,17 +460,10 @@ public class APKExtractorActivity extends BaseActivity {
                         appInfo.appInfo = app.applicationInfo;
                         boolean isSystem = (app.applicationInfo.flags & ApplicationInfo.FLAG_SYSTEM) != 0;
                         if (isSystem)
-                            systemAppInfoList.add(appInfo);
+                            loadedSystem.add(appInfo);
                         else
-                            userAppInfoList.add(appInfo);
-
-                        handler.post(() -> {
-                            if (isSystem)
-                                appAdapter[1].addItem(appInfo);
-                            else
-                                appAdapter[0].addItem(appInfo);
-                        });
-                    } catch (Exception ignored) {
+                            loadedUsers.add(appInfo);
+                    } catch (Exception | OutOfMemoryError ignored) {
                     }
                 });
             }
@@ -469,24 +471,27 @@ public class APKExtractorActivity extends BaseActivity {
             try {
                 executor.awaitTermination(Long.MAX_VALUE, TimeUnit.NANOSECONDS);
             } catch (InterruptedException e) {
-                e.printStackTrace();
+                Thread.currentThread().interrupt();
+                executor.shutdownNow();
+                return;
             }
 
             handler.post(() -> {
+                if (isFinishing() || isDestroyed() || appsRequest != request) return;
+                synchronized (userAppInfoList) { userAppInfoList.clear(); userAppInfoList.addAll(loadedUsers); }
+                synchronized (systemAppInfoList) { systemAppInfoList.clear(); systemAppInfoList.addAll(loadedSystem); }
                 findViewById(R.id.progressBar).setVisibility(View.GONE);
 
                 Comparator<AppInfo> comparator;
-                if (sortMode == 0)
+                final int selectedSort = sortMode;
+                if (selectedSort == 0)
                     comparator = CompareUtils::compareAppInfoByName;
                 else
                     comparator = (p1, p2) -> {
-                        long field1 = (sortMode == 1) ? p1.lastUpdate : p1.firstInstall;
-                        long field2 = (sortMode == 1) ? p2.lastUpdate : p2.firstInstall;
+                        long field1 = (selectedSort == 1) ? p1.lastUpdate : p1.firstInstall;
+                        long field2 = (selectedSort == 1) ? p2.lastUpdate : p2.firstInstall;
                         return Long.compare(field2, field1);
                     };
-
-                Collections.sort(appAdapter[0].appInfoList, comparator);
-                Collections.sort(appAdapter[1].appInfoList, comparator);
 
                 appAdapter[0].setComparator(comparator);
                 appAdapter[1].setComparator(comparator);
@@ -499,17 +504,10 @@ public class APKExtractorActivity extends BaseActivity {
                 ((SwipeRefreshLayout) findViewById(R.id.swipeRefreshUser)).setRefreshing(false);
                 ((SwipeRefreshLayout) findViewById(R.id.swipeRefreshSystem)).setRefreshing(false);
 
-                new Thread(() -> {
-                    try {
-                        loadAdditionalDetails(userAppInfoList, appAdapter[0]);
-                        loadAdditionalDetails(systemAppInfoList, appAdapter[1]);
-                    } catch (Exception e) {
-                        new ErrorUtil(APKExtractorActivity.this).showError(e);
-                    }
-                }).start();
             });
             } catch (Exception e) {
                 handler.post(() -> {
+                    if (isFinishing() || isDestroyed() || appsRequest != request) return;
                     findViewById(R.id.progressBar).setVisibility(View.GONE);
                     loadingApps = false;
                     ((SwipeRefreshLayout) findViewById(R.id.swipeRefreshUser)).setRefreshing(false);
@@ -517,12 +515,14 @@ public class APKExtractorActivity extends BaseActivity {
                 });
                 new ErrorUtil(APKExtractorActivity.this).showError(e);
             }
-        }).start();
+        }, "hexora-app-list");
+        appsLoadThread.start();
     }
 
     private void refreshApps() {
-        userAppInfoList.clear();
-        systemAppInfoList.clear();
+        if (loadingApps) return;
+        synchronized (userAppInfoList) { userAppInfoList.clear(); }
+        synchronized (systemAppInfoList) { systemAppInfoList.clear(); }
         appAdapter[0].reset();
         appAdapter[1].reset();
         findViewById(R.id.confirmButton).setVisibility(View.INVISIBLE);
@@ -614,14 +614,12 @@ public class APKExtractorActivity extends BaseActivity {
             AlertDialog ad = new MaterialAlertDialogBuilder(this)
                     .setSingleChoiceItems(display, sortMode, (dialog, which) -> {
                         sortMode = which;
-                        Comparator<AppInfo> comparator = sortMode == 0 ? CompareUtils::compareAppInfoByName : ((p1, p2) -> {
-                            long field1 = (sortMode == 1) ? p1.lastUpdate : p1.firstInstall;
-                            long field2 = (sortMode == 1) ? p2.lastUpdate : p2.firstInstall;
+                        final int selectedSort = sortMode;
+                        Comparator<AppInfo> comparator = selectedSort == 0 ? CompareUtils::compareAppInfoByName : ((p1, p2) -> {
+                            long field1 = (selectedSort == 1) ? p1.lastUpdate : p1.firstInstall;
+                            long field2 = (selectedSort == 1) ? p2.lastUpdate : p2.firstInstall;
                             return Long.compare(field2, field1);
                         });
-
-                        Collections.sort(appAdapter[0].appInfoList, comparator);
-                        Collections.sort(appAdapter[1].appInfoList, comparator);
 
                         appAdapter[0].setComparator(comparator);
                         appAdapter[1].setComparator(comparator);
@@ -1140,21 +1138,16 @@ public class APKExtractorActivity extends BaseActivity {
         return bitmap;
     }
 
-    private void loadAdditionalDetails(List<AppInfo> apps, AppRecyclerViewAdapter adapter) {
-        PackageManager pm = getPackageManager();
-        for (AppInfo app : new ArrayList<>(apps)) {
-            if (isDestroyed() || isFinishing()) return;
-            if (showIcon && app.appInfo != null) {
-                Drawable icon;
-                try { icon = app.appInfo.loadIcon(pm); } catch (Exception ignored) { continue; }
-                handler.post(() -> {
-                    if (isDestroyed()) return;
-                    app.icon = icon;
-                    int position = adapter.filteredAppInfoList.indexOf(app);
-                    if (position >= 0) adapter.notifyItemChanged(position);
-                });
-            }
-        }
+    public void updateAppSelectionUi() {
+        findViewById(R.id.confirmButton).setVisibility(getCurrentAdapter().selectedItems.isEmpty() ? View.INVISIBLE : View.VISIBLE);
+    }
+
+    @Override protected void onDestroy() {
+        appsRequest++;
+        if (appsLoadThread != null) appsLoadThread.interrupt();
+        ExecutorService pool = appsPool;
+        if (pool != null) pool.shutdownNow();
+        super.onDestroy();
     }
 
     public void extract(int pos, boolean antisplit, boolean showFinishedDialog) {

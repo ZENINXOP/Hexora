@@ -1,13 +1,9 @@
 package io.github.abdurazaaqmohammed.ui.dialogs;
 
 import android.content.Context;
-import android.content.pm.ApplicationInfo;
-import android.content.pm.PackageInfo;
-import android.content.pm.PackageManager;
 import android.content.res.Configuration;
 import android.content.res.Resources;
 import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
@@ -15,7 +11,6 @@ import android.media.ThumbnailUtils;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.MediaStore;
-import android.text.TextUtils;
 import android.util.LruCache;
 import android.view.View;
 import android.widget.ImageView;
@@ -31,7 +26,6 @@ import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Locale;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
 import io.github.abdurazaaqmohammed.MPManager.R;
 import io.github.abdurazaaqmohammed.adapters.main.FileTypeDrawable;
@@ -41,8 +35,15 @@ import io.github.abdurazaaqmohammed.utils.FileUtils;
 
 public class PickerIconLoader {
 
-    private static final ExecutorService iconLoaderService = Executors.newFixedThreadPool(4);
-    private static final LruCache<String, Drawable> iconCache = new LruCache<>(100);
+    private static final ExecutorService iconLoaderService = new java.util.concurrent.ThreadPoolExecutor(
+            2, 2, 0L, java.util.concurrent.TimeUnit.MILLISECONDS, new java.util.concurrent.ArrayBlockingQueue<>(32),
+            new java.util.concurrent.ThreadPoolExecutor.DiscardOldestPolicy());
+    private static final LruCache<String, Drawable> iconCache = new LruCache<String, Drawable>(8 * 1024 * 1024) {
+        @Override protected int sizeOf(String key, Drawable icon) {
+            return Math.max(128 * 1024, icon instanceof BitmapDrawable
+                    ? ((BitmapDrawable) icon).getBitmap().getAllocationByteCount() : 0);
+        }
+    };
 
     private static Drawable cachedFolderIcon, cachedApkIcon, cachedImageIcon, cachedVideoIcon,
             cachedMusicIcon, cachedArchiveIcon, cachedTextIcon, cachedFileIcon;
@@ -50,9 +51,10 @@ public class PickerIconLoader {
 
     private final Context context;
     private final Handler handler = new Handler(Looper.getMainLooper());
+    private final SimpleDateFormat dateFormat = new SimpleDateFormat("yy-MM-dd HH:mm", Locale.US);
 
     public PickerIconLoader(Context context) {
-        this.context = context;
+        this.context = context.getApplicationContext();
         ensureCachedIcons(context.getResources());
     }
 
@@ -61,83 +63,85 @@ public class PickerIconLoader {
         fileIconView.setTag(null);
         if (file.isFile()) {
             fileDateView.setVisibility(View.VISIBLE);
-            SimpleDateFormat sdf = new SimpleDateFormat("yy-MM-dd HH:mm", Locale.US);
-            String formattedDate = sdf.format(new Date(file.lastModified()));
+            String formattedDate = dateFormat.format(new Date(file.lastModified()));
             setupNonFolderIconView(file.getPath(), fileIconView);
             fileDateView.setText(formattedDate + ' ' + FileSize.getHumanReadableFileSize(file.length()));
         } else {
-            fileIconView.setImageDrawable(cachedFolderIcon);
+            fileIconView.setImageDrawable(copy(cachedFolderIcon));
             fileDateView.setVisibility(View.INVISIBLE);
         }
     }
 
     private void setupNonFolderIconView(String path, ImageView fileIconView) {
-        Drawable cached = iconCache.get(path);
+        Drawable cached = iconCache.get(io.github.abdurazaaqmohammed.utils.ApkMetadata.key(new File(path)));
         if (cached != null) {
-            fileIconView.setImageDrawable(cached);
+            fileIconView.setImageDrawable(copy(cached));
             return;
         }
         String ext = FilenameUtils.getExtension(path);
         ext = ext == null ? "" : "." + ext.toLowerCase(Locale.ROOT);
 
         if (".apk".equals(ext)) {
-            fileIconView.setImageDrawable(cachedApkIcon);
+            fileIconView.setImageDrawable(copy(cachedApkIcon));
             loadApkIconAsync(path, fileIconView);
         } else if (FileUtils.matchExt(ext, FileUtils.IMAGE_EXTS)) {
-            fileIconView.setImageDrawable(cachedImageIcon);
+            fileIconView.setImageDrawable(copy(cachedImageIcon));
             loadThumbnailAsync(path, fileIconView, false);
         } else if (FileUtils.matchExt(ext, FileUtils.VIDEO_EXTS)) {
-            fileIconView.setImageDrawable(cachedVideoIcon);
+            fileIconView.setImageDrawable(copy(cachedVideoIcon));
             loadThumbnailAsync(path, fileIconView, true);
         } else if (FileUtils.matchExt(ext, FileUtils.AUDIO_EXTS)) {
-            fileIconView.setImageDrawable(cachedMusicIcon);
+            fileIconView.setImageDrawable(copy(cachedMusicIcon));
         } else if (FileUtils.matchExt(ext, FileUtils.ARCHIVE_EXTS)) {
-            fileIconView.setImageDrawable(cachedArchiveIcon);
+            fileIconView.setImageDrawable(copy(cachedArchiveIcon));
         } else if (".pdf".equals(ext)) {
             fileIconView.setImageDrawable(new FileTypeDrawable(FileType.PDF));
         } else if (FileUtils.matchExt(ext, FileUtils.TEXT_EXTS)) {
-            fileIconView.setImageDrawable(cachedTextIcon);
+            fileIconView.setImageDrawable(copy(cachedTextIcon));
         } else {
-            fileIconView.setImageDrawable(cachedFileIcon);
+            fileIconView.setImageDrawable(copy(cachedFileIcon));
         }
     }
 
     private void loadApkIconAsync(String path, ImageView fileIconView) {
-        fileIconView.setTag(path);
+        String key = io.github.abdurazaaqmohammed.utils.ApkMetadata.key(new File(path));
+        fileIconView.setTag(key);
+        java.lang.ref.WeakReference<ImageView> reference = new java.lang.ref.WeakReference<>(fileIconView);
         iconLoaderService.execute(() -> {
-            if (!path.equals(fileIconView.getTag())) return;
+            ImageView current = reference.get();
+            if (current == null || !key.equals(current.getTag())) return;
             try {
-                PackageManager pm = context.getPackageManager();
-                PackageInfo packageInfo = pm.getPackageArchiveInfo(path, PackageManager.GET_ACTIVITIES);
-                if (packageInfo != null && packageInfo.applicationInfo != null) {
-                    ApplicationInfo appInfo = packageInfo.applicationInfo;
-                    if (TextUtils.isEmpty(appInfo.sourceDir) || TextUtils.isEmpty(appInfo.publicSourceDir)) {
-                        appInfo.sourceDir = path;
-                        appInfo.publicSourceDir = path;
-                    }
-                    Drawable icon = appInfo.loadIcon(pm);
+                io.github.abdurazaaqmohammed.utils.ApkMetadata metadata =
+                        io.github.abdurazaaqmohammed.utils.ApkMetadata.load(context, new File(path));
+                if (metadata != null) {
+                    Drawable icon = metadata.icon;
                     if (icon != null) {
-                        iconCache.put(path, icon);
+                        iconCache.put(key, icon);
                         handler.post(() -> {
-                            if (path.equals(fileIconView.getTag())) fileIconView.setImageDrawable(icon);
+                            ImageView target = reference.get();
+                            if (target != null && key.equals(target.getTag())) target.setImageDrawable(copy(icon));
                         });
                     }
                 }
-            } catch (Exception ignored) {
+            } catch (Exception | OutOfMemoryError ignored) {
             }
         });
     }
 
     private void loadThumbnailAsync(String path, ImageView fileIconView, boolean isVideo) {
-        fileIconView.setTag(path);
+        String key = io.github.abdurazaaqmohammed.utils.ApkMetadata.key(new File(path));
+        fileIconView.setTag(key);
+        java.lang.ref.WeakReference<ImageView> reference = new java.lang.ref.WeakReference<>(fileIconView);
         iconLoaderService.execute(() -> {
-            if (!path.equals(fileIconView.getTag())) return;
+            ImageView current = reference.get();
+            if (current == null || !key.equals(current.getTag())) return;
             Bitmap bitmap = isVideo ? loadVideoThumbnail(path) : loadImageThumbnail(path);
-            if (bitmap == null || !path.equals(fileIconView.getTag())) return;
+            if (bitmap == null) return;
             Drawable icon = new BitmapDrawable(context.getResources(), bitmap);
-            iconCache.put(path, icon);
+            iconCache.put(key, icon);
             handler.post(() -> {
-                if (path.equals(fileIconView.getTag())) fileIconView.setImageDrawable(icon);
+                ImageView target = reference.get();
+                if (target != null && key.equals(target.getTag())) target.setImageDrawable(copy(icon));
             });
         });
     }
@@ -167,24 +171,16 @@ public class PickerIconLoader {
     }
 
     private static Bitmap loadImageThumbnail(String path) {
-        try {
-            BitmapFactory.Options options = new BitmapFactory.Options();
-            options.inJustDecodeBounds = true;
-            BitmapFactory.decodeFile(path, options);
-            int width = options.outWidth;
-            int height = options.outHeight;
-            int scale = 1;
-            while (width / 2 >= 128 && height / 2 >= 128) {
-                width /= 2;
-                height /= 2;
-                scale *= 2;
-            }
-            options.inSampleSize = scale;
-            options.inJustDecodeBounds = false;
-            return BitmapFactory.decodeFile(path, options);
-        } catch (Throwable t) {
-            return null;
-        }
+        return io.github.abdurazaaqmohammed.utils.BitmapPreview.decode(path, 192, false);
+    }
+
+    public static void clearPreviewCache() {
+        iconCache.evictAll();
+    }
+
+    private static Drawable copy(Drawable icon) {
+        Drawable.ConstantState state = icon == null ? null : icon.getConstantState();
+        return state == null ? icon : state.newDrawable().mutate();
     }
 
     private static Bitmap loadVideoThumbnail(String path) {

@@ -61,6 +61,9 @@ public class ImageViewerActivity extends BaseActivity {
     private int currentIndex;
     private int pagerPage;
     private final Set<Integer> checkedPositions = new HashSet<>();
+    private final java.util.concurrent.ExecutorService infoWorker = java.util.concurrent.Executors.newFixedThreadPool(1);
+    private java.util.concurrent.Future<?> metadataLoad;
+    private int metadataRequest;
 
     interface PageProvider {
         int getPage();
@@ -140,10 +143,13 @@ public class ImageViewerActivity extends BaseActivity {
                     .setNegativeButton(android.R.string.cancel, null)
                     .setPositiveButton(R.string.delete, (dialog, which) -> {
                         ProgressManager pm = new ProgressManager(this, true).show();
-                        new Thread(() -> {
-                            if (multi) for (int p : checkedPositions) {
-                                String pathname = imagePaths.get(p);
-                                int size = checkedPositions.size();
+                         List<Integer> selected = new ArrayList<>(checkedPositions);
+                         List<String> paths = new ArrayList<>(imagePaths);
+                         pm.startWorker(() -> {
+                             if (multi) for (int p : selected) {
+                                 if (pm.isCancelled() || Thread.currentThread().isInterrupted()) break;
+                                 String pathname = paths.get(p);
+                                 int size = selected.size();
                                 pm.setText(getString(R.string.deleting, pathname.substring(pathname.lastIndexOf(File.separatorChar) + 1)));
                                 pm.setProgress(p, size);
                                 new File(pathname).delete();
@@ -153,7 +159,7 @@ public class ImageViewerActivity extends BaseActivity {
                                 new File(currPath).delete();
                             }
                             pm.dismiss();
-                        }).start();
+                         });
                     }).show();
         });
 
@@ -163,9 +169,9 @@ public class ImageViewerActivity extends BaseActivity {
             return;
         }
 
-        loadImagePaths(new File(startPath));
-        currentIndex = imagePaths.indexOf(startPath);
-        if (currentIndex < 0) currentIndex = 0;
+        imagePaths = new ArrayList<>();
+        imagePaths.add(new File(startPath).getAbsolutePath());
+        currentIndex = 0;
 
         btnBack.setOnClickListener(v -> finish());
         btnInfo.setOnClickListener(v -> showProperties(currentIndex));
@@ -219,22 +225,40 @@ public class ImageViewerActivity extends BaseActivity {
         });
 
         updateForPosition(currentIndex);
+        infoWorker.submit(() -> {
+            List<String> paths = loadImagePaths(new File(startPath));
+            runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed()) return;
+                String selectedPath = imagePaths.get(currentIndex);
+                boolean checked = checkedPositions.contains(currentIndex);
+                imagePaths.clear();
+                imagePaths.addAll(paths);
+                checkedPositions.clear();
+                currentIndex = Math.max(0, imagePaths.indexOf(selectedPath));
+                if (checked) checkedPositions.add(currentIndex);
+                pagerAdapter.notifyDataSetChanged();
+                pager.scrollToPosition(currentIndex);
+                pagerPage = currentIndex;
+                updateForPosition(currentIndex);
+            });
+        });
     }
 
-    private void loadImagePaths(File startFile) {
-        imagePaths = new ArrayList<>();
+    private List<String> loadImagePaths(File startFile) {
+        List<String> imagePaths = new ArrayList<>();
         File dir = startFile.getParentFile();
         if (dir == null || !dir.isDirectory()) {
             imagePaths.add(startFile.getAbsolutePath());
-            return;
+            return imagePaths;
         }
         File[] files = dir.listFiles();
         if (files == null) {
             imagePaths.add(startFile.getAbsolutePath());
-            return;
+            return imagePaths;
         }
         String startPath = startFile.getAbsolutePath();
         for (File f : files) {
+            if (Thread.currentThread().isInterrupted()) break;
             if (f.isFile() && (FileUtils.isImageFile(f.getName()) || f.getAbsolutePath().equals(startPath))) {
                 imagePaths.add(f.getAbsolutePath());
             }
@@ -242,6 +266,7 @@ public class ImageViewerActivity extends BaseActivity {
         if (!imagePaths.contains(startPath)) {
             imagePaths.add(startPath);
         }
+        return imagePaths;
     }
 
     private int getCurrentPage() {
@@ -249,6 +274,7 @@ public class ImageViewerActivity extends BaseActivity {
         if (lm == null) return currentIndex;
         int first = lm.findFirstVisibleItemPosition();
         int last = lm.findLastVisibleItemPosition();
+        if (first == RecyclerView.NO_POSITION) return currentIndex;
         if (first == last) return first;
         View firstView = lm.findViewByPosition(first);
         View lastView = lm.findViewByPosition(last);
@@ -267,6 +293,11 @@ public class ImageViewerActivity extends BaseActivity {
         titleText.setText(file.getName());
         counterText.setText((pos + 1) + "/" + imagePaths.size());
 
+        subtitleText.setText("");
+        int request = ++metadataRequest;
+        if (metadataLoad != null) metadataLoad.cancel(true);
+        ((java.util.concurrent.ThreadPoolExecutor) infoWorker).purge();
+        metadataLoad = infoWorker.submit(() -> {
         String resolution = "";
         BitmapFactory.Options opts = new BitmapFactory.Options();
         opts.inJustDecodeBounds = true;
@@ -280,7 +311,11 @@ public class ImageViewerActivity extends BaseActivity {
             modDate = DateFormat.getDateFormat(this).format(new Date(file.lastModified()));
         }
 
-        subtitleText.setText(modDate + (resolution.isEmpty() ? "" : "  " + resolution));
+        String details = modDate + (resolution.isEmpty() ? "" : "  " + resolution);
+        runOnUiThread(() -> {
+            if (!isFinishing() && !isDestroyed() && metadataRequest == request) subtitleText.setText(details);
+        });
+        });
 
         boolean checked = checkedPositions.contains(pos);
         batchCheck.setOnCheckedChangeListener(null);
@@ -295,7 +330,9 @@ public class ImageViewerActivity extends BaseActivity {
         if (pos < 0 || pos >= imagePaths.size()) return;
         String path = imagePaths.get(pos);
         File file = new File(path);
-
+        ProgressManager progress = new ProgressManager(this, true).show();
+        progress.startWorker(() -> {
+        try {
         StringBuilder sb = new StringBuilder();
         sb.append("File: ").append(file.getName()).append("\n");
         sb.append("Path: ").append(file.getAbsolutePath()).append("\n");
@@ -344,11 +381,18 @@ public class ImageViewerActivity extends BaseActivity {
             sb.append("(No EXIF data available)\n");
         }
 
+        runOnUiThread(() -> {
+        if (isFinishing() || isDestroyed() || progress.isCancelled()) return;
         new MaterialAlertDialogBuilder(this)
                 .setTitle(R.string.image_properties)
                 .setMessage(sb)
                 .setPositiveButton(android.R.string.ok, null)
                 .show();
+        });
+        } catch (RuntimeException | OutOfMemoryError error) {
+            progress.reportError(error);
+        }
+        });
     }
 
     private String formatFileSize(long bytes) {
@@ -437,8 +481,7 @@ public class ImageViewerActivity extends BaseActivity {
             showError("Only JPEG and PNG supported");
             return;
         }
-        ImageEditActivity.sessionPath = path;
-        startActivityForResult(new Intent(this, ImageEditActivity.class), REQ_EDIT_IMAGE);
+        startActivityForResult(new Intent(this, ImageEditActivity.class).putExtra("image_path", path), REQ_EDIT_IMAGE);
     }
 
     @Override
@@ -581,6 +624,10 @@ public class ImageViewerActivity extends BaseActivity {
 
     private static class ImagePagerAdapter extends RecyclerView.Adapter<ImagePagerAdapter.ViewHolder> {
         private final List<String> paths;
+        private final java.util.concurrent.ThreadPoolExecutor workers = new java.util.concurrent.ThreadPoolExecutor(
+                2, 2, 0L, java.util.concurrent.TimeUnit.MILLISECONDS, new java.util.concurrent.LinkedBlockingQueue<>());
+        private final android.os.Handler main = new android.os.Handler(android.os.Looper.getMainLooper());
+        private boolean closed;
 
         ImagePagerAdapter(List<String> paths) { this.paths = paths; }
 
@@ -596,38 +643,48 @@ public class ImageViewerActivity extends BaseActivity {
         @Override
         public void onBindViewHolder(@NonNull ViewHolder holder, int position) {
             String path = paths.get(position);
-            Bitmap bitmap = decodeSampled(path, 2048);
-            if (bitmap != null) {
-                holder.imageView.setImageBitmap(bitmap);
-            } else {
-                holder.imageView.setImageResource(android.R.drawable.ic_menu_gallery);
-            }
+            cancel(holder);
+            Object token = new Object();
+            holder.token = token;
+            holder.imageView.setImageResource(android.R.drawable.ic_menu_gallery);
             holder.imageView.resetZoom();
+            if (closed) return;
+            java.lang.ref.WeakReference<ViewHolder> reference = new java.lang.ref.WeakReference<>(holder);
+            holder.load = workers.submit(() -> {
+                Bitmap bitmap = decodeSampled(path, 2048);
+                if (bitmap == null) return;
+                main.post(() -> {
+                    ViewHolder target = reference.get();
+                    if (closed || target == null || target.token != token) {
+                        bitmap.recycle();
+                        return;
+                    }
+                    target.imageView.setImageBitmap(bitmap);
+                    target.imageView.resetZoom();
+                });
+            });
+        }
+
+        private void cancel(ViewHolder holder) {
+            holder.token = null;
+            if (holder.load != null) holder.load.cancel(true);
+            holder.load = null;
+            workers.purge();
+        }
+
+        @Override public void onViewRecycled(@NonNull ViewHolder holder) {
+            cancel(holder);
+            holder.imageView.setImageDrawable(null);
+            super.onViewRecycled(holder);
+        }
+
+        void close() {
+            closed = true;
+            workers.shutdownNow();
         }
 
         private Bitmap decodeSampled(String path, int maxSize) {
-            BitmapFactory.Options bounds = new BitmapFactory.Options();
-            bounds.inJustDecodeBounds = true;
-            BitmapFactory.decodeFile(path, bounds);
-            int sample = 1;
-            int largest = Math.max(bounds.outWidth, bounds.outHeight);
-            while (largest / (sample * 2) >= maxSize && sample < 16) {
-                sample *= 2;
-            }
-            BitmapFactory.Options opts = new BitmapFactory.Options();
-            opts.inSampleSize = sample;
-            opts.inPreferredConfig = Bitmap.Config.RGB_565;
-            Bitmap bitmap = null;
-            try {
-                bitmap = BitmapFactory.decodeFile(path, opts);
-            } catch (OutOfMemoryError e) {
-                opts.inSampleSize = sample * 2;
-                try {
-                    bitmap = BitmapFactory.decodeFile(path, opts);
-                } catch (OutOfMemoryError ignored) {
-                    return null;
-                }
-            }
+            Bitmap bitmap = io.github.abdurazaaqmohammed.utils.BitmapPreview.decode(path, maxSize, true);
             if (bitmap == null) return null;
             try {
                 int orientation = new ExifInterface(path).getAttributeInt(
@@ -636,10 +693,10 @@ public class ImageViewerActivity extends BaseActivity {
                 if (matrix != null) {
                     Bitmap rotated = Bitmap.createBitmap(bitmap, 0, 0,
                             bitmap.getWidth(), bitmap.getHeight(), matrix, true);
-                    bitmap.recycle();
+                    if (rotated != bitmap) bitmap.recycle();
                     bitmap = rotated;
                 }
-            } catch (Exception ignored) {
+            } catch (Exception | OutOfMemoryError ignored) {
             }
             return bitmap;
         }
@@ -648,7 +705,17 @@ public class ImageViewerActivity extends BaseActivity {
 
         static class ViewHolder extends RecyclerView.ViewHolder {
             final ZoomableImageView imageView;
+            Object token;
+            java.util.concurrent.Future<?> load;
             ViewHolder(ZoomableImageView v) { super(v); imageView = v; }
         }
+    }
+
+    @Override protected void onDestroy() {
+        metadataRequest++;
+        infoWorker.shutdownNow();
+        if (pagerAdapter != null) pagerAdapter.close();
+        if (pager != null) pager.setAdapter(null);
+        super.onDestroy();
     }
 }

@@ -12,7 +12,6 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.ServiceConnection;
 import android.content.SharedPreferences;
-import android.content.res.Configuration;
 import android.content.res.Resources;
 import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
@@ -50,7 +49,6 @@ import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AlertDialog;
 import io.github.abdurazaaqmohammed.core.ui.base.BaseActivity;
-import io.github.abdurazaaqmohammed.core.ui.theme.BuiltInThemes;
 import io.github.abdurazaaqmohammed.core.ui.theme.ThemeRegistry;
 import io.github.abdurazaaqmohammed.core.ui.util.PopupMenus;
 import io.github.abdurazaaqmohammed.data.prefs.BookmarkStore;
@@ -181,9 +179,13 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
     private File[] currentPane1Files;
     private File[] currentPane2Files;
     private final ExecutorService archiveWorkers = Executors.newFixedThreadPool(2);
+    private final java.util.concurrent.ThreadPoolExecutor folderStatusWorker = new java.util.concurrent.ThreadPoolExecutor(
+            1, 1, 0L, java.util.concurrent.TimeUnit.MILLISECONDS, new java.util.concurrent.ArrayBlockingQueue<>(1),
+            new java.util.concurrent.ThreadPoolExecutor.DiscardOldestPolicy());
     private final AtomicIntegerArray archiveRequests = new AtomicIntegerArray(2);
     private final AtomicInteger folderStatusRequests = new AtomicInteger();
     private final Future<?>[] archiveLoads = new Future<?>[2];
+    private Runnable pendingShizukuFolder;
     private final String[] paneListingLocations = new String[2];
     private List<ZipEntryInfo> currentPane1ZipEntries;
     private List<ZipEntryInfo> currentPane2ZipEntries;
@@ -292,14 +294,14 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
             File[] shown = adapter.getShownFiles();
             if (shown != null && shown.length <= 4096) {
                 orderedPaths = new ArrayList<>();
-                for (File item : shown) if (item.isFile()) orderedPaths.add(item.getAbsolutePath());
+                for (File item : shown) orderedPaths.add(item.getAbsolutePath());
                 if (!orderedPaths.contains(filePath)) orderedPaths = null;
             }
         }
         if (useActivity) MediaPlayerActivity.openAndPlay(this, filePath, orderedPaths);
         else {
             PlayerManager pm = PlayerManager.getInstance(this);
-            pm.play(PlayerManager.buildMediaItem(this, filePath), orderedPaths);
+            pm.playFile(filePath, orderedPaths);
             if (miniPlayerDialog == null || !miniPlayerDialog.isShowing()) (miniPlayerDialog = new MiniPlayerDialog(this)).show();
         }
     }
@@ -311,9 +313,11 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
         SharedPreferences settings = PreferenceManager.getDefaultSharedPreferences(this);
         settings.edit()
                 .putString("bookmarks", getBookmarks().toString())
-                .putBoolean("systemTheme", systemTheme)
+                .putBoolean("systemTheme", false)
                 .putBoolean("checkForUpdates", checkForUpdates)
-                .putInt("theme", theme)
+                // A theme switch can pause this old activity before it is recreated.
+                // Persist the chosen palette, not this instance's previous style.
+                .putInt("theme", ThemeRegistry.currentStyleRes(this))
                 .apply();
     }
 
@@ -629,26 +633,6 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
 
     public Resources rss;
 
-    @Override
-    public void onConfigurationChanged(@NonNull Configuration newConfig) {
-        super.onConfigurationChanged(newConfig);
-        if (systemTheme) {
-            int currentNightMode = newConfig.uiMode & Configuration.UI_MODE_NIGHT_MASK;
-            if (currentNightMode == Configuration.UI_MODE_NIGHT_YES) {
-                if (theme != R.style.Theme_MyApp_Dark) {
-                    // BaseActivity re-applies the SYSTEM_DEFAULT plugin on recreate.
-                    theme = R.style.Theme_MyApp_Dark;
-                    recreate();
-                }
-            } else if (currentNightMode == Configuration.UI_MODE_NIGHT_NO) {
-                if (theme != R.style.Theme_MyApp_Light) {
-                    theme = R.style.Theme_MyApp_Light;
-                    recreate();
-                }
-            }
-        }
-    }
-
     private ActivityResultLauncher<String> requestPermissionLauncher;
     private Runnable notificationPermissionContinuation;
     private final ActivityResultLauncher<String> notificationPermissionLauncher =
@@ -745,27 +729,9 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
             Extensions.showMessage(this, rss.getString(R.string.screen_capture_permission_needed_for_color_picker));
         }});
 
-    /**
-     * One-time upgrade from legacy theme storage (boolean "systemTheme" +
-     * int style-res "theme") to ThemeRegistry's string id. Runs before
-     * BaseActivity applies the theme so first launch after update is correct.
-     */
+    /** Migrate legacy preferences before BaseActivity applies the two-theme palette. */
     private void upgradeThemePrefsIfNeeded() {
-        try {
-            SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(this);
-            if (prefs.contains(ThemeRegistry.PREF_KEY)) return;
-            String id;
-            if (prefs.getBoolean("systemTheme", true)) {
-                id = BuiltInThemes.SYSTEM_DEFAULT_ID;
-            } else {
-                int legacy = prefs.getInt("theme", 0);
-                if (legacy == R.style.Theme_MyApp_Light) id = BuiltInThemes.LIGHT_ID;
-                else if (legacy == R.style.Theme_MyApp_Black) id = BuiltInThemes.BLACK_ID;
-                else id = BuiltInThemes.DARK_ID;
-            }
-            ThemeRegistry.setCurrentId(this, id);
-        } catch (Exception ignored) {
-        }
+        ThemeRegistry.getCurrentId(this);
     }
 
     @Override
@@ -778,7 +744,7 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
         // BaseActivity applied the ThemeRegistry plugin; sync legacy fields for
         // status-bar tinting, icon colors and intent extras during transition.
         theme = ThemeRegistry.currentStyleRes(this);
-        systemTheme = BuiltInThemes.SYSTEM_DEFAULT_ID.equals(ThemeRegistry.getCurrentId(this));
+        systemTheme = false;
         SharedPreferences settings = PreferenceManager.getDefaultSharedPreferences(this);
         ShizukuFileOps.init(this);
         ShizukuShell.warmUp(this);
@@ -802,6 +768,10 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
         handler = new Handler(Looper.getMainLooper());
         drawerLayout = findViewById(R.id.drawer_layout);
         View sidebarDrawer = findViewById(R.id.sidebar_drawer);
+        // Keep labels readable while leaving a visible strip of the browser on narrow screens.
+        float sidebarDensity = getResources().getDisplayMetrics().density;
+        sidebarDrawer.getLayoutParams().width = Math.min(Math.round(280 * sidebarDensity),
+                Math.max(1, getResources().getDisplayMetrics().widthPixels - Math.round(56 * sidebarDensity)));
 
         if (sidebarDrawer.getBackground() instanceof GradientDrawable sidebarBackground) {
 //            sidebarBackground.setColor(MaterialColors.getColor(this, com.google.android.material.R.attr.colorSurface, Color.BLACK));
@@ -897,7 +867,7 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
         uiHelper = new UIHelper(this);
 
         logEnabled = settings.getBoolean("logEnabled", false);
-        systemTheme = BuiltInThemes.SYSTEM_DEFAULT_ID.equals(ThemeRegistry.getCurrentId(this));
+        systemTheme = false;
         String homeDir1Path = settings.getString("home1", null);
         homeDir1 = TextUtils.isEmpty(homeDir1Path) ? Environment.getExternalStorageDirectory() : new File(homeDir1Path);
         String homeDir2Path = settings.getString("home2", null);
@@ -1183,7 +1153,8 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
             new Thread(() -> {
                 try {
                     RootManager rm = RootManager.getInstance(MainActivity.this);
-                    if (rm.autoEnableRootIfAvailable()) {
+                    if ((!io.github.abdurazaaqmohammed.utils.ShizukuManager.isRunning() || rm.isRootMode())
+                            && rm.autoEnableRootIfAvailable()) {
                         handler.post(() -> {
                             try {
                                 Extensions.showMessage(MainActivity.this, R.string.root_detected_enabled);
@@ -1471,14 +1442,17 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
         int request = archiveRequests.get(paneIndex);
         archiveLoads[paneIndex] = archiveWorkers.submit(() -> {
             try {
+                if (archiveRequests.get(paneIndex) != request) return;
                 if (io.github.abdurazaaqmohammed.utils.LocalStorage.isPath(folder)) {
                     File resolved = io.github.abdurazaaqmohammed.utils.LocalStorage.file(folder);
                     File[] children = resolved.listFiles(this::isNotHidden);
                     if (children == null) throw new IOException(getString(R.string.local_storage_unavailable));
                     sortFiles(children, resolved.getPath());
+                    io.github.abdurazaaqmohammed.utils.ApkProjectLayout layout =
+                            io.github.abdurazaaqmohammed.utils.ApkProjectLayout.detect(resolved);
                     handler.post(() -> {
                         if (!isFinishing() && !isDestroyed() && archiveRequests.get(paneIndex) == request)
-                            applyFolderListing(resolved, children, pane1, addToHistory);
+                            applyFolderListing(resolved, children, pane1, addToHistory, layout);
                     });
                     return;
                 }
@@ -1494,6 +1468,7 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
             if (files != null) files = Arrays.stream(files).filter(this::isNotHidden).toArray(File[]::new);
         }
         if (files == null) files = folder.listFiles(this::isNotHidden);
+        if (archiveRequests.get(paneIndex) != request) return;
         // A folder the app cannot read may still be listable (read-only) through the shell:
         // Android/data on API 30+, plus browsable system paths like /storage/emulated and
         // /system. Retry via Shizuku, then root, when the app got nothing or an empty
@@ -1546,10 +1521,12 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
             }
         }
                 sortFiles(files, folder.getPath());
+                io.github.abdurazaaqmohammed.utils.ApkProjectLayout layout =
+                        io.github.abdurazaaqmohammed.utils.ApkProjectLayout.detect(folder);
                 File[] result = files;
                 handler.post(() -> {
                     if (isFinishing() || isDestroyed() || archiveRequests.get(paneIndex) != request) return;
-                    applyFolderListing(folder, result, pane1, addToHistory);
+                    applyFolderListing(folder, result, pane1, addToHistory, layout);
                 });
             } catch (Exception e) {
                 handler.post(() -> {
@@ -1567,7 +1544,8 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
         });
     }
 
-    private void applyFolderListing(File folder, File[] files, boolean pane1, boolean addToHistory) {
+    private void applyFolderListing(File folder, File[] files, boolean pane1, boolean addToHistory,
+            io.github.abdurazaaqmohammed.utils.ApkProjectLayout projectLayout) {
         SwipeRefreshLayout refresh = findViewById(pane1 ? R.id.swipeRefreshPane1 : R.id.swipeRefreshPane2);
         refresh.setRefreshing(false);
         try {
@@ -1575,17 +1553,9 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
                     .putString(pane1 ? "last_path_1" : "last_path_2", folder.getAbsolutePath()).apply();
         } catch (Exception ignored) {
         }
-        Set<String> names = new HashSet<>();
-        for (File file : files) names.add(file.getName());
         View buildButton = findViewById(R.id.build);
-        boolean xml;
-        boolean json = false;
-        if (names.contains("AndroidManifest.xml")
-                && (names.contains("classes.dex") || names.contains("classes") || names.contains("smali"))
-                && ((xml = names.contains("resources") || names.contains("res"))
-                || (json = names.contains("uncompressed-files.json")) || names.contains("resources.arsc"))) {
+        if (projectLayout != null) {
             buildButton.setVisibility(View.VISIBLE);
-            boolean finalJson = json;
             buildButton.setOnClickListener(v1 -> {
                 BuildOptions bo = new BuildOptions();
                 LayoutInflater inflater = LayoutInflater.from(this);
@@ -1629,7 +1599,11 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
                             SignWrapper[] wrapper = new SignWrapper[1];
                             Runnable doBuild = () -> {
                                 ProgressManager pm = new ProgressManager(this, true).show();
-                                bo.type = xml ? BuildOptions.TYPE_XML : finalJson ? BuildOptions.TYPE_JSON : BuildOptions.TYPE_RAW;
+                                bo.type = switch (projectLayout) {
+                                    case XML -> BuildOptions.TYPE_XML;
+                                    case JSON -> BuildOptions.TYPE_JSON;
+                                    default -> BuildOptions.TYPE_RAW;
+                                };
                                 bo.extractNativeLibs = UIHelper.radioGroupValue(rgExtract, "manifest");
                                 bo.dexLib = UIHelper.radioGroupValue(rgDexLib, BuildOptions.DEX_LIB_INTERNAL);
                                 bo.validateResDir = cbVrd.isChecked();
@@ -1640,26 +1614,37 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
                                 bo.resDirName = resDir.isEmpty() ? null : resDir;
                                 bo.inputFile = folder;
                                 bo.outputFile = FileUtils.getUnusedFile(folder, folder.getName() + ".apk");
-                                new Thread(() -> {
+                                File output = bo.outputFile;
+                                pm.startWorker(() -> {
+                                    File temporary = null;
+                                    APKLogger logger = pm.getLogger();
                                     try {
-                                        APKLogger logger = pm.getLogger();
-                                        boolean flatApk = new File(folder, "classes.dex").isFile()
-                                                && !new File(folder, "root").isDirectory()
-                                                && !new File(folder, "classes").isDirectory()
-                                                && com.reandroid.arsc.chunk.xml.AndroidManifestBlock.isResXmlBlock(new File(folder, "AndroidManifest.xml"));
-                                        if (flatApk) {
+                                        pm.checkCancelled();
+                                        temporary = File.createTempFile(".hexora-build-", ".apk", folder);
+                                        bo.outputFile = temporary;
+                                        if (projectLayout == io.github.abdurazaaqmohammed.utils.ApkProjectLayout.FLAT) {
+                                            // The direct builder refuses an existing output, even an empty temp file.
+                                            if (!temporary.delete()) throw new java.io.IOException("Cannot prepare temporary APK");
                                             logger.logMessage("Building extracted APK…");
-                                            io.github.abdurazaaqmohammed.utils.ExtractedApkBuilder.build(folder, bo.outputFile);
+                                            io.github.abdurazaaqmohammed.utils.ExtractedApkBuilder.build(folder, temporary);
                                         } else new Builder(bo, logger).runCommand();
-                                        logger.close();
-                                        if(sign[0]) wrapper[0].signApk(bo.outputFile);
-                                        pm.dismiss();
+                                        pm.checkCancelled();
+                                        io.github.abdurazaaqmohammed.utils.ApkZipAlignUtil.ensureInstallable(temporary);
+                                        pm.checkCancelled();
+                                        if (output.exists() || !temporary.renameTo(output)) {
+                                            throw new java.io.IOException("Cannot publish built APK: " + output);
+                                        }
+                                        bo.outputFile = output;
+                                        if (sign[0]) wrapper[0].signApk(output);
                                         handler.post(() -> loadFolderInPane(folder, pane1, false));
-                                    } catch (Exception e) {
-                                        pm.dismiss();
-                                        new ErrorUtil(MainActivity.this).showError(e);
+                                    } catch (Exception | OutOfMemoryError | LinkageError error) {
+                                        pm.reportError(error);
+                                    } finally {
+                                        logger.close();
+                                        bo.outputFile = output;
+                                        if (temporary != null && temporary.exists()) temporary.delete();
                                     }
-                                }).start();
+                                });
                             };
                             if(sign[0]) SignWrapper.requireAuth(this, sw -> {
                                 wrapper[0] = sw;
@@ -1875,6 +1860,7 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
         int index = pane1 ? 0 : 1;
         archiveRequests.incrementAndGet(index);
         if (archiveLoads[index] != null) archiveLoads[index].cancel(false);
+        ((java.util.concurrent.ThreadPoolExecutor) archiveWorkers).purge();
         SwipeRefreshLayout refresh = findViewById(pane1 ? R.id.swipeRefreshPane1 : R.id.swipeRefreshPane2);
         if (refresh != null) refresh.setRefreshing(false);
     }
@@ -1955,6 +1941,10 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
 
     /** Optional elevated access when this device denies system folder grants. */
     private void showShizukuGuideOnce(File folder, boolean pane1) {
+        if (ShizukuShell.isGranted()) {
+            loadFolderInPane(folder, pane1, false);
+            return;
+        }
         boolean installed = ShizukuShell.isInstalled(this);
         String message;
         int positiveLabel;
@@ -1973,14 +1963,24 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
             onPositive = () -> ShizukuShell.requestPermission();
         }
         // Once the binder arrives (user started Shizuku / granted), reload this folder automatically.
-        ShizukuShell.onBinderReceived(() -> runOnUiThread(() -> {
-            if (ShizukuShell.isGranted()) loadFolderInPane(folder, pane1, false);
-        }));
+        ShizukuShell.removeBinderCallback(pendingShizukuFolder);
+        int expectedRequest = archiveRequests.get(pane1 ? 0 : 1);
+        pendingShizukuFolder = () -> runOnUiThread(() -> {
+            if (isFinishing() || isDestroyed() || !ShizukuShell.isGranted()) return;
+            ShizukuShell.removeBinderCallback(pendingShizukuFolder);
+            pendingShizukuFolder = null;
+            if (archiveRequests.get(pane1 ? 0 : 1) == expectedRequest)
+                loadFolderInPane(folder, pane1, false);
+        });
+        ShizukuShell.onBinderReceived(pendingShizukuFolder);
         new MaterialAlertDialogBuilder(this)
                 .setTitle("Shizuku")
                 .setMessage(message)
                 .setPositiveButton(positiveLabel, (d, w) -> onPositive.run())
-                .setNegativeButton(android.R.string.cancel, null)
+                .setNegativeButton(android.R.string.cancel, (d, w) -> {
+                    ShizukuShell.removeBinderCallback(pendingShizukuFolder);
+                    pendingShizukuFolder = null;
+                })
                 .show();
     }
 
@@ -2111,12 +2111,14 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
         };
         if (Looper.myLooper() == Looper.getMainLooper()) updatePath.run();
         else handler.post(updatePath);
-        new Thread(() -> {
+        folderStatusWorker.getQueue().clear();
+        folderStatusWorker.execute(() -> {
 
             //CollectionsUtils.removeIf(files, (Predicate<Object>) o -> o instanceof ZipEntryInfo && ((ZipEntryInfo) o).isDirectory());
             int foldersCount = 0;
             int totalCount = 0;
             for(Object item : files) {
+                if (Thread.currentThread().isInterrupted() || folderStatusRequests.get() != request) return;
                 if (item instanceof ZipEntryInfo && "..".equals(((ZipEntryInfo) item).getName())) continue;
                 totalCount++;
                 if(item instanceof ZipEntryInfo && ((ZipEntryInfo) item).isDirectory()) foldersCount++;
@@ -2129,22 +2131,11 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
                 this.<TextView>findViewById(R.id.folderCount).setText(
                         rss.getString(R.string.folders_files_x, finalFoldersCount, finalTotalCount - finalFoldersCount));
             });
-        }).start();
+        });
     }
 
     public void setCurrentFolderFromSelected(File curr, Set<File> files) {
-        folderStatusRequests.incrementAndGet();
-        TextView currentFolderPath = findViewById(R.id.currentFolderPath);
-        currentFolderPath.setTag(curr.getPath());
-        currentFolderPath.setText(io.github.abdurazaaqmohammed.utils.LocalStorage.displayPath(curr.getPath()));
-        uiHelper.scrollTextView(currentFolderPath);
-        int foldersCount = 0;
-        for (File file : files)
-            if (file.isDirectory())
-                foldersCount++;
-        this.<TextView>findViewById(R.id.folderCount).setText(
-                new StringBuilder("Folders: ").append(foldersCount).append(" Files: ")
-                        .append(files.size() - foldersCount));
+        setCurrentFolder(curr.getPath(), new ArrayList<>(files));
     }
 
     @Override
@@ -2179,7 +2170,15 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
         // Returning from editors/viewers (started with startActivity, not for result)
         // leaves listings stale — always re-list the visible panes.
         try {
-            if (!doesNotHaveStoragePerm(this) && !loadedStartupPanes && startupPanesInitialized && !handledLocate) refreshAllPanes();
+            if (!doesNotHaveStoragePerm(this) && !loadedStartupPanes && startupPanesInitialized && !handledLocate
+                    && !io.github.abdurazaaqmohammed.utils.ElevatedAccess.isPermissionTransition()) {
+                // A Shizuku permission window can pause/resume this activity while
+                // a folder worker is waiting. Let that request finish in its pane.
+                for (int index = 0; index < archiveLoads.length; index++) {
+                    Future<?> loading = archiveLoads[index];
+                    if (loading == null || loading.isDone()) refreshPane(index == 0);
+                }
+            }
         } catch (Exception ignored) {
         }
     }
@@ -2201,9 +2200,15 @@ public class MainActivity extends BaseActivity implements PaneNavigationControll
 
     @Override
     protected void onDestroy() {
+        if (miniPlayerDialog != null) miniPlayerDialog.dismiss();
+        ShizukuShell.removeBinderCallback(pendingShizukuFolder);
+        pendingShizukuFolder = null;
         archiveRequests.incrementAndGet(0);
         archiveRequests.incrementAndGet(1);
         archiveWorkers.shutdownNow();
+        folderStatusRequests.incrementAndGet();
+        folderStatusWorker.shutdownNow();
+        sortFilter.close();
         fileSearch.cancel();
         ftp.close();
         paneHighlight.detach();

@@ -2,7 +2,6 @@ package io.github.abdurazaaqmohammed.utils;
 
 import android.content.Context;
 import android.content.SharedPreferences;
-import android.os.Build;
 import androidx.preference.PreferenceManager;
 
 import java.io.File;
@@ -18,20 +17,23 @@ public final class AccessManager {
 
     public static Backend active(Context context) {
         if (context == null) return Backend.NONE;
-        RootManager.WorkingMode mode = RootManager.getInstance(context).getWorkingMode();
-        if (mode == RootManager.WorkingMode.ROOT) return Backend.ROOT;
+        ElevatedAccess.prepare(context);
+        RootManager rm = RootManager.getInstance(context);
+        RootManager.WorkingMode mode = rm.getWorkingMode();
+        if (mode == RootManager.WorkingMode.ROOT && rm.hasCachedRootAccess()) return Backend.ROOT;
         if (mode == RootManager.WorkingMode.SHIZUKU
-                && Build.VERSION.SDK_INT >= 23) return Backend.SHIZUKU;
+                && ShizukuManager.ready()) return Backend.SHIZUKU;
         return Backend.NONE;
     }
 
     public static boolean fileOpsOn(Context context) {
         if (context == null) return false;
+        Backend backend = active(context);
         RootManager rm = RootManager.getInstance(context);
-        if (rm.getWorkingMode() == RootManager.WorkingMode.ROOT) {
+        if (backend == Backend.ROOT) {
             return rm.isRootFileOpsEnabled() && rm.isRootAvailable();
         }
-        if (rm.getWorkingMode() == RootManager.WorkingMode.SHIZUKU) {
+        if (backend == Backend.SHIZUKU) {
             SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(context);
             return prefs.getBoolean("shizuku_file_ops", false) && ShizukuManager.ready();
         }

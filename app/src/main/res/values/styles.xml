@@ -6,7 +6,13 @@
         <item name="android:popupMenuStyle">@style/Widget.Hexora.PopupMenu</item>
         <item name="materialAlertDialogTheme">@style/ThemeOverlay.Hexora.Dialog</item>
         <item name="colorPrimary">@color/hexora_accent</item>
-        <item name="colorOnPrimary">@android:color/white</item>
+        <item name="colorOnPrimary">@color/hexora_on_primary</item>
+        <item name="colorPrimaryContainer">@color/hexora_selection</item>
+        <item name="colorOnPrimaryContainer">@color/hexora_text</item>
+        <item name="colorOnSecondary">@color/hexora_on_primary</item>
+        <item name="colorSecondaryContainer">@color/hexora_selection</item>
+        <item name="colorOnSecondaryContainer">@color/hexora_text</item>
+        <item name="colorSurfaceContainerLow">@color/hexora_bar</item>
         <item name="colorSecondary">@color/hexora_accent</item>
         <item name="colorSurface">@color/hexora_surface</item>
         <item name="colorOnSurface">@color/hexora_text</item>
@@ -19,21 +25,22 @@
         <item name="android:navigationBarColor">@color/hexora_bar</item>
     </style>
 
-    <style name="Theme.MyApp.Black" parent="Theme.MyApp.Dark">
-        <item name="colorSurface">@android:color/black</item>
-        <item name="android:windowBackground">@android:color/black</item>
-        <item name="colorSurfaceVariant">@android:color/black</item>
-        <item name="android:statusBarColor">@android:color/black</item>
-        <item name="android:navigationBarColor">@android:color/black</item>
-        <item name="android:windowLightStatusBar">false</item>
-        <item name="android:windowLightNavigationBar">false</item>
-    </style>
+    <!-- Compatibility alias for stored resource IDs; the app offers Light and Dark only. -->
+    <style name="Theme.MyApp.Black" parent="Theme.MyApp.Dark" />
     <style name="Theme.MyApp.Dark" parent="Theme.Material3.Dark.NoActionBar">
         <item name="popupMenuStyle">@style/Widget.Hexora.PopupMenu</item>
         <item name="android:popupMenuStyle">@style/Widget.Hexora.PopupMenu</item>
         <item name="materialAlertDialogTheme">@style/ThemeOverlay.Hexora.Dialog</item>
         <item name="colorPrimary">@color/hexora_accent_dark</item>
-        <item name="colorOnPrimary">@android:color/white</item>
+        <item name="colorOnPrimary">@color/hexora_on_primary_dark</item>
+        <item name="colorPrimaryContainer">@color/hexora_selection_dark</item>
+        <item name="colorOnPrimaryContainer">@color/hexora_text_dark</item>
+        <item name="colorOnSecondary">@color/hexora_on_primary_dark</item>
+        <item name="colorSecondaryContainer">@color/hexora_selection_dark</item>
+        <item name="colorOnSecondaryContainer">@color/hexora_text_dark</item>
+        <item name="colorSurfaceContainerLow">@color/hexora_bar_dark</item>
+        <item name="colorOutline">#8E939C</item>
+        <item name="colorOutlineVariant">#45484F</item>
         <item name="colorSecondary">@color/hexora_accent_dark</item>
         <item name="colorSurface">@color/hexora_surface_dark</item>
         <item name="colorOnSurface">@color/hexora_text_dark</item>
@@ -54,6 +61,14 @@
         <item name="materialAlertDialogTheme">@style/ThemeOverlay.Hexora.Dialog</item>
         <item name="colorPrimary">@color/hexora_accent_light</item>
         <item name="colorOnPrimary">@android:color/white</item>
+        <item name="colorPrimaryContainer">@color/hexora_selection_light</item>
+        <item name="colorOnPrimaryContainer">@color/hexora_text_light</item>
+        <item name="colorOnSecondary">@android:color/white</item>
+        <item name="colorSecondaryContainer">@color/hexora_selection_light</item>
+        <item name="colorOnSecondaryContainer">@color/hexora_text_light</item>
+        <item name="colorSurfaceContainerLow">@color/hexora_bar_light</item>
+        <item name="colorOutline">#73777F</item>
+        <item name="colorOutlineVariant">#D6D9DF</item>
         <item name="colorSecondary">@color/hexora_accent_light</item>
         <item name="colorSurface">@color/hexora_surface_light</item>
         <item name="colorOnSurface">@color/hexora_text_light</item>
@@ -71,6 +86,14 @@
     <style name="AppTheme.PopupOverlay" parent="ThemeOverlay.MaterialComponents">
         <item name="android:textColor">?attr/colorOnSurface</item>
         <item name="tint">?attr/colorOnSurface</item>
+    </style>
+    <style name="ThemeOverlay.Hexora.EditorPopup" parent="ThemeOverlay.AppCompat">
+        <item name="android:colorBackground">?attr/colorSurface</item>
+        <item name="android:textColorPrimary">?attr/colorOnSurface</item>
+        <item name="android:textColorSecondary">?attr/colorOnSurfaceVariant</item>
+        <item name="colorControlNormal">?attr/colorOnSurface</item>
+        <item name="popupMenuStyle">@style/Widget.Hexora.PopupMenu</item>
+        <item name="android:popupMenuStyle">@style/Widget.Hexora.PopupMenu</item>
     </style>
     <style name="text_action_popup_animation">
         <item name="android:windowEnterAnimation">@anim/anim_text_action_popup_enter</item>

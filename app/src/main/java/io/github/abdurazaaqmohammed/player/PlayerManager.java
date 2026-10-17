@@ -60,9 +60,13 @@ public class PlayerManager {
     private boolean hasAudioFocus;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
-    private final List<PlaybackCallback> callbacks = new ArrayList<>();
+    private final java.util.concurrent.CopyOnWriteArrayList<PlaybackCallback> callbacks = new java.util.concurrent.CopyOnWriteArrayList<>();
     private final Random random = new Random();
     private List<Integer> shuffleOrder;
+    private final java.util.concurrent.ThreadPoolExecutor queueWorker = new java.util.concurrent.ThreadPoolExecutor(
+            1, 1, 0L, java.util.concurrent.TimeUnit.MILLISECONDS, new java.util.concurrent.LinkedBlockingQueue<>());
+    private java.util.concurrent.Future<?> queueLoad;
+    private int queueGeneration;
 
     public interface PlaybackCallback {
         void onStateChanged(PlayState newState);
@@ -136,7 +140,7 @@ public class PlayerManager {
     public void decrementUIVisible() { if (uiVisibleCount > 0) uiVisibleCount--; }
     public boolean isUIVisible() { return uiVisibleCount > 0; }
 
-    public void registerCallback(PlaybackCallback cb) { if (!callbacks.contains(cb)) callbacks.add(cb); }
+    public void registerCallback(PlaybackCallback cb) { if (cb != null) callbacks.addIfAbsent(cb); }
     public void unregisterCallback(PlaybackCallback cb) { callbacks.remove(cb); }
 
     private void notifyState(PlayState s) {
@@ -173,17 +177,59 @@ public class PlayerManager {
     }
 
     public void play(MediaItem item, List<String> orderedPaths) {
+        List<MediaItem> folderQueue = buildFolderQueue(item, orderedPaths);
+        play(folderQueue, indexOfPath(folderQueue, item.path));
+    }
+
+    /** Start promptly; metadata and sibling enumeration never block a tap. */
+    public void playFile(String filePath, List<String> orderedPaths) {
+        File file = new File(filePath);
+        String ext = "." + org.apache.commons.io.FilenameUtils.getExtension(filePath).toLowerCase(Locale.ROOT);
+        MediaItem pending = new MediaItem(Uri.fromFile(file), filePath, file.getName(), "", "", 0,
+                io.github.abdurazaaqmohammed.utils.FileUtils.matchExt(ext, io.github.abdurazaaqmohammed.utils.FileUtils.VIDEO_EXTS));
+        play(Collections.singletonList(pending), 0);
+        int request = queueGeneration;
+        List<String> order = orderedPaths == null ? null : new ArrayList<>(orderedPaths);
+        queueLoad = queueWorker.submit(() -> {
+            MediaItem metadata = buildMediaItem(appContext, filePath);
+            if (Thread.currentThread().isInterrupted()) return;
+            List<MediaItem> items = buildFolderQueue(metadata, order);
+            if (Thread.currentThread().isInterrupted()) return;
+            handler.post(() -> {
+                if (queueGeneration != request || getCurrentItem() != pending) return;
+                queue = items;
+                currentIndex = indexOfPath(items, filePath);
+                isVideo = metadata.isVideo;
+                if (shuffle) buildShuffleOrder();
+                notifyMediaItem(metadata);
+            });
+        });
+    }
+
+    private static int indexOfPath(List<MediaItem> items, String path) {
+        for (int i = 0; i < items.size(); i++) if (java.util.Objects.equals(path, items.get(i).path)) return i;
+        return 0;
+    }
+
+    private void cancelQueueLoad() {
+        queueGeneration++;
+        if (queueLoad != null) queueLoad.cancel(true);
+        queueWorker.purge();
+    }
+
+    private static List<MediaItem> buildFolderQueue(MediaItem item, List<String> orderedPaths) {
         List<MediaItem> folderQueue = new ArrayList<>();
         File current = item.path == null ? null : new File(item.path);
         File directory = current == null ? null : current.getParentFile();
-        File[] siblings = directory == null ? null : directory.listFiles();
-        if (orderedPaths != null && orderedPaths.contains(item.path))
-            siblings = orderedPaths.stream().map(File::new).toArray(File[]::new);
+        boolean suppliedOrder = orderedPaths != null && orderedPaths.contains(item.path);
+        File[] siblings = suppliedOrder ? orderedPaths.stream().map(File::new).toArray(File[]::new)
+                : directory == null ? null : directory.listFiles();
         if (siblings != null) {
-            if (orderedPaths == null || !orderedPaths.contains(item.path))
+            if (!suppliedOrder)
                 java.util.Arrays.sort(siblings, java.util.Comparator.comparing(File::getName,
                         String.CASE_INSENSITIVE_ORDER).thenComparing(File::getName));
             for (File file : siblings) {
+                if (Thread.currentThread().isInterrupted()) break;
                 String name = file.getName();
                 String ext = "." + org.apache.commons.io.FilenameUtils.getExtension(name).toLowerCase(Locale.ROOT);
                 boolean video = io.github.abdurazaaqmohammed.utils.FileUtils.matchExt(ext,
@@ -200,7 +246,7 @@ public class PlayerManager {
         int start = -1;
         for (int i = 0; i < folderQueue.size(); i++) if (java.util.Objects.equals(item.path, folderQueue.get(i).path)) start = i;
         if (start < 0) { folderQueue.clear(); folderQueue.add(item); start = 0; }
-        play(folderQueue, start);
+        return folderQueue;
     }
 
     public void addAndPlay(int index) {
@@ -211,12 +257,14 @@ public class PlayerManager {
     }
 
     public void addToQueue(MediaItem item) {
+        cancelQueueLoad();
         queue.add(item);
         if (shuffle) buildShuffleOrder();
         if (currentIndex < 0) { currentIndex = 0; playCurrent(); }
     }
 
     public void addToQueue(List<MediaItem> items) {
+        cancelQueueLoad();
         queue.addAll(items);
         if (shuffle) buildShuffleOrder();
         if (currentIndex < 0 && !queue.isEmpty()) { currentIndex = 0; playCurrent(); }
@@ -224,6 +272,7 @@ public class PlayerManager {
 
     public void removeFromQueue(int index) {
         if (index >= 0 && index < queue.size()) {
+            cancelQueueLoad();
             queue.remove(index);
             if (index < currentIndex) currentIndex--;
             else if (index == currentIndex) {
@@ -322,13 +371,11 @@ public class PlayerManager {
     }
 
     public void stop() {
+        cancelQueueLoad();
         stopProgressUpdater();
         if (mediaPlayer != null) {
-            try {
-                mediaPlayer.stop();
-                mediaPlayer.reset();
-                mediaPlayer.release();
-            } catch (Exception ignored) {}
+            // stop() is invalid while preparing; release must still happen.
+            try { mediaPlayer.release(); } catch (Exception ignored) {}
             mediaPlayer = null;
         }
         abandonAudioFocus();
@@ -396,6 +443,7 @@ public class PlayerManager {
     public void clearABRepeat() { abRepeatA = -1; abRepeatB = -1; }
 
     private void playCurrent() {
+        cancelQueueLoad();
         if (currentIndex < 0 || currentIndex >= queue.size()) return;
         MediaItem item = queue.get(currentIndex);
         isVideo = item.isVideo;
@@ -404,14 +452,23 @@ public class PlayerManager {
         abandonAudioFocus();
 
         // Create new player BEFORE releasing the old one
-        MediaPlayer newPlayer = new MediaPlayer();
+        final MediaPlayer newPlayer;
+        try { newPlayer = new MediaPlayer(); }
+        catch (RuntimeException error) {
+            stop();
+            notifyState(PlayState.ERROR);
+            notifyError("Cannot create media player: " + error.getMessage());
+            return;
+        }
         MediaPlayer oldPlayer = mediaPlayer;
         mediaPlayer = newPlayer;
 
+        try {
         if (oldPlayer != null) {
-            try { oldPlayer.stop(); oldPlayer.reset(); oldPlayer.release(); } catch (Exception ignored) {}
+            try { oldPlayer.release(); } catch (Exception ignored) {}
         }
         notifyState(PlayState.STOPPED);
+        if (newPlayer != mediaPlayer) return;
 
         newPlayer.setAudioAttributes(new AudioAttributes.Builder()
                 .setUsage(AudioAttributes.USAGE_MEDIA)
@@ -422,6 +479,7 @@ public class PlayerManager {
 
         newPlayer.setOnPreparedListener(mp -> {
             if (mp != mediaPlayer) return;
+            try {
             if (resumePosition > 0 && resumePosition < mp.getDuration()) mp.seekTo(resumePosition);
             resumePosition = 0;
             requestAudioFocus();
@@ -433,6 +491,7 @@ public class PlayerManager {
             notifyState(PlayState.PLAYING);
             startProgressUpdater();
             try { appContext.startService(new Intent(appContext, MusicService.class)); } catch (Exception ignored) {}
+            } catch (RuntimeException error) { failPlayback(mp, error); }
         });
         newPlayer.setOnCompletionListener(mp -> {
             if (mp != mediaPlayer) return;
@@ -451,8 +510,7 @@ public class PlayerManager {
         });
         newPlayer.setOnErrorListener((mp, what, extra) -> {
             if (mp != mediaPlayer) return true;
-            //notifyError("Media error: " + what + " / " + extra);
-            notifyState(PlayState.ERROR);
+            failPlayback(mp, new IllegalStateException("Media error: " + what + " / " + extra));
             return true;
         });
         newPlayer.setOnInfoListener((mp, what, extra) -> {
@@ -468,17 +526,24 @@ public class PlayerManager {
             if (videoSizeChangedListener != null) videoSizeChangedListener.onVideoSizeChanged(w, h);
         });
 
-        try {
             notifyState(PlayState.PREPARING);
             notifyMediaItem(item);
+            if (newPlayer != mediaPlayer) return;
             newPlayer.setDataSource(appContext, item.uri);
             newPlayer.prepareAsync();
-        } catch (IOException | IllegalStateException e) {
-            if (newPlayer == mediaPlayer) {
-                notifyError("Cannot play file: " + e.getMessage());
-                notifyState(PlayState.ERROR);
-            }
+        } catch (IOException | RuntimeException e) {
+            failPlayback(newPlayer, e);
         }
+    }
+
+    private void failPlayback(MediaPlayer player, Exception error) {
+        if (player != mediaPlayer) return;
+        stopProgressUpdater();
+        try { player.release(); } catch (Exception ignored) {}
+        mediaPlayer = null;
+        abandonAudioFocus();
+        notifyState(PlayState.ERROR);
+        notifyError("Cannot play file: " + error.getMessage());
     }
 
     private void requestAudioFocus() {

@@ -33,7 +33,7 @@ public class AppRecyclerViewAdapter extends RecyclerView.Adapter<AppRecyclerView
     public final List<AppInfo> appInfoList;
     public final List<AppInfo> filteredAppInfoList;
 
-    private Comparator<AppInfo> currentComparator;
+    private volatile Comparator<AppInfo> currentComparator;
     private AppInfoFilter filter;
 
     public AppRecyclerViewAdapter(APKExtractorActivity activity, List<AppInfo> list) {
@@ -61,6 +61,7 @@ public class AppRecyclerViewAdapter extends RecyclerView.Adapter<AppRecyclerView
     public final HashSet<Integer> selectedItems = new HashSet<>();
 
     public void toggleSelection(int position) {
+        if (position < 0 || position >= filteredAppInfoList.size()) return;
         if (selectedItems.contains(position)) selectedItems.remove(position);
         else selectedItems.add(position);
         notifyItemChanged(position);
@@ -73,7 +74,7 @@ public class AppRecyclerViewAdapter extends RecyclerView.Adapter<AppRecyclerView
     }
 
     public void addItem(AppInfo appInfo) {
-        if (!appInfoList.contains(appInfo)) appInfoList.add(appInfo);
+        synchronized (appInfoList) { if (!appInfoList.contains(appInfo)) appInfoList.add(appInfo); }
         filteredAppInfoList.add(appInfo);
         notifyItemInserted(filteredAppInfoList.size() - 1);
     }
@@ -133,39 +134,49 @@ public class AppRecyclerViewAdapter extends RecyclerView.Adapter<AppRecyclerView
         if (sub.length() == 0) sub.append(appInfo.packageName);
         holder.packageNameView.setText(sub.toString());
         holder.packageNameView.setVisibility(View.VISIBLE);
+        holder.appIconView.setTag(null);
         if (act.showIcon) {
             holder.appIconView.setVisibility(View.VISIBLE);
-            holder.appIconView.setImageDrawable(appInfo.icon);
+            if (appInfo.icon != null) holder.appIconView.setImageDrawable(appInfo.icon);
+            else io.github.abdurazaaqmohammed.ApkExtractor.AppIconLoader.load(act, appInfo, holder.appIconView);
         } else {
+            holder.appIconView.setTag(null);
+            holder.appIconView.setImageDrawable(null);
             holder.appIconView.setVisibility(GONE);
         }
         holder.splitIconView.setVisibility(appInfo.isSplit ? View.VISIBLE : GONE);
 
         holder.itemView.setOnClickListener(v -> {
+            int current = holder.getBindingAdapterPosition();
+            if (current == RecyclerView.NO_POSITION) return;
             if (!selectedItems.isEmpty()) {
-                toggleSelection(position);
+                toggleSelection(current);
                 if (selectedItems.isEmpty()) {
                     apkExtractorActivity.findViewById(R.id.confirmButton).setVisibility(View.INVISIBLE);
                 }
             } else {
-                apkExtractorActivity.showListViewDropdown(holder.extractIconView, position, this);
+                apkExtractorActivity.showListViewDropdown(holder.extractIconView, current, this);
             }
         });
 
         holder.itemView.setOnLongClickListener(v -> {
+            int current = holder.getBindingAdapterPosition();
+            if (current == RecyclerView.NO_POSITION) return true;
             apkExtractorActivity.findViewById(R.id.confirmButton).setVisibility(View.VISIBLE);
-            toggleSelection(position);
+            toggleSelection(current);
             return true;
         });
 
         holder.extractIconView.setOnClickListener(v -> {
+            int current = holder.getBindingAdapterPosition();
+            if (current == RecyclerView.NO_POSITION) return;
             if (!selectedItems.isEmpty()) {
-                toggleSelection(position);
+                toggleSelection(current);
                 if (selectedItems.isEmpty()) {
                     apkExtractorActivity.findViewById(R.id.confirmButton).setVisibility(View.INVISIBLE);
                 }
             } else {
-                apkExtractorActivity.showListViewDropdown(holder.extractIconView, position, this);
+                apkExtractorActivity.showListViewDropdown(holder.extractIconView, current, this);
             }
         });
     }
@@ -180,21 +191,24 @@ public class AppRecyclerViewAdapter extends RecyclerView.Adapter<AppRecyclerView
         @Override
         protected FilterResults performFiltering(CharSequence constraint) {
             FilterResults results = new FilterResults();
+            List<AppInfo> snapshot;
+            synchronized (appInfoList) { snapshot = new ArrayList<>(appInfoList); }
             if (TextUtils.isEmpty(constraint)) {
-                results.values = new ArrayList<>(appInfoList);
+                results.values = snapshot;
             } else {
                 List<AppInfo> filtered = new ArrayList<>();
-                String pattern = constraint.toString().toLowerCase().trim();
-                for (AppInfo info : appInfoList) {
-                    if (info.name.toLowerCase().contains(pattern) || info.packageName.toLowerCase().contains(pattern)) {
+                String pattern = constraint.toString().toLowerCase(java.util.Locale.ROOT).trim();
+                for (AppInfo info : snapshot) {
+                    if (info.name.toLowerCase(java.util.Locale.ROOT).contains(pattern) || info.packageName.toLowerCase(java.util.Locale.ROOT).contains(pattern)) {
                         filtered.add(info);
                     }
                 }
                 results.values = filtered;
             }
-            if (currentComparator != null) {
+            Comparator<AppInfo> comparator = currentComparator;
+            if (comparator != null) {
                 List<AppInfo> sorted = (List<AppInfo>) results.values;
-                Collections.sort(sorted, currentComparator);
+                Collections.sort(sorted, comparator);
                 results.values = sorted;
             }
             results.count = ((List<AppInfo>) results.values).size();
@@ -204,10 +218,22 @@ public class AppRecyclerViewAdapter extends RecyclerView.Adapter<AppRecyclerView
         @Override
         @SuppressWarnings("unchecked")
         protected void publishResults(CharSequence constraint, FilterResults results) {
+            if (apkExtractorActivity.isFinishing() || apkExtractorActivity.isDestroyed()) return;
+            HashSet<AppInfo> selectedApps = new HashSet<>();
+            for (int index : selectedItems) if (index >= 0 && index < filteredAppInfoList.size()) selectedApps.add(filteredAppInfoList.get(index));
             filteredAppInfoList.clear();
             if (results.values != null) filteredAppInfoList.addAll((List<AppInfo>) results.values);
+            selectedItems.clear();
+            for (int i = 0; i < filteredAppInfoList.size(); i++) if (selectedApps.contains(filteredAppInfoList.get(i))) selectedItems.add(i);
+            apkExtractorActivity.updateAppSelectionUi();
             notifyDataSetChanged();
         }
+    }
+
+    @Override public void onViewRecycled(@NonNull ViewHolder holder) {
+        holder.appIconView.setTag(null);
+        holder.appIconView.setImageDrawable(null);
+        super.onViewRecycled(holder);
     }
 
     static class ViewHolder extends RecyclerView.ViewHolder {

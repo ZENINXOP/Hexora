@@ -17,7 +17,9 @@ public class DialogUtil {
     }
 
     public void styleAlertDialog(AlertDialog ad) {
-        context.runOnUiThread(ad::show);
+        context.runOnUiThread(() -> {
+            if (!context.isFinishing() && !context.isDestroyed()) ad.show();
+        });
     }
 
     /** Persistent choices remain accessible on devices that dismiss transient popups. */

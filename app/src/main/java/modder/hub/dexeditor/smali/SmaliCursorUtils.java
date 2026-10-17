@@ -67,13 +67,24 @@ public class SmaliCursorUtils {
         }
     }
 
-    private static CharSequence cachedTextRef;
+    private static java.lang.ref.WeakReference<CharSequence> cachedTextRef = new java.lang.ref.WeakReference<>(null);
     private static int cachedLine = -1;
     private static int cachedLength = -1;
     private static MethodInfo cachedResult;
 
     private static boolean isCacheHit(CharSequence text, int cursorLine) {
-        return cachedTextRef == text && cachedLine == cursorLine && cachedLength == text.length() && cachedResult != null;
+        return cachedTextRef.get() == text && cachedLength == text.length()
+                && (cachedLine == cursorLine || cachedResult != null
+                && cursorLine >= cachedResult.startLine && cursorLine <= cachedResult.endLine);
+    }
+
+    /** Equal-length replacements also invalidate method bounds and names. */
+    public static void invalidate(CharSequence text) {
+        if (cachedTextRef.get() != text) return;
+        cachedTextRef.clear();
+        cachedResult = null;
+        cachedLine = -1;
+        cachedLength = -1;
     }
 
     public static String getCurrentMethodOrFieldName(CharSequence text, int cursorLine) {
@@ -93,7 +104,7 @@ public class SmaliCursorUtils {
         MethodInfo info = new MethodInfo();
         int lineCount = getLineCount(text);
         if (cursorLine < 0 || cursorLine >= lineCount) {
-            cachedTextRef = text;
+            cachedTextRef = new java.lang.ref.WeakReference<>(text);
             cachedLine = cursorLine;
             cachedLength = text.length();
             cachedResult = null;
@@ -123,7 +134,7 @@ public class SmaliCursorUtils {
             }
             // If we hit another .end method while going up, we are not inside a method
             if (i < cursorLine && trimmed.startsWith(".end method")) {
-                cachedTextRef = text;
+                cachedTextRef = new java.lang.ref.WeakReference<>(text);
                 cachedLine = cursorLine;
                 cachedLength = text.length();
                 cachedResult = null;
@@ -132,7 +143,7 @@ public class SmaliCursorUtils {
         }
         
         if (info.startLine == -1) {
-            cachedTextRef = text;
+            cachedTextRef = new java.lang.ref.WeakReference<>(text);
             cachedLine = cursorLine;
             cachedLength = text.length();
             cachedResult = null;
@@ -148,7 +159,7 @@ public class SmaliCursorUtils {
                 info.endLine = j;
                 // Cursor must be within [startLine, endLine]
                 if (cursorLine <= j) {
-                    cachedTextRef = text;
+                    cachedTextRef = new java.lang.ref.WeakReference<>(text);
                     cachedLine = cursorLine;
                     cachedLength = text.length();
                     cachedResult = info;
@@ -160,7 +171,7 @@ public class SmaliCursorUtils {
             if (trimmed.startsWith(".method ")) break;
         }
         
-        cachedTextRef = text;
+        cachedTextRef = new java.lang.ref.WeakReference<>(text);
         cachedLine = cursorLine;
         cachedLength = text.length();
         cachedResult = null;

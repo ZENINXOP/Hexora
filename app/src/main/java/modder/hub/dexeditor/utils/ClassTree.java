@@ -68,7 +68,6 @@ import com.android.tools.smali.dexlib2.immutable.ImmutableMethodParameter;
 import com.android.tools.smali.smali2.Smali;
 import com.android.tools.smali.dexlib2.util.DexUtil;
 import com.android.tools.smali.dexlib2.writer.builder.DexBuilder;
-import com.android.tools.smali.dexlib2.writer.io.MemoryDataStore;
 import com.google.common.collect.ImmutableList;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
@@ -146,7 +145,6 @@ public class ClassTree {
     public final List<String> paths;
     public int dexVersion;
     final Map<String, List<String>> dexClassMap = new LinkedHashMap<>();
-    byte[] data;
     byte[] input;
 
     private Map<String, HashSet<String>> deletedClassJson = new HashMap<>();
@@ -209,6 +207,8 @@ public class ClassTree {
     public void setCompilationOptions(CompilationOptions options) {
         this.compilationOptions = options;
     }
+
+    public String getWorkDir() { return workDir; }
 
     public ClassTree(List<String> mPaths, String cacheDir) throws Exception {
         this.paths = mPaths;
@@ -439,7 +439,7 @@ public class ClassTree {
     }
 
     // removal of batch or single classes from tree node
-    public void removeClasses(List<String> classNames) {
+    public synchronized void removeClasses(List<String> classNames) {
         if (classNames == null || classNames.isEmpty()) return;
 
         List<String> folderPrefixes = new ArrayList<>();
@@ -529,7 +529,7 @@ public class ClassTree {
 
     // save smali according to the class and its content
     // it's just a mapping way to preserve  smali data in memeory, but it's not a good way it may cause self kill app like situation and mt manager never do like this
-    public void saveSmali(String type, String smali) {
+    public synchronized void saveSmali(String type, String smali) {
         pendingSmaliMap.put(type, smali);
         pureSmaliCache.remove(type);
         recordEditedClass(type);
@@ -745,7 +745,7 @@ public class ClassTree {
 
     // save all loaded dexes
     @SuppressLint("SdCardPath")
-    public void saveAllDexFiles(DexSaveProgress dexSaveProgress) throws Exception {
+    public synchronized void saveAllDexFiles(DexSaveProgress dexSaveProgress) throws Exception {
         if (dexClassMap == null || dexClassMap.isEmpty()) return;
 
         int total = dexClassMap.size();
@@ -756,22 +756,23 @@ public class ClassTree {
                 targetDexVersion = Integer.parseInt(compilationOptions.dexVersion);
             } catch (Exception ignored) {}
         }
-        final int finalTargetDexVersion = targetDexVersion;
-
-        final Opcodes opcodes = Opcodes.forDexVersion(targetDexVersion);
-
         boolean forceCompileAll = compilationOptions.removeAllDebug || compilationOptions.removeDebugSource || 
                                  compilationOptions.removeDebugLine || compilationOptions.removeDebugParam || 
                                  compilationOptions.removeDebugPrologue || compilationOptions.removeDebugLocal ||
                                  !compilationOptions.dexVersion.equals("Keep the same");
 
-        int numThreads = Math.max(2, Runtime.getRuntime().availableProcessors());
+        int numThreads = Math.max(1, Math.min(2, Runtime.getRuntime().availableProcessors()));
         ExecutorService executor = Executors.newFixedThreadPool(numThreads);
 
         try {
             int current = 1;
             for (Entry<String, List<String>> entry : dexClassMap.entrySet()) {
+            if (Thread.currentThread().isInterrupted()) throw new java.io.InterruptedIOException("Compilation cancelled");
             String fileName = entry.getKey();
+            DexBackedDexFile originalDex = dexFileByName.get(fileName);
+            final int finalTargetDexVersion = "Keep the same".equals(compilationOptions.dexVersion) && originalDex != null
+                    ? DexUtil.verifyDexHeader(originalDex.getBuffer().getBuf(), 0) : targetDexVersion;
+            final Opcodes opcodes = Opcodes.forDexVersion(finalTargetDexVersion);
             dexSaveProgress.onTitle(fileName + " (" + current + "/" + total + ")");
 
             boolean isTouched = forceCompileAll || deletedClassJson.containsKey(fileName) || editedClassMap.containsKey(fileName);
@@ -783,7 +784,7 @@ public class ClassTree {
             List<String> classNames = entry.getValue();
             int classCount = classNames.size();
             AtomicInteger processed = new AtomicInteger(0);
-            final Exception[] threadException = {null};
+            final java.util.concurrent.atomic.AtomicReference<Exception> threadException = new java.util.concurrent.atomic.AtomicReference<>();
 
             // DexPool re-interns all instruction references, including the lazy
             // wrappers produced by a typed rename. Builder-only copies can retain
@@ -808,7 +809,8 @@ public class ClassTree {
                 futures.add(executor.submit(() -> {
                     try {
                         for (int idx = from; idx < to; idx++) {
-                            if (threadException[0] != null) return null;
+                            if (Thread.currentThread().isInterrupted()) throw new java.io.InterruptedIOException("Compilation cancelled");
+                            if (threadException.get() != null) return null;
                             final String rawType = classNames.get(idx);
                             final String type = rawType.substring(1, rawType.length() - 1);
 
@@ -826,7 +828,11 @@ public class ClassTree {
                                 if (processed.get() % 50 == 0) {
                                     dexSaveProgress.onMessage("Assembling " + type + "...");
                                 }
-                                defToIntern = Smali.assemble(pending, SharedSmaliUtils.ASSEMBLE_OPTIONS, finalTargetDexVersion);
+                                try {
+                                    defToIntern = Smali.assemble(pending, SharedSmaliUtils.ASSEMBLE_OPTIONS, finalTargetDexVersion);
+                                } catch (Exception error) {
+                                    throw new IOException("COMPILE_ERROR:" + type + ":" + error.getMessage(), error);
+                                }
                                 assembledDefs.put(type, defToIntern);
                             } else {
                                 defToIntern = classMap.get(type);
@@ -859,9 +865,7 @@ public class ClassTree {
                         }
                     } catch (final Throwable t) {
                         Exception e = t instanceof Exception ? (Exception) t : new Exception(t);
-                        synchronized (threadException) {
-                            if (threadException[0] == null) threadException[0] = e;
-                        }
+                        threadException.compareAndSet(null, e);
                     }
                     return null;
                 }));
@@ -870,22 +874,33 @@ public class ClassTree {
             for (Future<?> f : futures) {
                 try {
                     f.get();
-                    if (threadException[0] != null) break;
+                    if (threadException.get() != null) break;
                 } catch (Exception e) {
                     Throwable cause = e;
                     if (e instanceof ExecutionException && e.getCause() != null) {
                         cause = e.getCause();
                     }
-                    synchronized (threadException) {
-                        if (threadException[0] == null) threadException[0] = cause instanceof Exception ? (Exception) cause : new Exception(cause);
-                    }
+                    if (e instanceof InterruptedException) Thread.currentThread().interrupt();
+                    threadException.compareAndSet(null, cause instanceof Exception ? (Exception) cause : new Exception(cause));
                     break;
                 }
             }
-            if (threadException[0] != null) {
-                throw threadException[0];
+            if (threadException.get() != null) {
+                for (Future<?> future : futures) future.cancel(true);
+                throw threadException.get();
             }
 
+            dexSaveProgress.onMessage("Writing file...");
+            File outFile = null;
+            for (String sourcePath : paths) {
+                File source = new File(sourcePath);
+                if (source.getName().equals(fileName)) { outFile = source; break; }
+            }
+            if (outFile == null) throw new IOException("Missing DEX source path: " + fileName);
+            io.github.abdurazaaqmohammed.domain.editor.DexSaveWriter.write(dexBuilder, outFile);
+
+            // Only commit assembled definitions after the file was published. A failed
+            // write must leave the user's pending Smali available for correction/retry.
             if (!assembledDefs.isEmpty()) {
                 classMap.putAll(assembledDefs);
                 for (Map.Entry<String, ClassDef> e : assembledDefs.entrySet()) {
@@ -902,40 +917,7 @@ public class ClassTree {
                 }
             }
 
-            dexSaveProgress.onMessage("Writing file...");
-            try {
-                // Size the scratch buffer from the original dex when we know it, and otherwise
-                // from a per-class estimate. MemoryDataStore grows by copying in fixed steps, so
-                // starting too small means repeatedly copying the whole buffer. The 512 B/class
-                // guess badly under-shoots for any dex with real code.
-                DexBackedDexFile original = dexFileByName.get(fileName);
-                int estimate = original != null && original.getFileSize() > 0
-                        ? (int) Math.min(Integer.MAX_VALUE - 64L, (long) original.getFileSize() * 12L / 10L + (1 << 20))
-                        : classCount * 1024;
-                MemoryDataStore memoryDataStore = new MemoryDataStore(Math.max(1 << 16, estimate));
-                dexBuilder.writeTo(memoryDataStore);
-                byte[] result = Arrays.copyOf(memoryDataStore.getBuffer(), memoryDataStore.getSize());
-
-                String outputDir;
-                if (paths != null && !paths.isEmpty()) {
-                    outputDir = new File(paths.get(0)).getParent();
-                } else {
-                    outputDir = "/sdcard";
-                }
-                File outFile = new File(outputDir, fileName);
-                File bakFile = io.github.abdurazaaqmohammed.domain.files.SafeFileOperations.unusedFile(new File(outFile.getAbsolutePath() + ".bak"));
-
-                if (outFile.exists()) {
-                    io.github.abdurazaaqmohammed.domain.files.SafeFileOperations.copyFile(outFile, bakFile);
-                }
-
-                io.github.abdurazaaqmohammed.domain.files.SafeFileOperations.writeAtomically(outFile, result, (temporary, destination) -> {
-                    if (!temporary.renameTo(destination)) throw new IOException("Cannot publish compiled DEX; original retained.");
-                });
-                data = result;
-            } catch (Exception e) {
-                throw e;
-            }
+            editedClassMap.remove(fileName);
 
             current++;
             }

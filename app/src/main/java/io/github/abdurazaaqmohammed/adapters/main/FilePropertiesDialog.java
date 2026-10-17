@@ -132,7 +132,7 @@ public class FilePropertiesDialog {
                     context.handler.post(() -> sizeValue.setText(FileSize.getHumanReadableFileSize(folderSize)));
                 }).start();
             }
-        } else if (!multi && !entry.isDirectory()) {
+        } else if (!multi) {
             long modTime = entry.getLastModified();
             if (modTime > 0) {
                 addPropertyRow(propRows, context.getString(R.string.modified),

@@ -12,6 +12,8 @@ import java.io.File;
 /** Small, file-version-aware cache shared by APK rows and the info dialog. */
 public final class ApkMetadata {
     private static final LruCache<String, ApkMetadata> CACHE = new LruCache<>(32);
+    private static final java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.FutureTask<ApkMetadata>> LOADING =
+            new java.util.concurrent.ConcurrentHashMap<>();
     public final PackageInfo packageInfo;
     public final String label;
     public final Drawable icon;
@@ -32,8 +34,34 @@ public final class ApkMetadata {
         return file.getAbsolutePath() + ':' + file.lastModified() + ':' + file.length();
     }
 
+    public static void clearCache() {
+        CACHE.evictAll();
+    }
+
     /** Call on a worker thread. Never holds the cache lock while parsing an APK. */
     public static ApkMetadata load(Context context, File file) {
+        String key = key(file);
+        ApkMetadata cached = CACHE.get(key);
+        if (cached != null) return cached;
+        Context app = context.getApplicationContext();
+        java.util.concurrent.FutureTask<ApkMetadata> created = new java.util.concurrent.FutureTask<>(() -> loadUncached(app, file));
+        java.util.concurrent.FutureTask<ApkMetadata> task = LOADING.putIfAbsent(key, created);
+        if (task == null) task = created;
+        try {
+            // Both panes and the details dialog share one parse/extraction.
+            task.run();
+            return task.get();
+        } catch (InterruptedException error) {
+            Thread.currentThread().interrupt();
+            return null;
+        } catch (java.util.concurrent.ExecutionException error) {
+            return null;
+        } finally {
+            if (task.isDone()) LOADING.remove(key, task);
+        }
+    }
+
+    private static ApkMetadata loadUncached(Context context, File file) {
         String key = key(file);
         ApkMetadata cached = CACHE.get(key);
         if (cached != null) return cached;
@@ -134,7 +162,16 @@ public final class ApkMetadata {
         String label = file.getName();
         Drawable icon = null;
         try { label = info.applicationInfo.loadLabel(pm).toString(); } catch (Exception ignored) { }
-        try { icon = info.applicationInfo.loadIcon(pm); } catch (Exception ignored) { }
+        try {
+            Drawable source = info.applicationInfo.loadIcon(pm);
+            if (source != null) {
+                int size = Math.max(48, Math.min(192, (int) (64 * context.getResources().getDisplayMetrics().density)));
+                android.graphics.Bitmap bitmap = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888);
+                source.setBounds(0, 0, size, size);
+                source.draw(new android.graphics.Canvas(bitmap));
+                icon = new android.graphics.drawable.BitmapDrawable(context.getResources(), bitmap);
+            }
+        } catch (Exception | OutOfMemoryError ignored) { }
         ApkMetadata result = new ApkMetadata(info, label, icon);
         CACHE.put(key, result);
         return result;

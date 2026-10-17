@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_search_hint">Search settings</string>
+    <string name="settings_no_results">No matching settings</string>
+    <string name="settings_theme_summary">Choose how Hexora looks</string>
+    <string name="settings_appearance_summary">Text size, language, fonts and panels</string>
+    <string name="settings_folders_summary">Startup locations and home folders</string>
+    <string name="settings_files_summary">Backups, timestamps and compression</string>
+    <string name="settings_access_summary">Root, Shizuku and file permissions</string>
+    <string name="settings_behavior_summary">Media, bookmarks and search history</string>
+    <string name="settings_signing_summary">Automatic APK signing and keys</string>
+    <string name="settings_updates_summary">Update checks and new versions</string>
+    <string name="settings_plugins_summary">Options added by installed plugins</string>
+    <string name="settings_expanded">Expanded</string>
+    <string name="settings_collapsed">Collapsed</string>
+    <string name="settings_change">Change</string>
+    <string name="settings_import_font">Import</string>
+    <string name="settings_access_status">Connection status</string>
+</resources>

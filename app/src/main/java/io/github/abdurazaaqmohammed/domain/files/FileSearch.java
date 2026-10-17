@@ -31,19 +31,26 @@ public final class FileSearch {
         Pattern pattern = null;
         if (regex) {
             try {
-                pattern = Pattern.compile(query, matchCase ? 0 : Pattern.CASE_INSENSITIVE);
+                pattern = SearchPattern.compile(query, matchCase ? 0 : Pattern.CASE_INSENSITIVE);
             } catch (Exception e) {
                 return results;
             }
         }
-        searchRecursive(dir, results, matchCase ? query : query.toLowerCase(java.util.Locale.ROOT),
-                subfolders, matchCase, regex, pattern, textInside, minSize, maxSize, lister, new java.util.HashSet<>());
+        String normalized = matchCase ? query : query.toLowerCase(java.util.Locale.ROOT);
+        java.util.Set<String> visited = new java.util.HashSet<>();
+        java.util.ArrayDeque<File> pending = new java.util.ArrayDeque<>();
+        if (dir != null) pending.push(dir);
+        while (!pending.isEmpty() && results.size() < MAX_HITS && !Thread.currentThread().isInterrupted()) {
+            searchDirectory(pending.pop(), results, normalized, subfolders, matchCase, regex,
+                    pattern, textInside, minSize, maxSize, lister, visited, pending);
+        }
         return results;
     }
 
-    private static void searchRecursive(File dir, List<File> results, String query,
+    private static void searchDirectory(File dir, List<File> results, String query,
             boolean subfolders, boolean mCase, boolean regex, Pattern pattern,
-            String textInside, long minSize, long maxSize, Function<File, File[]> lister, java.util.Set<String> visited) {
+            String textInside, long minSize, long maxSize, Function<File, File[]> lister, java.util.Set<String> visited,
+            java.util.ArrayDeque<File> pending) {
         if (dir == null || Thread.currentThread().isInterrupted()) return;
         try { if (!visited.add(dir.getCanonicalPath())) return; } catch (java.io.IOException e) { return; }
         File[] files = dir.listFiles();
@@ -55,11 +62,11 @@ public final class FileSearch {
             if (files == null) return;
         }
         for (File f : files) {
-            if (Thread.currentThread().isInterrupted()) return;
+            if (results.size() >= MAX_HITS || Thread.currentThread().isInterrupted()) return;
             boolean matchName;
             String name = f.getName();
             if (regex && pattern != null) {
-                matchName = pattern.matcher(name).find();
+                matchName = SearchPattern.find(pattern, name);
             } else {
                 matchName = mCase ? name.contains(query) : name.toLowerCase(java.util.Locale.ROOT).contains(query);
             }
@@ -75,11 +82,13 @@ public final class FileSearch {
             if (matchName && matchSize && f.isFile() && textInside != null && !textInside.isEmpty()) {
                 matchText = false;
                 if (f.length() < 10485760) { // Limit to 10MB files to prevent OOM
-                    try (BufferedReader br = new BufferedReader(new FileReader(f))) {
+                    try (BoundedLines br = new BoundedLines(f, 10 * 1024 * 1024)) {
                         String line;
-                        while (!Thread.currentThread().isInterrupted() && (line = br.readLine()) != null) {
+                        String needle = mCase ? textInside : textInside.toLowerCase(java.util.Locale.ROOT);
+                        int lines = 0;
+                        while (++lines <= MAX_LINES_PER_FILE && !Thread.currentThread().isInterrupted() && (line = br.readLine()) != null) {
                             if (mCase ? line.contains(textInside)
-                                    : line.toLowerCase(java.util.Locale.ROOT).contains(textInside.toLowerCase(java.util.Locale.ROOT))) {
+                                    : line.toLowerCase(java.util.Locale.ROOT).contains(needle)) {
                                 matchText = true;
                                 break;
                             }
@@ -92,8 +101,7 @@ public final class FileSearch {
             if (matchName && matchSize && matchText) results.add(f);
 
             if (subfolders && f.isDirectory()) {
-                searchRecursive(f, results, query, subfolders, mCase, regex,
-                        pattern, textInside, minSize, maxSize, lister, visited);
+                pending.push(f);
             }
         }
     }
@@ -104,20 +112,25 @@ public final class FileSearch {
         Pattern pattern = null;
         if (regex) {
             try {
-                pattern = Pattern.compile(needle, matchCase ? 0 : Pattern.CASE_INSENSITIVE);
+                pattern = SearchPattern.compile(needle, matchCase ? 0 : Pattern.CASE_INSENSITIVE);
             } catch (Exception e) {
                 return hits;
             }
         }
         String normNeedle = matchCase ? needle : needle.toLowerCase(java.util.Locale.ROOT);
         int[] scanned = {0};
-        findRecursive(dir, normNeedle, matchCase, regex, pattern, hits, scanned, progress, new java.util.HashSet<>());
+        java.util.Set<String> visited = new java.util.HashSet<>();
+        java.util.ArrayDeque<File> pending = new java.util.ArrayDeque<>();
+        if (dir != null) pending.push(dir);
+        while (!pending.isEmpty() && hits.size() < MAX_HITS && !Thread.currentThread().isInterrupted()) {
+            findDirectory(pending.pop(), normNeedle, matchCase, regex, pattern, hits, scanned, progress, visited, pending);
+        }
         return hits;
     }
 
-    private static void findRecursive(File dir, String needle, boolean matchCase,
+    private static void findDirectory(File dir, String needle, boolean matchCase,
             boolean regex, Pattern pattern, List<ContentHit> hits, int[] scanned,
-            Progress progress, java.util.Set<String> visited) {
+            Progress progress, java.util.Set<String> visited, java.util.ArrayDeque<File> pending) {
         if (dir == null || Thread.currentThread().isInterrupted()) return;
         try { if (!visited.add(dir.getCanonicalPath())) return; } catch (java.io.IOException e) { return; }
         File[] files = dir.listFiles();
@@ -125,18 +138,18 @@ public final class FileSearch {
         for (File f : files) {
             if (hits.size() >= MAX_HITS || Thread.currentThread().isInterrupted()) return;
             if (f.isDirectory()) {
-                findRecursive(f, needle, matchCase, regex, pattern, hits, scanned, progress, visited);
+                pending.push(f);
             } else if (f.isFile() && f.length() < MAX_CONTENT_BYTES) {
                 scanned[0]++;
                 if (scanned[0] % 50 == 0 && progress != null) progress.onProgress(scanned[0]);
-                try (BufferedReader br = new BufferedReader(new FileReader(f))) {
+                try (BoundedLines br = new BoundedLines(f, (int) MAX_CONTENT_BYTES)) {
                     String line;
                     int lineNo = 0;
                     while (!Thread.currentThread().isInterrupted() && (line = br.readLine()) != null) {
                         lineNo++;
                         if (lineNo == 1 && line.indexOf('\0') >= 0) break;
                         boolean hit;
-                        if (regex && pattern != null) hit = pattern.matcher(line).find();
+                        if (regex && pattern != null) hit = SearchPattern.find(pattern, line);
                         else hit = matchCase ? line.contains(needle) : line.toLowerCase(java.util.Locale.ROOT).contains(needle);
                         if (hit) {
                             String snippet = line.trim();
@@ -145,12 +158,45 @@ public final class FileSearch {
                             hits.add(new ContentHit(f, lineNo, snippet));
                             if (hits.size() >= MAX_HITS || Thread.currentThread().isInterrupted()) return;
                         }
-                        if (lineNo > MAX_LINES_PER_FILE) break;
+                        if (lineNo >= MAX_LINES_PER_FILE) break;
                     }
-                } catch (Exception ignored) {
+                } catch (java.io.IOException | SecurityException ignored) {
                 }
             }
         }
+    }
+
+    /** A growing file or a virtual file reporting length zero must still be bounded. */
+    private static final class BoundedLines implements java.io.Closeable {
+        private final BufferedReader reader;
+        private int remaining;
+        private boolean skipLf;
+
+        BoundedLines(File file, int maxCharacters) throws java.io.IOException {
+            reader = new BufferedReader(new FileReader(file));
+            remaining = maxCharacters;
+        }
+
+        String readLine() throws java.io.IOException {
+            StringBuilder line = new StringBuilder();
+            while (remaining-- > 0) {
+                if ((remaining & 4095) == 0 && Thread.currentThread().isInterrupted())
+                    throw new java.io.InterruptedIOException();
+                int ch = reader.read();
+                if (ch < 0) return line.length() == 0 ? null : line.toString();
+                if (skipLf) {
+                    skipLf = false;
+                    if (ch == '\n') continue;
+                }
+                if (ch == '\r') { skipLf = true; return line.toString(); }
+                if (ch == '\n') return line.toString();
+                if (line.length() >= 64 * 1024) throw new java.io.IOException("Search line limit exceeded");
+                line.append((char) ch);
+            }
+            return line.length() == 0 ? null : line.toString();
+        }
+
+        @Override public void close() throws java.io.IOException { reader.close(); }
     }
 
     /** Called from worker threads; the caller marshals to the UI thread. */

@@ -10,8 +10,6 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
-import android.media.MediaMetadataRetriever;
 import android.os.Build;
 import android.os.IBinder;
 import android.support.v4.media.MediaMetadataCompat;
@@ -40,6 +38,17 @@ public class MusicService extends Service implements PlayerManager.PlaybackCallb
     private PlayerManager playerManager;
     private boolean isForeground;
     private final Object sessionLock = new Object();
+    private final java.util.concurrent.ThreadPoolExecutor artworkWorker = new java.util.concurrent.ThreadPoolExecutor(
+            1, 1, 0L, java.util.concurrent.TimeUnit.MILLISECONDS, new java.util.concurrent.LinkedBlockingQueue<>());
+    private final android.os.Handler main = new android.os.Handler(android.os.Looper.getMainLooper());
+    private java.util.concurrent.Future<?> artworkLoad;
+    private String artworkKey;
+    private Bitmap cachedArtwork, metadataArtwork;
+    private MediaItem metadataItem;
+    private int metadataDuration = -1;
+    private long lastProgressAt;
+    private int artworkRequest;
+    private boolean destroyed;
 
     @Override
     public void onCreate() {
@@ -102,6 +111,12 @@ public class MusicService extends Service implements PlayerManager.PlaybackCallb
 
     @Override
     public void onDestroy() {
+        destroyed = true;
+        artworkRequest++;
+        artworkWorker.shutdownNow();
+        cachedArtwork = null;
+        metadataArtwork = null;
+        metadataItem = null;
         playerManager.unregisterCallback(this);
         try { unregisterReceiver(notificationReceiver); } catch (Exception ignored) {}
         if (mediaSession != null) {
@@ -123,6 +138,7 @@ public class MusicService extends Service implements PlayerManager.PlaybackCallb
 
     @SuppressWarnings("deprecation")
     private void updateNotification() {
+        if (destroyed) return;
 //        if (playerManager.isUIVisible()) {
 //            if (isForeground) {
 //                stopForeground(true);
@@ -151,7 +167,8 @@ public class MusicService extends Service implements PlayerManager.PlaybackCallb
         PendingIntent closeIntent = PendingIntent.getBroadcast(this, 4,
                 new Intent(ACTION_CLOSE), PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
 
-        Bitmap artwork = loadArtwork(item);
+        requestArtwork(item);
+        Bitmap artwork = cachedArtwork;
 
         long stateActions = PlaybackStateCompat.ACTION_PLAY | PlaybackStateCompat.ACTION_PLAY_PAUSE
                 | PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS | PlaybackStateCompat.ACTION_SKIP_TO_NEXT
@@ -192,37 +209,57 @@ public class MusicService extends Service implements PlayerManager.PlaybackCallb
 
         Notification notification = builder.build();
 
-        synchronized (sessionLock) {
-            MediaMetadataCompat.Builder mmBuilder = new MediaMetadataCompat.Builder();
-            mmBuilder.putString(MediaMetadataCompat.METADATA_KEY_TITLE, item.title);
-            mmBuilder.putString(MediaMetadataCompat.METADATA_KEY_ARTIST, item.artist);
-            mmBuilder.putString(MediaMetadataCompat.METADATA_KEY_ALBUM, item.album);
-            mmBuilder.putLong(MediaMetadataCompat.METADATA_KEY_DURATION, duration);
-            if (artwork != null) mmBuilder.putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, artwork);
-            mediaSession.setMetadata(mmBuilder.build());
-        }
+        updateSessionMetadata(item, duration, artwork);
 
+        try {
         if (!isForeground) {
             startForeground(NOTIF_ID, notification);
             isForeground = true;
         } else {
             notifManager.notify(NOTIF_ID, notification);
         }
+        } catch (RuntimeException error) {
+            android.util.Log.w("MusicService", "Cannot publish playback notification", error);
+            stopSelf();
+        }
+    }
+
+    private void requestArtwork(MediaItem item) {
+        String key = item.uri == null ? item.path : item.uri.toString();
+        if (java.util.Objects.equals(artworkKey, key)) return;
+        artworkKey = key;
+        cachedArtwork = null;
+        int request = ++artworkRequest;
+        if (artworkLoad != null) artworkLoad.cancel(true);
+        artworkWorker.purge();
+        artworkLoad = artworkWorker.submit(() -> {
+            Bitmap artwork = loadArtwork(item);
+            main.post(() -> {
+                if (destroyed || request != artworkRequest) {
+                    return;
+                }
+                cachedArtwork = artwork;
+                updateNotification();
+            });
+        });
+    }
+
+    private void updateSessionMetadata(MediaItem item, int duration, Bitmap artwork) {
+        if (destroyed || item == metadataItem && duration == metadataDuration && artwork == metadataArtwork) return;
+        MediaMetadataCompat.Builder metadata = new MediaMetadataCompat.Builder()
+                .putString(MediaMetadataCompat.METADATA_KEY_TITLE, item.title)
+                .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, item.artist)
+                .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, item.album)
+                .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, duration);
+        if (artwork != null) metadata.putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, artwork);
+        synchronized (sessionLock) { mediaSession.setMetadata(metadata.build()); }
+        metadataItem = item;
+        metadataDuration = duration;
+        metadataArtwork = artwork;
     }
 
     private Bitmap loadArtwork(MediaItem item) {
-        if (item.path == null) return null;
-        MediaMetadataRetriever mmr = new MediaMetadataRetriever();
-        try {
-            mmr.setDataSource(this, item.uri);
-            byte[] art = mmr.getEmbeddedPicture();
-            if (art != null) {
-                Bitmap bmp = BitmapFactory.decodeByteArray(art, 0, art.length);
-                if (bmp != null) { mmr.release(); return bmp; }
-            }
-        } catch (Exception ignored) {}
-        try { mmr.release(); } catch (Exception ignored) {}
-        return null;
+        return MediaArtwork.read(getApplicationContext(), item);
     }
 
     private final BroadcastReceiver notificationReceiver = new BroadcastReceiver() {
@@ -249,7 +286,11 @@ public class MusicService extends Service implements PlayerManager.PlaybackCallb
 
     @Override
     public void onProgress(int position, int duration) {
+        if (destroyed) return;
         if (isForeground) {
+            long now = android.os.SystemClock.elapsedRealtime();
+            if (now - lastProgressAt < 1000) return;
+            lastProgressAt = now;
             PlaybackStateCompat.Builder psb = new PlaybackStateCompat.Builder();
             boolean playing = playerManager.getState() == PlayerManager.PlayState.PLAYING;
             psb.setState(playing ? PlaybackStateCompat.STATE_PLAYING : PlaybackStateCompat.STATE_PAUSED,
@@ -262,14 +303,7 @@ public class MusicService extends Service implements PlayerManager.PlaybackCallb
             }
             MediaItem item = playerManager.getCurrentItem();
             if (item != null && duration > 0) {
-                MediaMetadataCompat.Builder mmBuilder = new MediaMetadataCompat.Builder();
-                mmBuilder.putString(MediaMetadataCompat.METADATA_KEY_TITLE, item.title);
-                mmBuilder.putString(MediaMetadataCompat.METADATA_KEY_ARTIST, item.artist);
-                mmBuilder.putString(MediaMetadataCompat.METADATA_KEY_ALBUM, item.album);
-                mmBuilder.putLong(MediaMetadataCompat.METADATA_KEY_DURATION, duration);
-                synchronized (sessionLock) {
-                    mediaSession.setMetadata(mmBuilder.build());
-                }
+                updateSessionMetadata(item, duration, cachedArtwork);
             }
         }
     }

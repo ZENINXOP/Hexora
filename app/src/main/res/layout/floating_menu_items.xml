@@ -1,51 +1,53 @@
-<androidx.cardview.widget.CardView
-	xmlns:android="http://schemas.android.com/apk/res/android"
-	xmlns:card_view="http://schemas.android.com/apk/res-auto"
+<?xml version="1.0" encoding="utf-8"?>
+<com.google.android.material.card.MaterialCardView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
-	android:layout_height="45dp"
-	android:layout_margin="8dp"
-	card_view:cardCornerRadius="10dp"
-	card_view:cardElevation="2dp">
-	<RelativeLayout
-		android:id="@+id/relativeLayout"
-		android:layout_width="match_parent"
-		android:layout_height="match_parent"
-		android:paddingLeft="8dp"
-		android:paddingRight="8dp"
-		android:paddingBottom="8dp"
-		android:focusable="true">
-		<ImageView
-			android:id="@+id/imageView"
-			android:layout_width="30dp"
-			android:layout_height="30dp"
-			android:layout_marginStart="10dp"
-			android:src="@drawable/ic_setting_mt"
-			android:scaleType="fitCenter"
-			android:focusable="false"
-			android:layout_centerVertical="true" />
-		<TextView
-			android:id="@+id/txtTitle"
-			android:layout_width="wrap_content"
-			android:layout_height="wrap_content"
-			android:layout_marginStart="10dp"
-			android:text="@string/menu_items"
-			android:textSize="14sp"
-
-			android:focusable="false"
-			android:textAppearance="@style/TextAppearance.Compat.Notification.Title"
-
-			android:layout_toEndOf="@id/imageView"
-			android:layout_centerVertical="true" />
-		<com.google.android.material.checkbox.MaterialCheckBox
-			android:id="@+id/disableSwitch"
-			android:layout_width="wrap_content"
-			android:layout_height="wrap_content"
-			android:padding="8dp"
-			android:textSize="12sp"
-
-			android:focusable="false"
-
-			android:layout_alignParentEnd="true"
-			android:layout_centerVertical="true" />
-	</RelativeLayout>
-</androidx.cardview.widget.CardView>
+    android:layout_height="wrap_content"
+    android:layout_marginBottom="8dp"
+    app:cardCornerRadius="12dp"
+    app:cardElevation="0dp"
+    app:cardBackgroundColor="?attr/colorSurface"
+    app:rippleColor="?attr/colorPrimaryContainer"
+    app:strokeColor="?attr/colorOutlineVariant"
+    app:strokeWidth="1dp">
+    <RelativeLayout
+        android:id="@+id/relativeLayout"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:minHeight="64dp"
+        android:paddingStart="8dp"
+        android:paddingEnd="8dp">
+        <ImageView
+            android:id="@+id/imageView"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:layout_centerVertical="true"
+            android:layout_alignParentStart="true"
+            android:padding="12dp"
+            android:src="@drawable/ic_setting_mt"
+            android:contentDescription="@string/ep_drag_actions"
+            app:tint="?attr/colorPrimary" />
+        <com.google.android.material.checkbox.MaterialCheckBox
+            android:id="@+id/disableSwitch"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:layout_centerVertical="true"
+            android:layout_alignParentEnd="true"
+            android:focusable="false"
+            app:useMaterialThemeColors="false"
+            app:buttonTint="@color/editor_selection_checkbox"
+            app:buttonIconTint="@color/editor_selection_checkmark" />
+        <TextView
+            android:id="@+id/txtTitle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_toEndOf="@id/imageView"
+            android:layout_toStartOf="@id/disableSwitch"
+            android:layout_centerVertical="true"
+            android:paddingTop="14dp"
+            android:paddingBottom="14dp"
+            android:layout_marginEnd="8dp"
+            android:textSize="14sp"
+            android:textColor="?attr/colorOnSurface" />
+    </RelativeLayout>
+</com.google.android.material.card.MaterialCardView>

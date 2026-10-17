@@ -41,6 +41,7 @@ import android.content.res.ColorStateList;
 import android.content.res.Configuration;
 import android.graphics.Color;
 import android.graphics.LightingColorFilter;
+import android.graphics.drawable.Drawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -174,6 +175,10 @@ public class DexEditorActivity extends BaseActivity {
     private boolean needsModifiedTreeRebuild = true;
     private boolean needsExplorerRefresh = false;
     private long lastBackPressTime = 0;
+    private boolean compilationRunning;
+    private final Handler contentSnapshotHandler = new Handler(Looper.getMainLooper());
+    private final java.util.Map<String, Runnable> pendingContentSnapshots = new java.util.HashMap<>();
+    private final java.util.Set<EditorTab> savingTabs = new java.util.HashSet<>();
     private SharedPreferences dexPref;
     private Menu optionsMenu;
     // --- UI Components ---
@@ -213,6 +218,7 @@ public class DexEditorActivity extends BaseActivity {
     @SuppressLint("MissingSuperCall")
     @Override
     public void onBackPressed() {
+        if (compilationRunning || !savingTabs.isEmpty()) return;
         if (drawerLayout.isDrawerOpen(GravityCompat.START)) {
             drawerLayout.closeDrawer(GravityCompat.START);
             return;
@@ -267,12 +273,13 @@ public class DexEditorActivity extends BaseActivity {
         tabsRecyclerView = findViewById(R.id.tabs_recycler_view);
         Toolbar toolbar = findViewById(R.id._toolbar);
         setSupportActionBar(toolbar);
-        findViewById(R.id.dex_classes).setOnClickListener(v -> {
-            hideEditor();
-            explorerViewPager.setCurrentItem(0, false);
-        });
-        findViewById(R.id.dex_navigation).setOnClickListener(this::showNavigationMenu);
-        findViewById(R.id.dex_code_theme).setOnClickListener(v -> showCodeThemeDialog());
+        Drawable overflow = ContextCompat.getDrawable(this, R.drawable.ic_more_mt);
+        if (overflow != null) {
+            overflow = overflow.mutate();
+            DrawableCompat.setTint(overflow, MaterialColors.getColor(toolbar,
+                    com.google.android.material.R.attr.colorOnSurface));
+            toolbar.setOverflowIcon(overflow);
+        }
 
         drawerToolbar = findViewById(R.id.drawer_toolbar);
         drawerToolbar.setOverflowIcon(ContextCompat.getDrawable(this, R.drawable.ic_more_mt));
@@ -312,6 +319,8 @@ public class DexEditorActivity extends BaseActivity {
         });
 
         drawerToggle = new ActionBarDrawerToggle(this, drawerLayout, toolbar, R.string.navigation_drawer_open, R.string.navigation_drawer_close);
+        drawerToggle.getDrawerArrowDrawable().setColor(MaterialColors.getColor(toolbar,
+                com.google.android.material.R.attr.colorOnSurface));
         drawerLayout.addDrawerListener(drawerToggle);
         drawerLayout.addDrawerListener(new DrawerLayout.SimpleDrawerListener() {
             @Override
@@ -540,6 +549,8 @@ public class DexEditorActivity extends BaseActivity {
             getSupportActionBar().setTitle(R.string.dex_editor_plus);
             setToolbarSubtitle(null);
         }
+        boolean documentVisible = editorVisible && tabs.get(currentTabIndex).type != 2;
+        findViewById(R.id.dex_editor_actions).setVisibility(documentVisible ? View.VISIBLE : View.GONE);
         boolean smaliVisible = editorVisible && tabs.get(currentTabIndex).type == 0;
         int editVisibility = smaliVisible ? View.VISIBLE : View.GONE;
         findViewById(R.id.btn_undo).setVisibility(editVisibility);
@@ -575,119 +586,27 @@ public class DexEditorActivity extends BaseActivity {
         else drawerLayout.openDrawer(GravityCompat.START);
     }
 
-    private void showNavigationMenu(View anchor) {
-        PopupMenu popup = new PopupMenu(this, anchor);
-        Menu menu = popup.getMenu();
-        menu.add(0, R.id.dex_classes, 0, R.string.dex_classes);
-        menu.add(0, R.id.tabs_recycler_view, 1, R.string.opened_classes);
-        menu.add(0, R.id.explorer_tab_layout, 2, R.string.history);
-        UnifiedEditorFragment fragment = viewPager.getVisibility() == View.VISIBLE
-                ? getCurrentFragment() : null;
-        menu.add(0, R.id.search, 3, R.string.search);
-        if (fragment != null && fragment.getEditor() != null) {
-            menu.add(0, R.id.btn_undo, 4, R.string.previous_position).setEnabled(fragment.canGoBack());
-            menu.add(0, R.id.btn_redo, 5, R.string.next_position).setEnabled(fragment.canGoForward());
-            menu.add(0, R.id.jumpToLine, 6, R.string.jump_to_line);
-            if (currentTabIndex >= 0 && currentTabIndex < tabs.size() && tabs.get(currentTabIndex).type == 0) {
-                menu.add(0, R.id.navigation, 7, R.string.method_field_list);
-            }
-        }
-        popup.setOnMenuItemClickListener(item -> {
-            int id = item.getItemId();
-            if (id == R.id.dex_classes) {
-                hideEditor();
-                explorerViewPager.setCurrentItem(0, false);
-            } else if (id == R.id.tabs_recycler_view) {
-                drawerLayout.openDrawer(GravityCompat.START);
-            } else if (id == R.id.explorer_tab_layout) {
-                hideEditor();
-                explorerViewPager.setCurrentItem(1, false);
-            } else if (id == R.id.search) {
-                if (fragment != null) fragment.showSearchPanel();
-                else {
-                    hideEditor();
-                    explorerViewPager.setCurrentItem(2, false);
-                }
-            } else if (fragment != null) {
-                if (id == R.id.btn_undo) fragment.navigateHistory(false);
-                else if (id == R.id.btn_redo) fragment.navigateHistory(true);
-                else if (id == R.id.jumpToLine) fragment.showJumpToLineDialog();
-                else if (id == R.id.navigation) fragment.showMethodFieldList();
-            }
-            return true;
-        });
-        popup.show();
-    }
-
-    public void showCodeThemeDialog() {
-        SharedPreferences prefs = getSharedPreferences("editor_prefs", MODE_PRIVATE);
-        String[] values = getResources().getStringArray(R.array.dex_editor_theme_values);
-        String selected = prefs.getString("pref_dex_theme", "app");
-        int checked = 0;
-        for (int i = 0; i < values.length; i++) if (values[i].equals(selected)) checked = i;
-        new MaterialAlertDialogBuilder(this)
-                .setTitle(R.string.dex_editor_theme)
-                .setSingleChoiceItems(R.array.dex_editor_theme_entries, checked, (dialog, which) -> {
-                    prefs.edit().putString("pref_dex_theme", values[which]).apply();
-                    // Refresh colors in place: keep edits, undo history, selection and open tabs.
-                    for (Fragment page : getSupportFragmentManager().getFragments()) {
-                        if (page instanceof UnifiedEditorFragment editorPage && editorPage.getEditor() != null) {
-                            editorPage.applyPreferences();
-                        }
-                    }
-                    dialog.dismiss();
-                })
-                .setNegativeButton(android.R.string.cancel, null)
-                .show();
-    }
-
     @Override
     public boolean onCreateOptionsMenu(Menu menu) {
         this.optionsMenu = menu;
-        getMenuInflater().inflate(viewPager.getVisibility() == View.VISIBLE ? R.menu.editor_menu : R.menu.dex_editor_main_menu, menu);
         return true;
     }
 
     @Override
     public boolean onPrepareOptionsMenu(Menu menu) {
-        if (viewPager.getVisibility() == View.VISIBLE && currentTabIndex != -1 && currentTabIndex < tabs.size()) {
-            EditorTab tab = tabs.get(currentTabIndex);
-            boolean isSmali = tab.type == 0;
-            boolean isGraph = tab.type == 2;
-
-            menu.findItem(R.id.undo).setVisible(isSmali);
-            menu.findItem(R.id.redo).setVisible(isSmali);
-
-            MenuItem saveItem = menu.findItem(R.id.save);
-            saveItem.setVisible(isSmali);
-            saveItem.setEnabled(tab.isModified);
-            if (saveItem.getIcon() != null) saveItem.getIcon().setAlpha(tab.isModified ? 255 : 100);
-
-            menu.findItem(R.id.navigation).setVisible(isSmali);
-            menu.findItem(R.id.edit_menu).setVisible(isSmali);
-
-            // Sub-items in "More"
-            menu.findItem(R.id.smali2java).setVisible(isSmali).setEnabled(Build.VERSION.SDK_INT > 23);
-            menu.findItem(R.id.smali_instruction).setVisible(isSmali);
-
-            MenuItem jumpToLine = menu.findItem(R.id.jumpToLine);
-            if (jumpToLine != null) jumpToLine.setVisible(!isGraph);
-
-            MenuItem readOnlyItem = menu.findItem(R.id.read_only);
-            readOnlyItem.setVisible(isSmali);
-            readOnlyItem.setChecked(tab.isReadOnly);// preserve the read-only feature for targeted tab only
-
-            MenuItem wrapItem = menu.findItem(R.id.wrap_text);
-            if (wrapItem != null) {
-                wrapItem.setVisible(!isGraph);
-                wrapItem.setChecked(getSharedPreferences("editor_prefs", MODE_PRIVATE).getBoolean("wrap_text", false));
-            }
+        // The class browser and graph use Android's single overflow. Smali/Java
+        // documents use btn_file instead, whose popup already contains their actions.
+        // Rebuild from the current page so returning Home cannot retain an old menu.
+        menu.clear();
+        boolean editorVisible = viewPager.getVisibility() == View.VISIBLE
+                && currentTabIndex >= 0 && currentTabIndex < tabs.size();
+        if (!editorVisible) {
+            getMenuInflater().inflate(R.menu.dex_editor_main_menu, menu);
+            menu.findItem(R.id.action_compile).setEnabled(classTree != null && !compilationRunning);
+        } else if (tabs.get(currentTabIndex).type == 2) {
+            getMenuInflater().inflate(R.menu.dex_editor_graph_menu, menu);
+        } else {
             handleUndoRedo();
-            if (!isGraph) {
-                // The shared toolbar already supplies these actions. Keeping the
-                // legacy action menu visible adds a second row of icons.
-                for (int i = 0; i < menu.size(); i++) menu.getItem(i).setVisible(false);
-            }
         }
         UIHelper.tintMenuIcons(menu, MaterialColors.getColor(findViewById(R.id._toolbar),
                 com.google.android.material.R.attr.colorOnSurface));
@@ -1017,8 +936,16 @@ public class DexEditorActivity extends BaseActivity {
             }
             ImageButton btnUndo = findViewById(R.id.btn_undo);
             ImageButton btnRedo = findViewById(R.id.btn_redo);
-            if (btnUndo != null) btnUndo.setEnabled(fragment.getEditor().canUndo());
-            if (btnRedo != null) btnRedo.setEnabled(fragment.getEditor().canRedo());
+            if (btnUndo != null) {
+                boolean canUndo = fragment.getEditor().canUndo();
+                btnUndo.setEnabled(canUndo);
+                btnUndo.setAlpha(canUndo ? 1f : 0.38f);
+            }
+            if (btnRedo != null) {
+                boolean canRedo = fragment.getEditor().canRedo();
+                btnRedo.setEnabled(canRedo);
+                btnRedo.setAlpha(canRedo ? 1f : 0.38f);
+            }
         }
     }
 
@@ -1389,12 +1316,39 @@ public class DexEditorActivity extends BaseActivity {
 
     public void onContentModified(String className) {
         needsModifiedTreeRebuild = true;
+        EditorTab changed = null;
+        for (EditorTab candidate : tabs) {
+            if (candidate.type == 0 && candidate.className.equals(className)) { changed = candidate; break; }
+        }
+        if (changed == null) return;
+        final EditorTab changedTab = changed;
+        if (!changed.isModified) {
+            changed.isModified = true;
+            tabsAdapter.notifyItemChanged(tabs.indexOf(changed) + 1);
+            invalidateOptionsMenu();
+        }
+        Runnable previous = pendingContentSnapshots.remove(className);
+        if (previous != null) contentSnapshotHandler.removeCallbacks(previous);
+        Runnable snapshot = () -> {
+            pendingContentSnapshots.remove(className);
+            if (isFinishing() || isDestroyed()) return;
+            int index = tabs.indexOf(changedTab);
+            if (index < 0) return;
+            UnifiedEditorFragment fragment = getFragmentAtIndex(index);
+            if (fragment != null && fragment.getEditor() != null)
+                captureEditorContent(className, fragment.getEditor().getText().toString());
+        };
+        pendingContentSnapshots.put(className, snapshot);
+        contentSnapshotHandler.postDelayed(snapshot, 150);
+    }
+
+    /** Flush on view disposal too, so debouncing never loses the last keystroke. */
+    public void captureEditorContent(String className, String currentText) {
+        Runnable pending = pendingContentSnapshots.remove(className);
+        if (pending != null) contentSnapshotHandler.removeCallbacks(pending);
         for (int i = 0; i < tabs.size(); i++) {
             EditorTab tab = tabs.get(i);
-            if (tab.className.equals(className)) {
-                UnifiedEditorFragment fragment = getFragmentAtIndex(i);
-                if (fragment != null && fragment.getEditor() != null) {
-                    String currentText = fragment.getEditor().getText().toString();
+            if (tab.type == 0 && tab.className.equals(className)) {
                     tab.content = currentText; // Update current content to preserve it on recreation
                     
                     boolean actuallyModified = !currentText.equals(tab.originalContent);
@@ -1404,7 +1358,6 @@ public class DexEditorActivity extends BaseActivity {
                         tabsAdapter.notifyItemChanged(i + 1); // Fixed index: tabs start at position 1
                         invalidateOptionsMenu();
                     }
-                }
                 break;
             }
         }
@@ -1630,10 +1583,17 @@ public class DexEditorActivity extends BaseActivity {
         }
 
         final UnifiedEditorFragment fragment = (UnifiedEditorFragment) getSupportFragmentManager().findFragmentByTag("f" + tab.id);
-        if (fragment == null) {
-            if (onSaved != null) onSaved.run();
+        if (fragment == null || fragment.getEditor() == null || classTree == null || savingTabs.contains(tab)) {
+            if (!savingTabs.contains(tab)) Extensions.showMessage(this, "Editor is still loading. Try saving again when it is ready.");
             return;
         }
+        final io.github.rosemoe.sora.widget.CodeEditor savingEditor = fragment.getEditor();
+        final String code = savingEditor.getText().toString();
+        captureEditorContent(tab.className, code);
+        final ClassTree savingTree = classTree;
+        final boolean wasEditable = savingEditor.isEditable();
+        savingEditor.setEditable(false);
+        savingTabs.add(tab);
 
         final AlertCircularProgress pd = new AlertCircularProgress(this);
         pd.setMessage(getString(R.string.saving_x,tab.title));
@@ -1641,10 +1601,12 @@ public class DexEditorActivity extends BaseActivity {
 
         new Thread(() -> {
             try {
-                final String code = fragment.getEditor().getText().toString();
-                if (classTree.isSameAsCachedSmali(tab.className, code)) {
+                if (savingTree.isSameAsCachedSmali(tab.className, code)) {
                     runOnUiThread(() -> {
+                        savingTabs.remove(tab);
                         pd.dismiss();
+                        if (fragment.getEditor() == savingEditor) savingEditor.setEditable(wasEditable);
+                        if (isFinishing() || isDestroyed() || !tabs.contains(tab)) return;
                         tab.isModified = false;
                         tab.content = code;
                         tab.originalContent = code;
@@ -1657,9 +1619,12 @@ public class DexEditorActivity extends BaseActivity {
                     });
                     return;
                 }
-                classTree.saveClassDefIfChanged(Smali.assemble(code, SharedSmaliUtils.ASSEMBLE_OPTIONS, dexVersion), code);
+                savingTree.saveClassDefIfChanged(Smali.assemble(code, SharedSmaliUtils.ASSEMBLE_OPTIONS, dexVersion), code);
                 runOnUiThread(() -> {
+                    savingTabs.remove(tab);
                     pd.dismiss();
+                    if (fragment.getEditor() == savingEditor) savingEditor.setEditable(wasEditable);
+                    if (isFinishing() || isDestroyed() || !tabs.contains(tab)) return;
                     tab.isModified = false;
                     tab.content = code;
                     tab.originalContent = code;
@@ -1673,9 +1638,12 @@ public class DexEditorActivity extends BaseActivity {
                     handleUndoRedo();
                     if (onSaved != null) onSaved.run();
                 });
-            } catch (final Exception e) {
+            } catch (final Exception | OutOfMemoryError | LinkageError e) {
                 runOnUiThread(() -> {
+                    savingTabs.remove(tab);
                     pd.dismiss();
+                    if (fragment.getEditor() == savingEditor) savingEditor.setEditable(wasEditable);
+                    if (isFinishing() || isDestroyed()) return;
                     Notify_MT.Notify(DexEditorActivity.this, "Error saving " + tab.title, e.getMessage(), "Close");
                     fragment.setClosing(false);
                     handleUndoRedo();
@@ -1685,6 +1653,8 @@ public class DexEditorActivity extends BaseActivity {
     }
 
     private void exitActivity() {
+        contentSnapshotHandler.removeCallbacksAndMessages(null);
+        pendingContentSnapshots.clear();
         EditorMinimizer.onEditorClosed(this);
         tabs.clear();
         tabNavigationHistory.clear();
@@ -2659,21 +2629,28 @@ public class DexEditorActivity extends BaseActivity {
 
         @Override
         public void onClick(DialogInterface dialogInterface, int i) {
+            if (compilationRunning || classTree == null) return;
+            final ClassTree savingTree = classTree;
+            final List<String> dexPaths = new ArrayList<>(savingTree.paths);
+            if (dexPaths.isEmpty()) {
+                showErrorDialog("No DEX files selected for compilation.");
+                return;
+            }
+            compilationRunning = true;
             final AlertProgress alertProgress = new AlertProgress(DexEditorActivity.this);
             alertProgress.setTitle(getString(R.string.processing));
             alertProgress.setMessage("...");
-            alertProgress.setOnCancelListener(() -> isStopped = true);
             alertProgress.show();
 
             // Set compilation options
-            classTree.setCompilationOptions(sessionOptions);
+            savingTree.setCompilationOptions(sessionOptions);
 
-            new Thread() {
+            Thread worker = new Thread("hexora-dex-save") {
                 @Override
                 public void run() {
-                    Looper.prepare();
+                    ClassTree.claimWorkDir(savingTree.getWorkDir());
                     try {
-                        classTree.saveAllDexFiles(new ClassTree.DexSaveProgress() {
+                        savingTree.saveAllDexFiles(new ClassTree.DexSaveProgress() {
                             @Override
                             public void onProgress(final int progress, final int total) {
                                 runOnUiThread(() -> alertProgress.setProgress(progress, total));
@@ -2686,7 +2663,7 @@ public class DexEditorActivity extends BaseActivity {
 
                             @Override
                             public void onMessage(final String message) {
-                                if (isStopped) throw new RuntimeException("CANCELLED");
+                                if (isStopped || Thread.currentThread().isInterrupted()) throw new RuntimeException("CANCELLED");
                                 runOnUiThread(() -> alertProgress.setMessage(message));
                             }
                         });
@@ -2696,11 +2673,11 @@ public class DexEditorActivity extends BaseActivity {
                             return;
                         }
                         runOnUiThread(() -> {
+                            if (isFinishing() || isDestroyed()) return;
                             // Clear editor positions JSON on success
                             EditorPositionManager.getInstance(DexEditorActivity.this).clear();
                             //SketchwareUtil.showMessage(getApplicationContext(), "Success");
                             Intent resultIntent = new Intent();
-                            List<String> dexPaths = getIntent().getStringArrayListExtra("SelectedDexFiles");
                             resultIntent.setData(Uri.fromFile(new File(dexPaths.get(0))));
                             resultIntent.putExtra("zipFilePath", getIntent().getStringExtra("zipFilePath"));
                             resultIntent.putExtra("zipEntryPath", getIntent().getStringExtra("zipEntryPath"));
@@ -2721,7 +2698,7 @@ public class DexEditorActivity extends BaseActivity {
                             finish();
                         });
                     } catch (final Exception e) {
-                        if ("CANCELLED".equals(e.getMessage())) {
+                        if (isStopped || Thread.currentThread().isInterrupted() || "CANCELLED".equals(e.getMessage())) {
                             runOnUiThread(() -> Extensions.showMessage(DexEditorActivity.this, "Operation Cancelled"));
                             alertProgress.dismiss();
                             return;
@@ -2748,6 +2725,7 @@ public class DexEditorActivity extends BaseActivity {
                             final int finalColumn = column;
 
                             runOnUiThread(() -> {
+                                if (isFinishing() || isDestroyed()) return;
                                 // detect compile error from spceific classes and navigate to the class for fix
                                 new MaterialAlertDialogBuilder(DexEditorActivity.this)
                                         .setTitle(R.string.compile_error)
@@ -2763,13 +2741,22 @@ public class DexEditorActivity extends BaseActivity {
                                         .show();
                             });
                         } else {
-                            runOnUiThread(() -> showErrorDialog("An error occurred while processing dex\n\n---StackTrace---\n\n" + e));
+                            runOnUiThread(() -> new io.github.abdurazaaqmohammed.utils.ErrorUtil(DexEditorActivity.this).showError(e));
                         }
+                    } catch (OutOfMemoryError | LinkageError error) {
+                        runOnUiThread(() -> new io.github.abdurazaaqmohammed.utils.ErrorUtil(DexEditorActivity.this).showError(error));
+                    } finally {
+                        ClassTree.releaseWorkDir(savingTree.getWorkDir());
+                        runOnUiThread(() -> compilationRunning = false);
+                        alertProgress.dismiss();
                     }
-                    alertProgress.dismiss();
-                    Looper.loop();
                 }
-            }.start();
+            };
+            alertProgress.setOnCancelListener(() -> {
+                isStopped = true;
+                worker.interrupt();
+            });
+            worker.start();
         }
     }
 
@@ -2875,7 +2862,6 @@ public class DexEditorActivity extends BaseActivity {
         @Override
         public void onBindViewHolder(@NonNull ViewHolder holder, @SuppressLint("RecyclerView") int position) {
             boolean isSelected;
-            int skyColor = MaterialColors.getColor(holder.mainView, com.google.android.material.R.attr.colorPrimary);
             int foreground = MaterialColors.getColor(holder.mainView, com.google.android.material.R.attr.colorOnSurface);
             float swipeWidth = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 120, getResources().getDisplayMetrics());
 
@@ -2886,14 +2872,12 @@ public class DexEditorActivity extends BaseActivity {
             if (position == 0) {
                 isSelected = viewPager.getVisibility() != View.VISIBLE;
                 holder.title.setText(R.string.dex_editor_plus);
-                boolean dark = (getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
-                int theme = getIntent().getIntExtra("theme", dark ? R.style.Theme_MyApp_Dark : R.style.Theme_MyApp_Light);
-                holder.title.setTextColor(isSelected ? skyColor : foreground);
+                holder.title.setTextColor(foreground);
                 holder.path.setVisibility(View.GONE);
                 holder.icon.setImageResource(R.drawable.ic_home);
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                    holder.icon.setImageTintList(ColorStateList.valueOf(isSelected ? skyColor : foreground));
-                } else holder.icon.setColorFilter(new LightingColorFilter(Color.BLACK, isSelected ? skyColor : foreground));
+                    holder.icon.setImageTintList(ColorStateList.valueOf(foreground));
+                } else holder.icon.setColorFilter(new LightingColorFilter(Color.BLACK, foreground));
                 holder.mainView.setOnClickListener(v -> {
                     drawerLayout.closeDrawer(GravityCompat.START);
                     v.postDelayed(this::hideEditor, 250);
@@ -2905,9 +2889,7 @@ public class DexEditorActivity extends BaseActivity {
                 EditorTab tab = tabs.get(tabIndex);
                 isSelected = (viewPager.getVisibility() == View.VISIBLE && tabIndex == currentTabIndex);
                 holder.title.setText((tab.isModified ? "*" : "") + tab.title); // highlight the spcific edited classes with star
-                boolean dark = (getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
-                int theme = getIntent().getIntExtra("theme", dark ? R.style.Theme_MyApp_Dark : R.style.Theme_MyApp_Light);
-                holder.title.setTextColor(isSelected ? skyColor : foreground);
+                holder.title.setTextColor(foreground);
 
                 holder.path.setVisibility(View.VISIBLE);
                 holder.path.setText(tab.className);
@@ -2919,8 +2901,8 @@ public class DexEditorActivity extends BaseActivity {
                     holder.icon.setImageResource(R.drawable.ic_edit_mt);
                 }
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                    holder.icon.setImageTintList(ColorStateList.valueOf(isSelected ? skyColor : foreground));
-                } else holder.icon.setColorFilter(new LightingColorFilter(Color.BLACK, isSelected ? skyColor : foreground));
+                    holder.icon.setImageTintList(ColorStateList.valueOf(foreground));
+                } else holder.icon.setColorFilter(new LightingColorFilter(Color.BLACK, foreground));
 
                 holder.mainView.setOnClickListener(v -> {
                     int currentPos = holder.getBindingAdapterPosition();
@@ -3000,12 +2982,12 @@ public class DexEditorActivity extends BaseActivity {
                     }
                 });
             }
-            if (isSelected) holder.mainView.setBackgroundColor(Color.parseColor("#E1F5FE"));
-            else {
-                TypedValue tv = new TypedValue();
-                getTheme().resolveAttribute(com.google.android.material.R.attr.colorSurface, tv, true);
-                holder.mainView.setBackgroundColor(tv.data);
-            }
+            holder.path.setTextColor(MaterialColors.getColor(holder.mainView,
+                    com.google.android.material.R.attr.colorOnSurfaceVariant));
+            holder.title.setTypeface(holder.title.getTypeface(),
+                    isSelected ? android.graphics.Typeface.BOLD : android.graphics.Typeface.NORMAL);
+            holder.mainView.setBackgroundResource(R.drawable.bg_dex_drawer_row);
+            holder.mainView.setSelected(isSelected);
         }
 
         public void closeOtherTabs(int index) {

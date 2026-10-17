@@ -148,7 +148,7 @@ public class MainFilesArrayAdapter extends RecyclerView.Adapter<MainFilesArrayAd
                     public List<File> selectedImages() {
                         List<File> out = new ArrayList<>();
                         for (int p : selectedPositions) {
-                            Object o = values[p];
+                            Object o = MainFilesArrayAdapter.this.values[p];
                             if (o instanceof File f) {
                                 if (f.isFile() && FileUtils.isImageFile(f.getName())) out.add(f);
                             }
@@ -839,6 +839,7 @@ public class MainFilesArrayAdapter extends RecyclerView.Adapter<MainFilesArrayAd
     }
 
     public void handleSwipe(int position) {
+        if (position <= 0 || position >= values.length) return;
         context.setSelectedPane(pane1 ? 1 : 2);
         int changedStart = position;
         int changedEnd = position;
@@ -873,6 +874,7 @@ public class MainFilesArrayAdapter extends RecyclerView.Adapter<MainFilesArrayAd
     }
 
     public void handleMultiSelect(int position) {
+        if (position <= 0 || position >= values.length) return;
         if (selectedPositions.contains(position)) {
             selectedPositions.remove(position);
             if (selectedPositions.isEmpty()) {
@@ -925,7 +927,7 @@ public class MainFilesArrayAdapter extends RecyclerView.Adapter<MainFilesArrayAd
             if (selectedPositions.contains(i)) selectedPositions.remove(i);
             else selectedPositions.add(i);
         }
-        notifyDataSetChanged();
+        notifyItemRangeChanged(0, values.length, SELECTION_PAYLOAD);
     }
 
     public void selectSameType() {
@@ -948,12 +950,19 @@ public class MainFilesArrayAdapter extends RecyclerView.Adapter<MainFilesArrayAd
                     selectedPositions.add(i);
             }
         }
-        notifyDataSetChanged();
+        notifyItemRangeChanged(0, values.length, SELECTION_PAYLOAD);
     }
 
     public void selectAll() {
         setMultiSelectMode(true);
         for (int i = (isInZip ? 0 : 1); i < values.length; i++) selectedPositions.add(i);
-        notifyDataSetChanged();
+        notifyItemRangeChanged(0, values.length, SELECTION_PAYLOAD);
+    }
+
+    @Override
+    public void onViewRecycled(@NonNull ViewHolder holder) {
+        holder.fileIconView.setTag(null);
+        holder.fileIconView.setImageDrawable(null);
+        super.onViewRecycled(holder);
     }
 }

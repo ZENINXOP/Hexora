@@ -1,0 +1,9 @@
+{
+  "name": "Hexora sample syntax",
+  "scopeName": "source.hexora-sample",
+  "fileTypes": ["hxsample"],
+  "patterns": [
+    {"name": "keyword.control", "match": "\\b(hello|return)\\b"},
+    {"name": "string.quoted.double", "begin": "\"", "end": "\""}
+  ]
+}

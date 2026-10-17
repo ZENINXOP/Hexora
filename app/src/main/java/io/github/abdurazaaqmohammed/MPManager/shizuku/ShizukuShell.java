@@ -52,7 +52,7 @@ public final class ShizukuShell {
                 });
                 Shizuku.addBinderDeadListener(() -> Log.d(TAG, "binder dead"));
                 Shizuku.addRequestPermissionResultListener((requestCode, grantResult) -> {
-                    if (requestCode == 0 && grantResult == PackageManager.PERMISSION_GRANTED) notifyBinderCallbacks();
+                    if (grantResult == PackageManager.PERMISSION_GRANTED) notifyBinderCallbacks();
                 });
             }
             Log.d(TAG, "warmUp: binder=" + Shizuku.getBinder() + " ping=" + Shizuku.pingBinder());
@@ -71,6 +71,10 @@ public final class ShizukuShell {
         synchronized (BINDER_CALLBACKS) {
             BINDER_CALLBACKS.add(callback);
         }
+    }
+
+    public static void removeBinderCallback(Runnable callback) {
+        synchronized (BINDER_CALLBACKS) { BINDER_CALLBACKS.remove(callback); }
     }
 
     private static void notifyBinderCallbacks() {

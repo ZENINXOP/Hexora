@@ -99,6 +99,26 @@ public class App extends MultiDexApplication {
         showToast(context, msg);
     }
 
+    @Override public void onTrimMemory(int level) {
+        super.onTrimMemory(level);
+        if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) releasePreviewCaches();
+    }
+
+    @Override public void onLowMemory() {
+        super.onLowMemory();
+        releasePreviewCaches();
+    }
+
+    private static void releasePreviewCaches() {
+        // Drop cache ownership; displayed drawables must never be recycled here.
+        io.github.abdurazaaqmohammed.adapters.main.FileIconLoader.clearPreviewCache();
+        io.github.abdurazaaqmohammed.ui.dialogs.PickerIconLoader.clearPreviewCache();
+        io.github.abdurazaaqmohammed.utils.ApkMetadata.clearCache();
+        io.github.abdurazaaqmohammed.player.MediaArtwork.clearCache();
+        io.github.abdurazaaqmohammed.ApkExtractor.AppIconLoader.clearCache();
+        io.github.abdurazaaqmohammed.utils.ZipArchiveCache.clear();
+    }
+
     public static void showToast(Context context, String message) {
         try {
             Extensions.showMessage((Activity) context, message);

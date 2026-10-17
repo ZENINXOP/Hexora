@@ -92,6 +92,7 @@ public class SettingsController {
     private final MainActivity host;
     private final ExternalSettingLauncher externalSettingLauncher;
     private final Handler handler = new Handler(Looper.getMainLooper());
+    private SettingsSections sections;
 
     public SettingsController(MainActivity activity) {
         this(activity, activity, activity::launchExternalSetting);
@@ -108,53 +109,12 @@ public class SettingsController {
         SharedPreferences settings = PreferenceManager.getDefaultSharedPreferences(activity);
 
         MaterialButtonToggleGroup themeButtons = settingsDialog.findViewById(R.id.themeToggleGroup);
-        String currentThemeId = ThemeRegistry.getCurrentId(activity);
-        themeButtons.check(
-                BuiltInThemes.SYSTEM_DEFAULT_ID.equals(currentThemeId) ? R.id.systemThemeButton
-                        : BuiltInThemes.LIGHT_ID.equals(currentThemeId) ? R.id.lightThemeButton
-                                : BuiltInThemes.DARK_ID.equals(currentThemeId) ? R.id.darkThemeButton
-                                        : R.id.blackThemeButton);
-        for (int i = 0; i < themeButtons.getChildCount(); i++) {
-            View child = themeButtons.getChildAt(i);
-            if (child instanceof MaterialButton) {
-                child.setOnLongClickListener(v3 -> {
-                    int buttonId = v3.getId();
-                    if (buttonId == R.id.lightThemeButton) {
-                        Extensions.showMessage(activity, R.string.light_theme);
-                    } else if (buttonId == R.id.darkThemeButton) {
-                        Extensions.showMessage(activity, R.string.dark_theme);
-                    } else if (buttonId == R.id.blackThemeButton) {
-                        Extensions.showMessage(activity, R.string.black_theme);
-                    } else if (buttonId == R.id.systemThemeButton) {
-                        Extensions.showMessage(activity, R.string.system_theme);
-                    }
-                    return true;
-                });
-            }
-        }
-
+        themeButtons.check(ThemeRegistry.isDark(activity) ? R.id.darkThemeButton : R.id.lightThemeButton);
         themeButtons.addOnButtonCheckedListener((group, checkedId, isChecked) -> {
-            if (isChecked) {
-                String pluginId;
-                boolean system = false;
-                if (checkedId == R.id.lightThemeButton) {
-                    themeButtons.check(R.id.lightThemeButton);
-                    pluginId = BuiltInThemes.LIGHT_ID;
-                } else if (checkedId == R.id.darkThemeButton) {
-                    themeButtons.findViewById(R.id.darkThemeButton);
-                    pluginId = BuiltInThemes.DARK_ID;
-                } else if (checkedId == R.id.blackThemeButton) {
-                    themeButtons.check(R.id.blackThemeButton);
-                    pluginId = BuiltInThemes.BLACK_ID;
-                } else {
-                    system = true;
-                    themeButtons.check(R.id.systemThemeButton);
-                    pluginId = BuiltInThemes.SYSTEM_DEFAULT_ID;
-                }
-                applySystemThemeFlag(system);
-                ThemeRegistry.setCurrentId(activity, pluginId);
-                settings.edit().putInt("theme", ThemeRegistry.currentStyleRes(activity)).apply();
-                activity.recreate();
+            if (!isChecked) return;
+            String id = checkedId == R.id.darkThemeButton ? BuiltInThemes.DARK_ID : BuiltInThemes.LIGHT_ID;
+            if (!ThemeRegistry.applyChoice(activity, id)) {
+                group.check(ThemeRegistry.isDark(activity) ? R.id.darkThemeButton : R.id.lightThemeButton);
             }
         });
 
@@ -218,6 +178,15 @@ public class SettingsController {
         checkUpdateNow.setOnClickListener(v1 -> UpdateUtil.checkForUpdates(true, activity));
         settingsDialog.findViewById(R.id.about).setOnClickListener(v -> new UIHelper(activity).showAboutDialog());
         setupPluginSettings(settingsDialog, settings);
+        sections = new SettingsSections(activity, settingsDialog);
+    }
+
+    public void saveUiState(Bundle state) {
+        if (sections != null) sections.save(state);
+    }
+
+    public void restoreUiState(Bundle state) {
+        if (sections != null) sections.restore(state);
     }
 
     public void persist(ScrollView root) {
@@ -253,10 +222,16 @@ public class SettingsController {
                 new MaterialCardView(activity);
         LinearLayout.LayoutParams cardParams = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        cardParams.bottomMargin = (int) (5 * density);
+        cardParams.bottomMargin = (int) (10 * density);
         card.setLayoutParams(cardParams);
-        card.setRadius(8 * density);
+        card.setId(R.id.settingsPluginsSection);
+        card.setRadius(16 * density);
         card.setCardElevation(0);
+        card.setCardBackgroundColor(com.google.android.material.color.MaterialColors.getColor(
+                activity, com.google.android.material.R.attr.colorSurface, 0));
+        card.setStrokeColor(com.google.android.material.color.MaterialColors.getColor(
+                activity, com.google.android.material.R.attr.colorOutlineVariant, 0));
+        card.setStrokeWidth(Math.max(1, (int) density));
 
         LinearLayout box = new LinearLayout(activity);
         box.setOrientation(LinearLayout.VERTICAL);
@@ -382,7 +357,29 @@ public class SettingsController {
         } catch (Exception ignored) {
         }
 
-        container.addView(card);
+        // Give plugin settings the same searchable, collapsible structure.
+        box.removeView(header);
+        card.removeView(box);
+        box.setTag("settings_content");
+        box.setVisibility(View.GONE);
+        box.setPadding(pad, 0, pad, pad);
+        LinearLayout section = new LinearLayout(activity);
+        section.setOrientation(LinearLayout.VERTICAL);
+        section.setLayoutParams(new ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        LayoutInflater.from(activity).inflate(R.layout.item_settings_section_header, section, true);
+        View divider = new View(activity);
+        divider.setBackgroundColor(com.google.android.material.color.MaterialColors.getColor(
+                activity, com.google.android.material.R.attr.colorOutlineVariant, 0));
+        LinearLayout.LayoutParams dividerParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, Math.max(1, (int) density));
+        dividerParams.bottomMargin = (int) (12 * density);
+        box.addView(divider, 0, dividerParams);
+        section.addView(box);
+        card.addView(section);
+        View footer = root.findViewById(R.id.settingsEmpty);
+        int footerIndex = container.indexOfChild(footer);
+        container.addView(card, footerIndex < 0 ? container.getChildCount() : footerIndex);
     }
 
     /** Opens an external setting config screen after consent; persists booleans. */
@@ -774,8 +771,8 @@ public class SettingsController {
     private void setupAccessSettings(ScrollView root, SharedPreferences settings) {
         RootManager rootManager = RootManager.getInstance(activity);
         AutoCompleteTextView workingModeTv = root.findViewById(R.id.workingModeTv);
-        MaterialSwitch rootStatusSwitch = root.findViewById(R.id.rootStatusSwitch);
-        MaterialSwitch shizukuStatusSwitch = root.findViewById(R.id.shizukuStatusSwitch);
+        CompoundButton rootStatusSwitch = root.findViewById(R.id.rootStatusSwitch);
+        CompoundButton shizukuStatusSwitch = root.findViewById(R.id.shizukuStatusSwitch);
         MaterialButton grantShizukuBtn = root.findViewById(R.id.grantShizukuBtn);
         MaterialSwitch silentInstallToggle = root.findViewById(R.id.silentInstallToggle);
         MaterialSwitch rootFileOpsToggle = root.findViewById(R.id.rootFileOpsToggle);
@@ -802,8 +799,11 @@ public class SettingsController {
             workingModeTv.setText(labelShizuku, false);
         } else workingModeTv.setText(labelNonRoot, false);
 
-        rootStatusSwitch.setChecked(false);
+        rootStatusSwitch.setChecked(rootManager.hasCachedRootAccess());
         Runnable refreshShizukuRow = () -> {
+            boolean rootAvailable = rootManager.hasCachedRootAccess();
+            rootStatusSwitch.setChecked(rootAvailable);
+            rootStatusSwitch.setText(rootAvailable ? R.string.root_available : R.string.root_not_available);
             boolean running = ShizukuManager.isRunning();
             boolean granted = ShizukuManager.hasPermission();
             shizukuStatusSwitch.setChecked(running && granted);
@@ -841,10 +841,13 @@ public class SettingsController {
                 workingModeTv.setText(labelRoot, false);
                 Extensions.showMessage(activity, "Checking root…");
                 new Thread(() -> {
+                    rootManager.refreshRootCache();
                     boolean ok = rootManager.isRootAvailable();
                     handler.post(() -> {
                         if (ok) {
                             rootManager.setWorkingMode(RootManager.WorkingMode.ROOT);
+                            settings.edit().putBoolean("root_file_ops", true).apply();
+                            rootFileOpsToggle.setChecked(true);
                             rootStatusSwitch.setChecked(true);
                         } else {
                             Extensions.showMessage(activity, R.string.root_denied_msg);
@@ -864,6 +867,8 @@ public class SettingsController {
                     return;
                 }
                 rootManager.setWorkingMode(RootManager.WorkingMode.SHIZUKU);
+                settings.edit().putBoolean("shizuku_file_ops", true).apply();
+                shizukuFileOpsToggle.setChecked(true);
                 rootStatusSwitch.setChecked(false);
                 applyModeUi.run();
                 new Thread(() -> ShizukuManager.warmUp(activity)).start();
@@ -901,6 +906,7 @@ public class SettingsController {
         final Shizuku.OnRequestPermissionResultListener[] holder =
                 new Shizuku.OnRequestPermissionResultListener[1];
         holder[0] = (code, result) -> {
+            if (code != ShizukuManager.PERMISSION_CODE) return;
             ShizukuManager.removePermissionListener(holder[0]);
             handler.post(() -> {
                 if (result == PackageManager.PERMISSION_GRANTED) {
@@ -948,10 +954,6 @@ public class SettingsController {
             host.refreshSidebar(host.getSidebarSectionOrder());
         } catch (Exception ignored) {
         }
-    }
-
-    private void applySystemThemeFlag(boolean system) {
-        if (host != null) host.setSystemTheme(system);
     }
 
     private boolean isLogEnabled() {

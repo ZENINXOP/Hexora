@@ -100,28 +100,28 @@ public class Smali {
         ExecutorService executor = Executors.newFixedThreadPool(options.jobs);
         List<Future<Boolean>> tasks = Lists.newArrayList();
 
-        for (final File file: filesToProcessSet) {
-            tasks.add(executor.submit(() -> assembleSmaliFile(file, dexBuilder, options)));
-        }
-
-        for (Future<Boolean> task: tasks) {
-            while(true) {
-                try {
-                    try {
-                        if (!task.get()) {
-                            errors = true;
-                        }
-                    } catch (ExecutionException ex) {
-                        throw new RuntimeException(ex);
-                    }
-                } catch (InterruptedException ex) {
-                    continue;
-                }
-                break;
+        try {
+            for (final File file: filesToProcessSet) {
+                if (Thread.currentThread().isInterrupted()) throw new java.io.InterruptedIOException("Smali compilation cancelled");
+                tasks.add(executor.submit(() -> {
+                    if (Thread.currentThread().isInterrupted()) throw new java.io.InterruptedIOException("Smali compilation cancelled");
+                    return assembleSmaliFile(file, dexBuilder, options);
+                }));
             }
+            for (Future<Boolean> task: tasks) {
+                try {
+                    if (!task.get()) errors = true;
+                } catch (InterruptedException error) {
+                    Thread.currentThread().interrupt();
+                    throw new java.io.InterruptedIOException("Smali compilation cancelled");
+                } catch (ExecutionException error) {
+                    throw new IOException("Smali compilation failed", error.getCause());
+                }
+            }
+        } finally {
+            executor.shutdownNow();
         }
-
-        executor.shutdown();
+        if (Thread.currentThread().isInterrupted()) throw new java.io.InterruptedIOException("Smali compilation cancelled");
 
         if (errors) {
             return false;

@@ -52,6 +52,17 @@ public class SortFilterController {
     private EditText filterBar;
     private View pathLayout;
     private boolean syncingFilterUi;
+    private final android.os.Handler filterHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+    private final Runnable[] pendingFilters = new Runnable[2];
+    private final java.util.concurrent.ThreadPoolExecutor filterWorker = new java.util.concurrent.ThreadPoolExecutor(
+            2, 2, 0L, java.util.concurrent.TimeUnit.MILLISECONDS, new java.util.concurrent.LinkedBlockingQueue<>());
+    private final java.util.concurrent.Future<?>[] filterJobs = new java.util.concurrent.Future<?>[2];
+    private final int[] filterRequests = new int[2];
+
+    public void close() {
+        filterHandler.removeCallbacksAndMessages(null);
+        filterWorker.shutdownNow();
+    }
 
     public SortFilterController(MainActivity activity) {
         this.activity = activity;
@@ -79,7 +90,13 @@ public class SortFilterController {
                 if (syncingFilterUi) return;
                 if (activity.lastPaneSelected == 1) currentPane1Filter = s.toString().toLowerCase(Locale.ROOT);
                 else currentPane2Filter = s.toString().toLowerCase(Locale.ROOT);
-                applyFilterToCurrentPane();
+                boolean pane1 = activity.lastPaneSelected == 1;
+                int index = pane1 ? 0 : 1;
+                filterRequests[index]++;
+                if (filterJobs[index] != null) filterJobs[index].cancel(true);
+                if (pendingFilters[index] != null) filterHandler.removeCallbacks(pendingFilters[index]);
+                pendingFilters[index] = () -> applyFilterToPane(pane1);
+                filterHandler.postDelayed(pendingFilters[index], 150);
             }
 
             @Override
@@ -136,31 +153,67 @@ public class SortFilterController {
     }
 
     public void applyFilterToCurrentPane() {
-        boolean isPane1 = activity.lastPaneSelected == 1;
-        RecyclerView.Adapter a = activity.getCurrentPane().getAdapter();
+        boolean pane1 = activity.lastPaneSelected == 1;
+        int index = pane1 ? 0 : 1;
+        if (pendingFilters[index] != null) filterHandler.removeCallbacks(pendingFilters[index]);
+        applyFilterToPane(pane1);
+    }
+
+    private void applyFilterToPane(boolean isPane1) {
+        if (activity.isFinishing() || activity.isDestroyed()) return;
+        RecyclerView pane = activity.findViewById(isPane1 ? R.id.listViewPane1 : R.id.listViewPane2);
+        RecyclerView.Adapter a = pane.getAdapter();
         if (!(a instanceof MainFilesArrayAdapter)) return;
         MainFilesArrayAdapter adapter = (MainFilesArrayAdapter) a;
-
+        int index = isPane1 ? 0 : 1;
+        int request = ++filterRequests[index];
+        if (filterJobs[index] != null) filterJobs[index].cancel(true);
+        filterWorker.purge();
+        String query = isPane1 ? currentPane1Filter : currentPane2Filter;
+        File folder = isPane1 ? activity.pane1Folder : activity.pane2Folder;
         if (adapter.isInZip) {
             List<ZipEntryInfo> entries = activity.paneZipEntries(isPane1);
             if (entries == null) return;
-            List<ZipEntryInfo> filtered = filterZipEntries(entries, isPane1);
-            activity.replacePaneListing(isPane1, "zip:" + (isPane1 ? activity.pane1Folder : activity.pane2Folder).getAbsolutePath()
+            filterJobs[index] = filterWorker.submit(() -> {
+            List<ZipEntryInfo> filtered = new ArrayList<>();
+            for (ZipEntryInfo entry : entries) {
+                if (Thread.currentThread().isInterrupted()) return;
+                if (entry.getName().equals("..") || entry.getName().toLowerCase(Locale.ROOT).contains(query)) filtered.add(entry);
+            }
+            filterHandler.post(() -> {
+            if (!canPublishFilter(pane, adapter, index, request)) return;
+            activity.replacePaneListing(isPane1, "zip:" + folder.getAbsolutePath()
                     + "!" + adapter.currentZipPath, new MainFilesArrayAdapter(activity, filtered.toArray(new ZipEntryInfo[0]), null, isPane1, true,
                     adapter.currentZipPath));
-            activity.setCurrentFolder(activity.archiveDisplayPath(isPane1 ? activity.pane1Folder : activity.pane2Folder)
+            if (activity.lastPaneSelected == (isPane1 ? 1 : 2)) activity.setCurrentFolder(activity.archiveDisplayPath(folder)
                     + "!" + adapter.currentZipPath, filtered);
             activity.findViewById(isPane1 ? R.id.pane1Empty : R.id.pane2Empty).setVisibility(filtered.size() <= 1 ? View.VISIBLE : View.GONE);
+            });
+            });
         } else {
             File[] files = activity.paneFiles(isPane1);
             if (files == null) return;
-            File[] filtered = filterFiles(files, isPane1);
-            File folder = isPane1 ? activity.pane1Folder : activity.pane2Folder;
+            filterJobs[index] = filterWorker.submit(() -> {
+            List<File> matches = new ArrayList<>();
+            for (File file : files) {
+                if (Thread.currentThread().isInterrupted()) return;
+                if (file.getName().toLowerCase(Locale.ROOT).contains(query)) matches.add(file);
+            }
+            File[] filtered = matches.toArray(new File[0]);
+            filterHandler.post(() -> {
+            if (!canPublishFilter(pane, adapter, index, request)) return;
             activity.replacePaneListing(isPane1, "file:" + folder.getAbsolutePath(), new MainFilesArrayAdapter(activity, filtered,
                     folder.getParentFile() != null ? folder.getParentFile() : folder, isPane1, false, null));
-            activity.setCurrentFolder(folder, filtered);
+            if (activity.lastPaneSelected == (isPane1 ? 1 : 2)) activity.setCurrentFolder(folder, filtered);
             activity.findViewById(isPane1 ? R.id.pane1Empty : R.id.pane2Empty).setVisibility(filtered.length == 0 ? View.VISIBLE : View.GONE);
+            });
+            });
         }
+    }
+
+    private boolean canPublishFilter(RecyclerView pane, MainFilesArrayAdapter source, int index, int request) {
+        return !activity.isFinishing() && !activity.isDestroyed()
+                && filterRequests[index] == request && pane.getAdapter() == source;
     }
 
     public boolean isNotHidden(File f) {

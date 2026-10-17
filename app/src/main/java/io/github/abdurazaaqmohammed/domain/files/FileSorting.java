@@ -33,35 +33,59 @@ public final class FileSorting {
 
     public static void sortFiles(File[] files, int sortBy, boolean reverse) {
         if (files == null) return;
-        Arrays.sort(files, (f1, f2) -> {
+        // Snapshot once: File methods may hit disk/Binder, and changing metadata
+        // during TimSort can also violate the comparator contract.
+        FileSortKey[] keys = new FileSortKey[files.length];
+        for (int i = 0; i < files.length; i++) {
+            if (Thread.currentThread().isInterrupted()) throw new java.util.concurrent.CancellationException();
+            keys[i] = new FileSortKey(files[i], sortBy);
+        }
+        Arrays.sort(keys, (f1, f2) -> {
+            if (f1.directory != f2.directory) return f1.directory ? -1 : 1;
             int result;
             switch (sortBy) {
                 case SORT_SIZE:
-                    result = Long.compare(f1.length(), f2.length());
+                    result = Long.compare(f1.value, f2.value);
                     break;
                 case SORT_DATE:
-                    result = Long.compare(f1.lastModified(), f2.lastModified());
+                    result = Long.compare(f1.value, f2.value);
                     break;
                 case SORT_TYPE:
-                    String ext1 = getExt(f1.getName());
-                    String ext2 = getExt(f2.getName());
-                    result = ext1.compareToIgnoreCase(ext2);
-                    if (result == 0) result = f1.getName().compareToIgnoreCase(f2.getName());
+                    result = f1.extension.compareToIgnoreCase(f2.extension);
+                    if (result == 0) result = f1.name.compareToIgnoreCase(f2.name);
                     break;
                 default:
-                    result = f1.getName().compareToIgnoreCase(f2.getName());
+                    result = f1.name.compareToIgnoreCase(f2.name);
                     break;
             }
-            if (f1.isDirectory() && !f2.isDirectory()) return -1;
-            if (!f1.isDirectory() && f2.isDirectory()) return 1;
             return reverse ? -result : result;
         });
+        for (int i = 0; i < files.length; i++) files[i] = keys[i].file;
     }
+
+    private static final class FileSortKey {
+        final File file;
+        final String name, extension;
+        final boolean directory;
+        final long value;
+
+        FileSortKey(File file, int sortBy) {
+            this.file = file;
+            name = file.getName();
+            extension = sortBy == SORT_TYPE ? getExt(name) : "";
+            directory = file.isDirectory();
+            value = sortBy == SORT_SIZE ? file.length() : sortBy == SORT_DATE ? file.lastModified() : 0;
+        }
+    }
+
+    private static final java.util.regex.Pattern CLASSES_DEX = java.util.regex.Pattern.compile("classes\\d*\\.dex");
 
     public static void sortZipEntries(List<ZipEntryInfo> entries, String folderPath, int sortBy, boolean reverse) {
         if (entries == null) return;
         boolean isApk = isZipFolderApk(folderPath);
         Collections.sort(entries, (e1, e2) -> {
+            if (e1 == e2) return 0;
+            if (e1.getName().equals("..") && e2.getName().equals("..")) return 0;
             if (e1.getName().equals("..")) return -1;
             if (e2.getName().equals("..")) return 1;
             if (isApk) {
@@ -83,14 +107,14 @@ public final class FileSorting {
         if (folderPath == null) return false;
         int bang = folderPath.indexOf('!');
         String zipPath = bang == -1 ? folderPath : folderPath.substring(0, bang);
-        return zipPath.toLowerCase().endsWith(".apk");
+        return zipPath.toLowerCase(java.util.Locale.ROOT).endsWith(".apk");
     }
 
     private static int apkEntryPriority(ZipEntryInfo entry) {
         if (entry.isDirectory()) return APK_PRIORITY_DIR;
         String name = entry.getName();
         if (name.equalsIgnoreCase("AndroidManifest.xml")) return APK_PRIORITY_MANIFEST;
-        if (name.matches("classes\\d*\\.dex")) return APK_PRIORITY_CLASSES;
+        if (CLASSES_DEX.matcher(name).matches()) return APK_PRIORITY_CLASSES;
         if (name.equals("resources.arsc")) return APK_PRIORITY_ARSC;
         return APK_PRIORITY_OTHER;
     }

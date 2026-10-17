@@ -45,6 +45,10 @@ public enum FileType {
     public final String label;
     public final int color;
     private final String[] extensions;
+    private static final java.util.Map<String, FileType> BY_EXTENSION = new java.util.HashMap<>();
+    static {
+        for (FileType type : values()) for (String extension : type.extensions) BY_EXTENSION.put(extension, type);
+    }
 
     FileType(String label, int color, String... extensions) {
         this.label = label;
@@ -72,9 +76,6 @@ public enum FileType {
         int dot = name.lastIndexOf('.');
         if (dot < 0 || dot == name.length() - 1) return null;
         String extension = name.substring(dot + 1);
-        for (FileType type : values()) {
-            for (String candidate : type.extensions) if (candidate.equals(extension)) return type;
-        }
-        return null;
+        return BY_EXTENSION.get(extension);
     }
 }

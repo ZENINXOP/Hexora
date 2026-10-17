@@ -121,10 +121,14 @@ public class RecyclerViewAdapter extends RecyclerView.Adapter<RecyclerViewAdapte
 	public void onBindViewHolder(final MyViewHolder holder, final int position) {
 		HashMap<String, Object> item = data.get(position);
 		String id = (String) item.get("id");
-		String title = (String) item.get("title");
-		boolean disabled = item.containsKey("disabled") && (boolean) item.get("disabled");
+		String title = item.get("title") instanceof String text ? text : id;
+		boolean disabled = Boolean.TRUE.equals(item.get("disabled"));
 		
 		holder.mTitle.setText(title);
+        holder.rowView.setActivated(false);
+        applyRowBackground(holder.rowView);
+        applyRowColors(holder, !disabled);
+        holder.disableSwitch.setContentDescription(title);
 		
 		if (buttonIcons.containsKey(id)) {
 			holder.imageView.setImageResource(buttonIcons.get(id));
@@ -132,12 +136,16 @@ public class RecyclerViewAdapter extends RecyclerView.Adapter<RecyclerViewAdapte
 			holder.imageView.setImageResource(R.drawable.ic_setting_mt);
 		}
 		
+		holder.disableSwitch.setOnCheckedChangeListener(null);
 		holder.disableSwitch.setChecked(!disabled);
 		
 		holder.disableSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
             item.put("disabled", !isChecked);
+            applyRowColors(holder, isChecked);
             updateJson();
         });
+
+        holder.rowView.setOnClickListener(view -> holder.disableSwitch.setChecked(!holder.disableSwitch.isChecked()));
 		
 		// Drag handling
 		holder.imageView.setOnTouchListener((v, event) -> {
@@ -155,6 +163,7 @@ public class RecyclerViewAdapter extends RecyclerView.Adapter<RecyclerViewAdapte
 	
 	@Override
 	public void onRowMoved(int fromPosition, int toPosition) {
+		if (fromPosition < 0 || toPosition < 0 || fromPosition >= data.size() || toPosition >= data.size()) return;
 		if (fromPosition < toPosition) {
 			for (int i = fromPosition; i < toPosition; i++) {
 				Collections.swap(data, i, i + 1);
@@ -179,9 +188,31 @@ public class RecyclerViewAdapter extends RecyclerView.Adapter<RecyclerViewAdapte
 	
 	@Override
 	public void onRowSelected(MyViewHolder myViewHolder) {
+		myViewHolder.rowView.setActivated(true);
+        applyRowBackground(myViewHolder.rowView);
 	}
 	
 	@Override
 	public void onRowClear(MyViewHolder myViewHolder) {
+		myViewHolder.rowView.setActivated(false);
+        applyRowBackground(myViewHolder.rowView);
 	}
+
+    private void applyRowBackground(View row) {
+        // Keep normal and dragged rows in the active activity palette.
+        ((com.google.android.material.card.MaterialCardView) row).setCardBackgroundColor(
+                com.google.android.material.color.MaterialColors.getColor(row,
+                        row.isActivated() ? com.google.android.material.R.attr.colorPrimaryContainer
+                                : com.google.android.material.R.attr.colorSurface));
+    }
+
+    private void applyRowColors(MyViewHolder holder, boolean shown) {
+        int text = com.google.android.material.color.MaterialColors.getColor(holder.rowView,
+                shown ? com.google.android.material.R.attr.colorOnSurface : com.google.android.material.R.attr.colorOnSurfaceVariant);
+        int icon = com.google.android.material.color.MaterialColors.getColor(holder.rowView,
+                shown ? com.google.android.material.R.attr.colorPrimary : com.google.android.material.R.attr.colorOnSurfaceVariant);
+        holder.mTitle.setTextColor(text);
+        androidx.core.widget.ImageViewCompat.setImageTintList(holder.imageView,
+                android.content.res.ColorStateList.valueOf(icon));
+    }
 }

@@ -76,6 +76,10 @@ public final class ZipArchiveCache {
         }
     }
 
+    public static void clear() {
+        synchronized (CACHE) { CACHE.clear(); }
+    }
+
     public static String folderPath(String path) {
         if (path == null || path.isEmpty()) return "";
         String normalized = path.replace('\\', '/');
@@ -87,20 +91,34 @@ public final class ZipArchiveCache {
         private final Map<String, FileHeader> headers = new HashMap<>();
         private final Map<String, List<ZipEntryInfo>> folders = new HashMap<>();
 
+        private static final class FolderDetails {
+            long size;
+            long recordedModified;
+            long descendantModified;
+        }
+
         private Archive(File file) throws IOException {
             if (!file.isFile()) throw new IOException("Archive no longer exists: " + file);
             reader = io.github.abdurazaaqmohammed.domain.files.ArchivePasswords.open(file);
             folders.put("", new ArrayList<>());
+            Map<String, FolderDetails> folderDetails = new HashMap<>();
             try {
                 for (FileHeader header : reader.getFileHeaders()) {
                     if (Thread.currentThread().isInterrupted()) throw new InterruptedIOException();
                     String path = header.getFileName().replace('\\', '/');
                     if (path.isEmpty()) continue;
                     headers.put(path, header);
+                    ZipEntryInfo entry = new ZipEntryInfo(header, file, "");
                     String parent = "";
                     int slash = path.indexOf('/');
                     while (slash >= 0) {
                         String directory = path.substring(0, slash + 1);
+                        FolderDetails details = folderDetails.computeIfAbsent(directory, ignored -> new FolderDetails());
+                        if (!entry.isDirectory()) {
+                            details.size = details.size > Long.MAX_VALUE - entry.getSize()
+                                    ? Long.MAX_VALUE : details.size + entry.getSize();
+                        }
+                        details.descendantModified = Math.max(details.descendantModified, entry.getLastModified());
                         if (!folders.containsKey(directory)) {
                             folders.put(directory, new ArrayList<>());
                             folders.get(parent).add(new ZipEntryInfo(
@@ -110,16 +128,38 @@ public final class ZipArchiveCache {
                         parent = directory;
                         slash = path.indexOf('/', slash + 1);
                     }
+                    if (entry.isDirectory()) {
+                        folderDetails.computeIfAbsent(folderPath(path), ignored -> new FolderDetails())
+                                .recordedModified = entry.getLastModified();
+                    }
                     if (!path.endsWith("/")) {
                         if (header.isDirectory()) {
                             String directory = path + "/";
                             if (!folders.containsKey(directory)) {
                                 folders.put(directory, new ArrayList<>());
-                                folders.get(parent).add(new ZipEntryInfo(header, file, parent));
+                                folders.get(parent).add(entry);
                             }
                         } else {
-                            folders.get(parent).add(new ZipEntryInfo(header, file, parent));
+                            folders.get(parent).add(entry);
                         }
+                    }
+                }
+                // APKs commonly omit directory headers. Publish immutable folder rows
+                // using descendant metadata, retaining explicit dates regardless of ZIP order.
+                // Compute once while indexing, never by extracting or rescanning on each row.
+                // AI-assisted contribution: OpenAI Codex.
+                for (List<ZipEntryInfo> children : folders.values()) {
+                    if (Thread.currentThread().isInterrupted()) throw new InterruptedIOException();
+                    for (int index = 0; index < children.size(); index++) {
+                        ZipEntryInfo entry = children.get(index);
+                        if (!entry.isDirectory()) continue;
+                        String directory = folderPath(entry.getFullPath());
+                        FolderDetails details = folderDetails.get(directory);
+                        if (details == null) continue;
+                        long modified = details.recordedModified > 0
+                                ? details.recordedModified : details.descendantModified;
+                        children.set(index, new ZipEntryInfo(entry.getName(), directory, true,
+                                details.size, modified, file));
                     }
                 }
             } finally {

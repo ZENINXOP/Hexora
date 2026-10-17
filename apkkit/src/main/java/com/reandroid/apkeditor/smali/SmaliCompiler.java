@@ -16,7 +16,9 @@
 package com.reandroid.apkeditor.smali;
 
 import com.android.tools.smali.smali.SmaliOptions;
-import com.android.tools.smali.smali2.Smali;
+import com.android.tools.smali.smali.Smali;
+import com.android.tools.smali.dexlib2.Opcodes;
+import com.android.tools.smali.dexlib2.util.DexUtil;
 import com.reandroid.apk.APKLogger;
 import com.reandroid.apk.ApkModuleEncoder;
 import com.reandroid.apk.DexEncoder;
@@ -28,10 +30,11 @@ import com.reandroid.dex.model.DexFile;
 import com.reandroid.utils.StringsUtil;
 import com.reandroid.utils.io.FileUtil;
 
-import org.antlr.runtime.RecognitionException;
 
 import java.io.File;
 import java.io.FileOutputStream;
+import java.io.BufferedInputStream;
+import java.io.FileInputStream;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
@@ -81,50 +84,60 @@ public class SmaliCompiler implements DexEncoder {
         }
     }
     private InputSource build(String progress, File classesDir, File dexCacheFile) throws IOException {
-        if(BuildOptions.DEX_LIB_INTERNAL.equals(buildOptions.dexLib)) {
-            return buildWithInternalLib(progress, classesDir, dexCacheFile);
-        }
-        return buildWithJesusFreke(progress, classesDir, dexCacheFile);
-    }
-    private InputSource buildWithJesusFreke(String progress, File classesDir, File dexCacheFile) throws IOException {
-        logMessage(progress + "Smali<JF>: " + dexCacheFile.getName());
-        SmaliOptions smaliOptions = new SmaliOptions();
         FileUtil.ensureParentDirectory(dexCacheFile);
-        smaliOptions.outputDexFile = dexCacheFile.getAbsolutePath();
-//        File marker = new File(classesDir, DexMarker.FILE_NAME);
-//        if(marker.isFile()){
-//            smaliOptions.markersListFile = marker.getAbsolutePath();
-//        }
-        if(smaliOptions.jobs <= 0){
-            smaliOptions.jobs = Runtime.getRuntime().availableProcessors();
+        int version = apiToDexVersion(minSdkVersion != null ? minSdkVersion : 24);
+        if (dexCacheFile.isFile()) {
+            try (BufferedInputStream input = new BufferedInputStream(new FileInputStream(dexCacheFile))) {
+                version = DexUtil.verifyDexHeader(input);
+            } catch (RuntimeException | IOException ignored) { }
         }
-        if (this.minSdkVersion != null) {
-            smaliOptions.apiLevel = this.minSdkVersion;
-        }
+        File temporary = File.createTempFile(".hexora-smali-", ".dex", dexCacheFile.getParentFile());
         try {
-            Smali.assemble(classesDir.getAbsolutePath(), smaliOptions);
-        } catch (RecognitionException e) {
-            throw new RuntimeException(e);
+            checkCancelled();
+            if (BuildOptions.DEX_LIB_INTERNAL.equals(buildOptions.dexLib)) {
+                buildWithInternalLib(progress, classesDir, temporary, version, dexCacheFile.getName());
+            } else {
+                buildWithJesusFreke(progress, classesDir, temporary, version, dexCacheFile.getName());
+            }
+            checkCancelled();
+            try (BufferedInputStream input = new BufferedInputStream(new FileInputStream(temporary))) {
+                DexUtil.verifyDexHeader(input);
+            }
+            com.reandroid.utils.io.AtomicFileReplace.replace(temporary, dexCacheFile);
+            writeStamp(dexCacheFile);
+            return new FileInputSource(dexCacheFile, dexCacheFile.getName());
+        } finally {
+            if (temporary.exists()) temporary.delete();
         }
-        writeStamp(dexCacheFile);
-        return new FileInputSource(dexCacheFile, dexCacheFile.getName());
     }
-    private InputSource buildWithInternalLib(String progress, File classesDir, File dexCacheFile) throws IOException {
-        logMessage(progress + "Smali<INTERNAL>: " + dexCacheFile.getName());
-        DexFile dexFile = DexFile.createDefault();
-        dexFile.setSimpleName(dexCacheFile.getName());
-        int version = 0;
-        if (this.minSdkVersion != null) {
-            version = minSdkVersion;
+    private void buildWithJesusFreke(String progress, File classesDir, File output, int version, String name) throws IOException {
+        logMessage(progress + "Smali<JF>: " + name);
+        SmaliOptions smaliOptions = new SmaliOptions();
+        smaliOptions.outputDexFile = output.getAbsolutePath();
+        smaliOptions.jobs = Math.max(1, Math.min(2, Runtime.getRuntime().availableProcessors()));
+        smaliOptions.apiLevel = Opcodes.forDexVersion(version).api;
+        // This must be the directory assembler. smali2.Smali.assemble(String, options)
+        // parses its argument as source text and never creates an output DEX.
+        if (!Smali.assemble(smaliOptions, classesDir.getAbsolutePath())) {
+            throw new IOException("Smali compilation failed in " + classesDir);
         }
-        version = apiToDexVersion(version);
-        dexFile.setVersion(version);
-        dexFile.parseSmaliDirectory(classesDir);
-        dexFile.refreshFull();
-        dexFile.write(dexCacheFile);
-        dexFile.close();
-        writeStamp(dexCacheFile);
-        return new FileInputSource(dexCacheFile, dexCacheFile.getName());
+    }
+    private void buildWithInternalLib(String progress, File classesDir, File output, int version, String name) throws IOException {
+        logMessage(progress + "Smali<INTERNAL>: " + name);
+        DexFile dexFile = DexFile.createDefault();
+        try {
+            dexFile.setSimpleName(name);
+            dexFile.setVersion(version);
+            dexFile.parseSmaliDirectory(classesDir);
+            checkCancelled();
+            dexFile.refreshFull();
+            dexFile.write(output);
+        } finally {
+            dexFile.close();
+        }
+    }
+    private static void checkCancelled() throws java.io.InterruptedIOException {
+        if (Thread.currentThread().isInterrupted()) throw new java.io.InterruptedIOException("Build cancelled");
     }
 
     private boolean isModified(File classesDir, File dexCacheFile){

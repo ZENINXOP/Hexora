@@ -55,15 +55,19 @@ public class Smali {
 
     public static ClassDef assemble(String smaliCode, SmaliOptions options, int dexVer)
             throws Exception {
-        DexBuilder dexBuilder = new DexBuilder(Opcodes.forDexVersion(dexVer));
+        Opcodes opcodes = Opcodes.forDexVersion(dexVer);
+        DexBuilder dexBuilder = new DexBuilder(opcodes);
+        // DEX format versions (035/038/039) are not Android API levels.
+        // Use the same opcode API in the lexer, parser and instruction walker.
+        int apiLevel = opcodes.api;
 
-        SmaliCatchErrFlexLexer lexer = new SmaliCatchErrFlexLexer(new StringReader(smaliCode), options.apiLevel);
+        SmaliCatchErrFlexLexer lexer = new SmaliCatchErrFlexLexer(new StringReader(smaliCode), apiLevel);
         CommonTokenStream tokens = new CommonTokenStream(lexer);
 
         SmaliCatchErrParser parser = new SmaliCatchErrParser(tokens);
         parser.setVerboseErrors(options.verboseErrors);
         parser.setAllowOdex(options.allowOdexOpcodes);
-        parser.setApiLevel(dexVer);
+        parser.setApiLevel(apiLevel);
 
         SmaliCatchErrParser.smali_file_return result = parser.smali_file();
 
@@ -81,7 +85,7 @@ public class Smali {
         treeStream.setTokenStream(tokens);
 
         SmaliCatchErrTreeWalker treeWalker = new SmaliCatchErrTreeWalker(treeStream);
-        treeWalker.setApiLevel(dexVer);
+        treeWalker.setApiLevel(apiLevel);
         treeWalker.setVerboseErrors(options.verboseErrors);
         treeWalker.setDexBuilder(dexBuilder);
 

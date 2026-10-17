@@ -11,8 +11,8 @@ import android.view.DragEvent;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewConfiguration;
-import android.widget.ImageButton;
 import android.widget.ListView;
+import android.widget.ImageButton;
 import android.widget.PopupMenu;
 
 import androidx.preference.PreferenceManager;
@@ -36,6 +36,9 @@ import io.github.abdurazaaqmohammed.tools.StorageManagerActivity;
 import io.github.abdurazaaqmohammed.tools.ToolsHubActivity;
 import io.github.abdurazaaqmohammed.tools.WifiManagerActivity;
 import io.github.abdurazaaqmohammed.utils.StorageUtil;
+import io.github.abdurazaaqmohammed.core.ui.theme.BuiltInThemes;
+import io.github.abdurazaaqmohammed.core.ui.theme.ThemeRegistry;
+import io.github.abdurazaaqmohammed.ui.ThemeToggleDrawable;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -59,6 +62,8 @@ public class SidebarController {
     private ListView sidebarList;
     private SwipeRefreshLayout sidebarRefresh;
     private boolean sidebarOrganizeMode;
+    private ImageButton themeButton;
+    private ThemeToggleDrawable themeIcon;
     private View organizeDragView;
     private View organizeDragCard;
     private SidebarAdapter.SidebarEntry organizeDragEntry;
@@ -202,33 +207,66 @@ public class SidebarController {
                 sidebarRefresh.setRefreshing(false);
             });
         }
-        ImageButton organizeButton = activity.findViewById(R.id.sidebarOrganizeButton);
-        organizeButton.setOnLongClickListener(v -> {
-            Snackbar.make(activity.findViewById(android.R.id.content), R.string.organize_sidebar, Snackbar.LENGTH_SHORT).show();
-            return false;
-        });
-        organizeButton.setOnClickListener(v -> setSidebarOrganizeMode(!sidebarOrganizeMode));
         activity.findViewById(R.id.sidebarMenuButton).setOnClickListener(this::showSidebarMenu);
+        setupThemeToggle();
         registerStorageRefreshReceiver();
+    }
+
+    private void setupThemeToggle() {
+        themeButton = activity.findViewById(R.id.sidebarThemeToggle);
+        int color = com.google.android.material.color.MaterialColors.getColor(themeButton,
+                com.google.android.material.R.attr.colorOnSurface);
+        themeIcon = new ThemeToggleDrawable(!ThemeRegistry.isDark(activity), color);
+        themeButton.setImageDrawable(themeIcon);
+        updateThemeToggle();
+        themeButton.setOnClickListener(view -> {
+            if (!themeButton.isEnabled() || !ThemeRegistry.canChangeNow(activity)) return;
+            boolean nextIsDark = !ThemeRegistry.isDark(activity);
+            themeButton.setEnabled(false);
+            // Display the next available action: Dark shows a sun, Light a moon.
+            themeIcon.animateTo(!nextIsDark, () -> {
+                if (activity.isFinishing() || activity.isDestroyed()) return;
+                if (!activity.getLifecycle().getCurrentState().isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)) {
+                    updateThemeToggle();
+                    return;
+                }
+                ThemeRegistry.applyChoice(activity, nextIsDark ? BuiltInThemes.DARK_ID : BuiltInThemes.LIGHT_ID);
+                updateThemeToggle();
+            });
+        });
+    }
+
+    private void updateThemeToggle() {
+        boolean dark = ThemeRegistry.isDark(activity);
+        themeIcon.setDarkIcon(!dark);
+        themeButton.setContentDescription(activity.getString(dark
+                ? R.string.theme_switch_to_light : R.string.theme_switch_to_dark));
+        themeButton.setEnabled(true);
+    }
+
+    private void addLocalStorage(View anchor) {
+        if (Build.VERSION.SDK_INT < 21) {
+            Snackbar.make(anchor, R.string.local_storage_requires_lollipop, Snackbar.LENGTH_LONG).show();
+            return;
+        }
+        try {
+            activity.startActivityForResult(io.github.abdurazaaqmohammed.utils.SafAccess.folderPicker(null),
+                    io.github.abdurazaaqmohammed.utils.LocalStorage.PICK_FOLDER);
+        } catch (android.content.ActivityNotFoundException error) {
+            new io.github.abdurazaaqmohammed.utils.ErrorUtil(activity).showError(error);
+        }
     }
 
     private void showSidebarMenu(View anchor) {
         PopupMenu menu = new PopupMenu(activity, anchor);
         menu.getMenu().add(0, R.string.add_local_storage, 0, R.string.add_local_storage).setIcon(R.drawable.add_24px);
-        menu.getMenu().add(0, R.string.organize_sidebar, 1, R.string.organize_sidebar);
+        menu.getMenu().add(0, R.string.organize_sidebar, 1,
+                sidebarOrganizeMode ? R.string.done_organizing_sidebar : R.string.organize_sidebar)
+                .setCheckable(true).setChecked(sidebarOrganizeMode);
         menu.getMenu().add(0, R.string.settings, 2, R.string.settings);
         menu.setOnMenuItemClickListener(item -> {
             if (item.getItemId() == R.string.add_local_storage) {
-                if (Build.VERSION.SDK_INT < 21) {
-                    Snackbar.make(anchor, R.string.local_storage_requires_lollipop, Snackbar.LENGTH_LONG).show();
-                    return true;
-                }
-                try {
-                    activity.startActivityForResult(io.github.abdurazaaqmohammed.utils.SafAccess.folderPicker(null),
-                            io.github.abdurazaaqmohammed.utils.LocalStorage.PICK_FOLDER);
-                } catch (android.content.ActivityNotFoundException e) {
-                    new io.github.abdurazaaqmohammed.utils.ErrorUtil(activity).showError(e);
-                }
+                addLocalStorage(anchor);
             } else if (item.getItemId() == R.string.organize_sidebar) setSidebarOrganizeMode(!sidebarOrganizeMode);
             else openSidebarTool("settings");
             return true;
@@ -331,10 +369,7 @@ public class SidebarController {
             organizeDragCard = null;
             organizeDragEntry = null;
         }
-        ImageButton organizeButton = activity.findViewById(R.id.sidebarOrganizeButton);
-        organizeButton.setImageResource(enabled ? R.drawable.baseline_check_circle_24 : R.drawable.drag_handle_24px);
         String msg = activity.getString(enabled ? R.string.organize_sidebar : R.string.done_organizing_sidebar);
-        organizeButton.setContentDescription(msg);
         Snackbar.make(activity.findViewById(android.R.id.content), msg, Snackbar.LENGTH_SHORT).show();
     }
 
@@ -527,6 +562,7 @@ public class SidebarController {
     }
 
     public void unregister() {
+        if (themeIcon != null) themeIcon.stopAnimation();
         try {
             if (storageRefreshReceiver != null) {
                 activity.unregisterReceiver(storageRefreshReceiver);

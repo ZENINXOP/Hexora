@@ -47,6 +47,13 @@ public class MainSettingsActivity extends BaseActivity {
         MainActivity host = resolveHost();
         controller = new SettingsController(this, host, this::launchExternalSetting);
         controller.attach(settingsScroll);
+        controller.restoreUiState(savedInstanceState);
+    }
+
+    @Override
+    protected void onSaveInstanceState(Bundle outState) {
+        super.onSaveInstanceState(outState);
+        if (controller != null) controller.saveUiState(outState);
     }
 
     private MainActivity resolveHost() {

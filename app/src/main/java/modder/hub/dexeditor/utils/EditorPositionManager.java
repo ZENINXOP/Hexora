@@ -51,7 +51,12 @@ public class EditorPositionManager {
     private static final long PERSIST_DELAY_MS = 1500;
     private static EditorPositionManager instance;
     private final File file;
-    private Map<String, Position> positions = new HashMap<>();
+    private final Map<String, Position> positions = new java.util.LinkedHashMap<>();
+    private final java.util.concurrent.ExecutorService diskWorker = java.util.concurrent.Executors.newSingleThreadExecutor();
+    private int loadGeneration;
+    private boolean loaded;
+    private final java.util.List<Runnable> loadCallbacks = new java.util.ArrayList<>();
+    private static final int MAX_POSITIONS = 5000;
     private final Gson gson = new Gson();
     private final Handler persistHandler = new Handler(Looper.getMainLooper());
     private final Runnable persistRunnable = new Runnable() {
@@ -73,7 +78,18 @@ public class EditorPositionManager {
 
     private EditorPositionManager(Context context) {
         file = new File(context.getFilesDir(), FILE_NAME);
-        load();
+        diskWorker.execute(() -> {
+            try { load(); }
+            finally {
+                java.util.List<Runnable> callbacks;
+                synchronized (positions) {
+                    loaded = true;
+                    callbacks = new java.util.ArrayList<>(loadCallbacks);
+                    loadCallbacks.clear();
+                }
+                for (Runnable callback : callbacks) persistHandler.post(callback);
+            }
+        });
     }
 
     public static synchronized EditorPositionManager getInstance(Context context) {
@@ -84,24 +100,37 @@ public class EditorPositionManager {
     }
 
     private void load() {
-        if (file.exists()) {
+        if (file.exists() && file.length() <= 2 * 1024 * 1024) {
             String json = FileUtil.readFile(file.getAbsolutePath());
             if (json != null && !json.isEmpty()) {
                 try {
                     Type type = new TypeToken<Map<String, Position>>() {}.getType();
                     Map<String, Position> loaded = gson.fromJson(json, type);
                     if (loaded != null) {
-                        positions = loaded;
+                        synchronized (positions) {
+                            if (loadGeneration != 0) return;
+                            for (Map.Entry<String, Position> entry : loaded.entrySet()) {
+                                if (positions.size() >= MAX_POSITIONS) break;
+                                if (entry.getKey() != null && entry.getValue() != null)
+                                    positions.putIfAbsent(entry.getKey(), entry.getValue());
+                            }
+                        }
                     }
-                } catch (Exception e) {
-                    positions = new HashMap<>();
+                } catch (Exception | StackOverflowError e) {
+                    // Keep positions already recorded while the disk read was pending.
                 }
             }
         }
     }
 
     public void savePosition(String className, int lineno, int column) {
-        positions.put(className, new Position(lineno, column));
+        synchronized (positions) {
+            Position previous = positions.get(className);
+            if (previous != null && previous.lineno == lineno && previous.column == column) return;
+            positions.remove(className);
+            positions.put(className, new Position(lineno, column));
+            while (positions.size() > MAX_POSITIONS) positions.remove(positions.keySet().iterator().next());
+        }
         schedulePersist();
     }
 
@@ -111,27 +140,40 @@ public class EditorPositionManager {
     }
 
     private void persistNow() {
-        String json = gson.toJson(positions);
-        FileUtil.writeFile(file.getAbsolutePath(), json);
+        diskWorker.execute(() -> {
+            Map<String, Position> snapshot;
+            synchronized (positions) { snapshot = new HashMap<>(positions); }
+            String json = gson.toJson(snapshot);
+            FileUtil.writeFile(file.getAbsolutePath(), json);
+        });
     }
 
     public Position getPosition(String className) {
-        return positions.get(className);
+        synchronized (positions) { return positions.get(className); }
+    }
+
+    public void whenLoaded(Runnable callback) {
+        synchronized (positions) {
+            if (!loaded) { loadCallbacks.add(callback); return; }
+        }
+        if (Looper.myLooper() == Looper.getMainLooper()) callback.run();
+        else persistHandler.post(callback);
     }
 
     public void removePosition(String className) {
-        if (positions.containsKey(className)) {
+        synchronized (positions) {
+            loadGeneration++;
             positions.remove(className);
-            persistHandler.removeCallbacks(persistRunnable);
-            persistNow();
         }
+        schedulePersist();
     }
 
     public void clear() {
         persistHandler.removeCallbacks(persistRunnable);
-        if (file.exists()) {
-            file.delete();
+        synchronized (positions) {
+            loadGeneration++;
+            positions.clear();
         }
-        positions.clear();
+        diskWorker.execute(() -> { if (file.exists()) file.delete(); });
     }
 }

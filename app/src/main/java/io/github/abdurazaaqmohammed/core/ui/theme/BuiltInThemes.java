@@ -13,6 +13,7 @@ import io.github.abdurazaaqmohammed.MPManager.R;
  */
 public final class BuiltInThemes {
 
+    // Legacy IDs are retained only for migration; neither is a selectable theme.
     public static final String SYSTEM_DEFAULT_ID = "system_default";
     public static final String LIGHT_ID = "myapp_light";
     public static final String DARK_ID = "myapp_dark";
@@ -22,15 +23,10 @@ public final class BuiltInThemes {
     }
 
     public static void registerAll() {
-        ThemeRegistry.register(new Simple(SYSTEM_DEFAULT_ID, "System default",
-                R.style.Theme_Hexora,
-                AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM));
         ThemeRegistry.register(new Simple(LIGHT_ID, "Light",
                 R.style.Theme_MyApp_Light, AppCompatDelegate.MODE_NIGHT_NO));
         ThemeRegistry.register(new Simple(DARK_ID, "Dark",
                 R.style.Theme_MyApp_Dark, AppCompatDelegate.MODE_NIGHT_YES));
-        ThemeRegistry.register(new Simple(BLACK_ID, "Black",
-                R.style.Theme_MyApp_Black, AppCompatDelegate.MODE_NIGHT_YES));
     }
 
     private static final class Simple implements ThemePlugin {

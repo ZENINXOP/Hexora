@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+    <item android:id="@+id/action_minimize" android:title="@string/hexora_minimize"
+        android:icon="@drawable/ic_minimize" app:showAsAction="never" />
+    <item android:id="@+id/preference" android:title="@string/preferences"
+        android:icon="@drawable/ic_setting_mt" app:showAsAction="never" />
+    <item android:id="@+id/close" android:title="@string/close_file"
+        android:icon="@drawable/ic_close_mt" app:showAsAction="never" />
+</menu>

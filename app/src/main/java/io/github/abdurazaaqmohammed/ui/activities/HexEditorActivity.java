@@ -67,11 +67,18 @@ public class HexEditorActivity extends BaseActivity {
     private boolean readOnly;
     private String rootOriginalPath;
 
-    private final TreeMap<Integer, Integer> mods = new TreeMap<>();
-    private final ArrayDeque<int[]> undoStack = new ArrayDeque<>();
-    private final ArrayDeque<int[]> redoStack = new ArrayDeque<>();
+    private final TreeMap<Long, Integer> mods = new TreeMap<>();
+    private final ArrayDeque<long[]> undoStack = new ArrayDeque<>();
+    private final ArrayDeque<long[]> redoStack = new ArrayDeque<>();
+    private final byte[] readPage = new byte[8192];
+    private long readPageOffset = -1;
+    private int readPageLength;
+    private Thread searchWorker;
+    private int searchRequest;
+    private boolean saving;
+    private static final int MAX_INPUT_CHARS = 256 * 1024;
 
-    private int cursorPos;
+    private long cursorPos;
     private boolean nibbleHigh = true;
     private HexRowAdapter adapter;
     private TextView statusText;
@@ -172,7 +179,7 @@ public class HexEditorActivity extends BaseActivity {
             @Override
             public boolean onSingleTapUp(MotionEvent e) {
                 View v = lastTouchedCell;
-                if (v != null && v.getTag() instanceof Integer) setCursor((Integer) v.getTag(), false);
+                if (v != null && v.getTag() instanceof Long) setCursor((Long) v.getTag(), false);
                 return false;
             }
 
@@ -278,14 +285,18 @@ public class HexEditorActivity extends BaseActivity {
         }
     }
 
-    private int readByte(int pos) {
+    private int readByte(long pos) {
         Integer modded = mods.get(pos);
         if (modded != null) return modded;
         try {
-            if (pos >= size) return -1;
+            if (pos < 0 || pos >= size || raf == null) return -1;
             synchronized (raf) {
-                raf.seek(pos);
-                return raf.read();
+                if (pos < readPageOffset || pos >= readPageOffset + readPageLength) {
+                    readPageOffset = pos - pos % readPage.length;
+                    raf.seek(readPageOffset);
+                    readPageLength = raf.read(readPage);
+                }
+                return pos < readPageOffset + readPageLength ? readPage[(int) (pos - readPageOffset)] & 0xff : -1;
             }
         } catch (IOException e) {
             return -1;
@@ -293,19 +304,19 @@ public class HexEditorActivity extends BaseActivity {
     }
 
     private void inputNibble(int digit) {
-        if (readOnly || cursorPos >= size) return;
+        if (readOnly || saving || cursorPos >= size) return;
         int oldVal = readByte(cursorPos);
         if (oldVal == -1) return;
         boolean wasHigh = nibbleHigh;
         int newVal = wasHigh ? ((digit << 4) | (oldVal & 0x0F)) : ((oldVal & 0xF0) | digit);
 
         if (wasHigh) {
-            undoStack.push(new int[]{cursorPos, oldVal, newVal});
+            undoStack.push(new long[]{cursorPos, oldVal, newVal});
             redoStack.clear();
         } else {
-            int[] top = undoStack.peek();
+            long[] top = undoStack.peek();
             if (top != null && top[0] == cursorPos) top[2] = newVal;
-            else undoStack.push(new int[]{cursorPos, oldVal, newVal});
+            else undoStack.push(new long[]{cursorPos, oldVal, newVal});
         }
         mods.put(cursorPos, newVal);
         nibbleHigh = !nibbleHigh;
@@ -316,35 +327,35 @@ public class HexEditorActivity extends BaseActivity {
     }
 
     private void undo() {
-        if (undoStack.isEmpty()) return;
-        int[] e = undoStack.pop();
-        mods.put(e[0], e[1]);
+        if (saving || undoStack.isEmpty()) return;
+        long[] e = undoStack.pop();
+        mods.put(e[0], (int) e[1]);
         redoStack.push(e);
         nibbleHigh = true;
         setCursor(e[0], true);
     }
 
     private void redo() {
-        if (redoStack.isEmpty()) return;
-        int[] e = redoStack.pop();
-        mods.put(e[0], e[2]);
+        if (saving || redoStack.isEmpty()) return;
+        long[] e = redoStack.pop();
+        mods.put(e[0], (int) e[2]);
         undoStack.push(e);
         nibbleHigh = true;
         setCursor(e[0], true);
     }
 
-    private void setCursor(int pos, boolean scroll) {
-        int old = cursorPos;
-        cursorPos = Math.max(0, (int) Math.min(pos, Math.max(0, size - 1)));
+    private void setCursor(long pos, boolean scroll) {
+        long old = cursorPos;
+        cursorPos = Math.max(0, Math.min(pos, Math.min(Math.max(0, size - 1), (long) Integer.MAX_VALUE * 8 - 1)));
         nibbleHigh = true;
         refreshRows(old, cursorPos);
-        if (scroll) layoutManager.scrollToPositionWithOffset(cursorPos / 8, (int) (getResources().getDisplayMetrics().density * 80));
+        if (scroll) layoutManager.scrollToPositionWithOffset((int) (cursorPos / 8), (int) (getResources().getDisplayMetrics().density * 80));
         updateStatus();
     }
 
-    private void refreshRows(int... positions) {
-        for (int p : positions) {
-            int row = Math.min(p / 8, Math.max(0, adapter.getItemCount() - 1));
+    private void refreshRows(long... positions) {
+        for (long p : positions) {
+            int row = (int) Math.min(p / 8, Math.max(0, adapter.getItemCount() - 1));
             if (row >= 0 && row < adapter.getItemCount()) adapter.notifyItemChanged(row);
         }
         updateStatus();
@@ -428,6 +439,7 @@ public class HexEditorActivity extends BaseActivity {
 
     private byte[] buildPattern(int type, String text, boolean bigEndian) throws Exception {
         if (text == null || TextUtils.isEmpty(text.trim())) throw new IllegalArgumentException("Empty search value");
+        if (text.length() > MAX_INPUT_CHARS) throw new IllegalArgumentException("Input is too large");
         switch (type) {
             case TYPE_HEX_TEXT: {
                 String hex = text.replaceAll("[^0-9a-fA-F]", "");
@@ -492,40 +504,36 @@ public class HexEditorActivity extends BaseActivity {
     }
 
     private void scan(long start, boolean forward) {
+        if (searchWorker != null) searchWorker.interrupt();
+        final int request = ++searchRequest;
         final byte[] pattern = lastPattern;
+        final TreeMap<Long, Integer> edits = new TreeMap<>(mods);
         final long startPos = start < 0 ? (forward ? 0 : Math.max(0, size - pattern.length)) : start;
         final ProgressManager pm = new ProgressManager(this, true);
         pm.setText(getString(R.string.search) + "…");
         pm.show();
-        new Thread(() -> {
-            long found = -1;
-            if (forward) {
-                for (long p = startPos; p + pattern.length <= size; p++)
-                    if (matchesAt(p, pattern)) {found = p; break;}
-            } else {
-                for (long p = Math.min(startPos, size - pattern.length); p >= 0; p--)
-                    if (matchesAt(p, pattern)) {found = p; break;}
-            }
-            final long f = found;
+        searchWorker = new Thread(() -> {
+            try {
+            final long f = io.github.abdurazaaqmohammed.domain.editor.HexSearch.find(file, size, edits, pattern, startPos, forward);
             runOnUiThread(() -> {
-                pm.dismiss();
+                if (isFinishing() || isDestroyed() || request != searchRequest || pm.isCancelled()) return;
                 if (f >= 0) {
                     lastMatchPos = f;
-                    setCursor((int) f, true);
+                    setCursor(f, true);
                 } else {
                     Extensions.showMessage(this, getString(R.string.hex_not_found));
                 }
             });
-        }).start();
-    }
-
-    private boolean matchesAt(long pos, byte[] pattern) {
-        for (int i = 0; i < pattern.length; i++)
-            if (readByte((int) (pos + i)) != (pattern[i] & 0xFF)) return false;
-        return true;
+            } catch (java.io.InterruptedIOException ignored) {
+            } catch (IOException error) { pm.reportError(error); }
+            finally { pm.dismiss(); }
+        }, "hexora-hex-search");
+        pm.onCancel(searchWorker::interrupt);
+        searchWorker.start();
     }
 
     private void replaceCurrentMatch() {
+        if (readOnly || saving) return;
         if (!ensureSearchPattern()) return;
         long target = lastMatchPos >= 0 ? lastMatchPos : cursorPos;
         if (target + lastPattern.length > size) {
@@ -545,24 +553,25 @@ public class HexEditorActivity extends BaseActivity {
     }
 
     private void writeBytesAt(long pos, byte[] data, Runnable extraUndoAction) {
-        List<int[]> entries = new ArrayList<>();
+        if (readOnly || saving) return;
+        List<long[]> entries = new ArrayList<>();
         for (int i = 0; i < data.length; i++) {
-            int p = (int) (pos + i);
-            if (p >= size) break;
+            long p = pos + i;
+            if (p >= size || p >= (long) Integer.MAX_VALUE * 8) break;
             int oldVal = readByte(p);
             int newVal = data[i] & 0xFF;
             mods.put(p, newVal);
-            entries.add(new int[]{p, oldVal, newVal});
+            entries.add(new long[]{p, oldVal, newVal});
         }
         undoStack.addAll(entries); // each entry undone individually
         redoStack.clear();
         nibbleHigh = true;
         if (adapter != null) {
             int firstRow = (int) (pos / 8);
-            int lastRow = (int) ((pos + Math.max(1, entries.size()) - 1) / 8);
+            int lastRow = (int) Math.min(Integer.MAX_VALUE - 1L, (pos + Math.max(1, entries.size()) - 1) / 8);
             for (int r = firstRow; r <= lastRow && r < adapter.getItemCount(); r++) adapter.notifyItemChanged(r);
         }
-        setCursor((int) Math.min(pos + data.length, Math.max(0, size - 1)), false);
+        setCursor(Math.min(pos + data.length, Math.max(0, size - 1)), false);
         updateStatus();
     }
 
@@ -615,6 +624,7 @@ public class HexEditorActivity extends BaseActivity {
 
     private byte[] parsePastedBytes(int format, String text) {
         if (TextUtils.isEmpty(text)) return new byte[0];
+        if (text.length() > MAX_INPUT_CHARS) throw new IllegalArgumentException("Paste is too large");
         switch (format) {
             case 0: { // Hex text
                 String hex = text.replaceAll("[^0-9a-fA-F]", "").toLowerCase(Locale.ROOT);
@@ -659,6 +669,7 @@ public class HexEditorActivity extends BaseActivity {
     }
 
     private void saveChanges(Runnable onSaved) {
+        if (saving) return;
         if (mods.isEmpty()) {
             if (onSaved != null) onSaved.run();
             return;
@@ -681,42 +692,68 @@ public class HexEditorActivity extends BaseActivity {
     }
 
     private void saveChangesRoot(Runnable onSaved) {
-        backupForSave();
-        try (RandomAccessFile w = new RandomAccessFile(file, "rw")) {
-            for (Map.Entry<Integer, Integer> entry : mods.entrySet()) {
-                w.seek(entry.getKey());
-                w.writeByte(entry.getValue());
+        if (saving || isFinishing() || isDestroyed()) return;
+        saving = true;
+        TreeMap<Long, Integer> edits = new TreeMap<>(mods);
+        ProgressManager progress = new ProgressManager(this, true).show();
+        // Finish the write even if the window closes; never clear dirty state
+        // until local persistence and the optional elevated write-back succeed.
+        new Thread(() -> {
+        try {
+            backupForSave();
+            try (RandomAccessFile w = new RandomAccessFile(file, "rw")) {
+                byte[] block = new byte[64 * 1024];
+                long start = -1, next = -1;
+                int count = 0;
+                for (Map.Entry<Long, Integer> entry : edits.entrySet()) {
+                    long position = entry.getKey();
+                    if (count > 0 && (position != next || count == block.length)) {
+                        w.seek(start);
+                        w.write(block, 0, count);
+                        count = 0;
+                    }
+                    if (count == 0) start = position;
+                    block[count++] = (byte) entry.getValue().intValue();
+                    next = position + 1;
+                }
+                if (count > 0) {
+                    w.seek(start);
+                    w.write(block, 0, count);
+                }
+                w.getFD().sync();
             }
+            if (rootOriginalPath != null) RootStaging.writeBack(this, file, rootOriginalPath);
+            runOnUiThread(() -> {
+            saving = false;
+            readPageOffset = -1;
+            readPageLength = 0;
+            if (isFinishing() || isDestroyed()) return;
             mods.clear();
             undoStack.clear();
             redoStack.clear();
             adapter.notifyDataSetChanged();
             updateStatus();
-            Extensions.showMessage(this, R.string.saved);
+            Extensions.showMessage(this, rootOriginalPath != null ? R.string.editor_saved_root : R.string.saved);
             String zip = getIntent().getStringExtra("zipFilePath");
             if (zip != null) setResult(757, new android.content.Intent()
                     .setData(android.net.Uri.fromFile(file)).putExtra("zipFilePath", zip)
-                    .putExtra("zipEntryPath", getIntent().getStringExtra("zipEntryPath")));
+                     .putExtra("zipEntryPath", getIntent().getStringExtra("zipEntryPath")));
+            if (onSaved != null) onSaved.run();
+            });
         } catch (Exception e) {
-            new ErrorUtil(this).showError(e);
-            return;
+            runOnUiThread(() -> {
+                saving = false;
+                readPageOffset = -1;
+                readPageLength = 0;
+                if (!isFinishing() && !isDestroyed()) new ErrorUtil(this).showError(e);
+            });
+        } finally {
+            progress.dismiss();
         }
-        if (rootOriginalPath != null) {
-            Extensions.showMessage(this, getString(R.string.editor_writing_root));
-            new Thread(() -> {
-                try {
-                    RootStaging.writeBack(this, file, rootOriginalPath);
-                    runOnUiThread(() -> Extensions.showMessage(this, getString(R.string.editor_saved_root)));
-                } catch (Exception e) {
-                    runOnUiThread(() -> new ErrorUtil(this).showError(e));
-                }
-            }).start();
-        }
-        if (onSaved != null) onSaved.run();
+        }, "hexora-hex-save").start();
     }
 
-    private void backupForSave() {
-        try {
+    private void backupForSave() throws Exception {
             if (!UiPrefs.genBackup(this)) return;
             if (rootOriginalPath != null) {
                 if ((io.github.abdurazaaqmohammed.utils.LocalStorage.isPath(new File(rootOriginalPath))
@@ -727,17 +764,16 @@ public class HexEditorActivity extends BaseActivity {
                 File bak = new File(file.getPath() + ".bak");
                 try (RandomAccessFile in = new RandomAccessFile(file, "r");
                      RandomAccessFile out = new RandomAccessFile(bak, "rw")) {
+                    out.setLength(0);
                     byte[] buf = new byte[65536];
                     int n;
                     while ((n = in.read(buf)) != -1) out.write(buf, 0, n);
                 }
             }
-        } catch (Exception ignored) {
-        }
     }
 
     private void revertChanges() {
-        if (mods.isEmpty()) return;
+        if (saving || mods.isEmpty()) return;
         new MaterialAlertDialogBuilder(this)
                 .setTitle(getString(R.string.hex_revert))
                 .setMessage(getString(R.string.hex_revert_msg))
@@ -763,7 +799,7 @@ public class HexEditorActivity extends BaseActivity {
                 .setPositiveButton(android.R.string.ok, (d, w) -> {
                     try {
                         long target = Long.parseLong(input.getText().toString().trim(), 16);
-                        setCursor((int) Math.min(target, Math.max(0, size - 1)), true);
+                        setCursor(Math.min(target, Math.max(0, size - 1)), true);
                     } catch (NumberFormatException ignored) {
                         Extensions.showMessage(this, getString(R.string.hex_invalid_offset));
                     }
@@ -771,6 +807,7 @@ public class HexEditorActivity extends BaseActivity {
     }
 
     private void confirmDiscardAndFinish() {
+        if (saving) return;
         if (mods.isEmpty()) {
             finish();
             return;
@@ -797,6 +834,7 @@ public class HexEditorActivity extends BaseActivity {
 
     @Override
     public void onBackPressed() {
+        if (saving || inspectorPanel == null || searchPanel == null) return;
         if(inspectorPanel.getVisibility() == View.VISIBLE) inspectorPanel.setVisibility(View.GONE);
         else if(searchPanel.getVisibility() == View.VISIBLE) searchPanel.setVisibility(View.GONE);
         else confirmDiscardAndFinish();
@@ -834,6 +872,8 @@ public class HexEditorActivity extends BaseActivity {
 
     @Override
     protected void onDestroy() {
+        searchRequest++;
+        if (searchWorker != null) searchWorker.interrupt();
         super.onDestroy();
         if (raf != null) try {
             raf.close();
@@ -872,18 +912,20 @@ public class HexEditorActivity extends BaseActivity {
 
         @Override
         public void onBindViewHolder(@NonNull ViewHolder holder, int position) {
-            int rowStart = position * 8;
+            long rowStart = (long) position * 8;
             int[] values = new int[8];
             for (int i = 0; i < 8; i++) values[i] = readByte(rowStart + i);
 
-            holder.offsetCell.setText(String.format(Locale.US, "%04X", rowStart & 0xFFFF));
+            holder.offsetCell.setText(String.format(Locale.US, "%04X", rowStart));
 
-            int selCol = cursorPos - rowStart;
+            int selCol = cursorPos >= rowStart && cursorPos < rowStart + 8 ? (int) (cursorPos - rowStart) : -1;
             for (int i = 0; i < 8; i++) {
                 TextView cell = holder.cells[i];
                 if (values[i] == -1) {
                     cell.setText("");
                     cell.setBackground(null);
+                    cell.setTag(null);
+                    cell.setOnTouchListener(null);
                     continue;
                 }
                 cell.setText(String.format(Locale.US, "%02X", values[i]));
@@ -911,7 +953,7 @@ public class HexEditorActivity extends BaseActivity {
 
         @Override
         public int getItemCount() {
-            return (int) ((size + 7) / 8);
+            return (int) Math.min(Integer.MAX_VALUE, size / 8 + (size % 8 == 0 ? 0 : 1));
         }
 
         static class ViewHolder extends RecyclerView.ViewHolder {

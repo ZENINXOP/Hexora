@@ -293,6 +293,7 @@ public class EditorFragment extends Fragment implements SmaliMethodFieldListFrag
         });
 
         smaliEditor.subscribeEvent(ContentChangeEvent.class, (event, unsubscribe) -> {
+            SmaliCursorUtils.invalidate(smaliEditor.getText());
             if (isInitializing) return;
             Activity act = getActivity();
             if (act instanceof DexEditorActivity) {
@@ -326,8 +327,7 @@ public class EditorFragment extends Fragment implements SmaliMethodFieldListFrag
             }
 
             if (cursor.isSelected()) {
-                String selectedText = text.subSequence(cursor.getLeft(), cursor.getRight()).toString();
-                positionText.append(" (").append(selectedText.length()).append(")");
+                positionText.append(" (").append(cursor.getRight() - cursor.getLeft()).append(")");
             }
             textviewLineNo.setText(positionText.toString());
 
@@ -403,7 +403,8 @@ public class EditorFragment extends Fragment implements SmaliMethodFieldListFrag
         new Handler(Looper.getMainLooper()).post(() -> isInitializing = false);
 
         if (!skipRestorePosition) {
-            new Handler(Looper.getMainLooper()).postDelayed(() -> {
+            positionManager.whenLoaded(() -> {
+                if (!isAdded() || smaliEditor == null || getView() == null) return;
                 try {
                     EditorPositionManager.Position pos = positionManager.getPosition(className);
                     if (pos != null) {
@@ -416,7 +417,7 @@ public class EditorFragment extends Fragment implements SmaliMethodFieldListFrag
                         }
                     }
                 } catch (Exception ignored) {}
-            }, 100);
+            });
         }
     }
 

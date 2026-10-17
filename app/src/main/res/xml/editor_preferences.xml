@@ -1,94 +1,36 @@
 <?xml version="1.0" encoding="utf-8"?>
 <PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
-                  xmlns:app="http://schemas.android.com/apk/res-auto">
-
-    <PreferenceCategory android:title="Display Settings">
-        <ListPreference
-            android:key="pref_dex_theme"
-            android:title="@string/dex_editor_theme"
-            android:entries="@array/dex_editor_theme_entries"
-            android:entryValues="@array/dex_editor_theme_values"
-            android:defaultValue="app"
-            app:useSimpleSummaryProvider="true" />
-
-        <DropDownPreference
-            android:key="pref_theme"
-            android:title="Theme"
-            android:entries="@array/theme_entries"
-            android:entryValues="@array/theme_values"
-            android:summary="Set the theme for the editor"
-            app:useSimpleSummaryProvider="true" />
-
-        <ListPreference
-            android:key="font_type"
-            android:title="Font Type"
-            android:entries="@array/font_styles"
-            android:entryValues="@array/font_style_values"
-            android:defaultValue="normal"
-            app:useSimpleSummaryProvider="true" />
-
-        <ListPreference
-            android:key="pref_font_size"
-            android:title="Font Size"
-            android:entries="@array/font_sizes"
-            android:entryValues="@array/font_size_values"
-            android:defaultValue="14"
-            app:useSimpleSummaryProvider="true" />
-
-        <SwitchPreferenceCompat
-            android:key="pref_show_line_numbers"
-            android:title="Show Line Numbers"
-            android:summary="Display line numbers on the left side"
-            android:defaultValue="true"/>
-
-        <SwitchPreferenceCompat
-            android:key="pref_word_wrap"
-            android:title="Word Wrap"
-            android:summary="Wrap long lines to fit the screen"
-            android:defaultValue="false"/>
-            
-        <SwitchPreferenceCompat
-            android:key="pref_syntax_highlight"
-            android:title="Syntax Highlighting"
-            android:summary="Enable syntax highlighting for code files"
-            android:defaultValue="true"/>
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+    <PreferenceCategory android:title="@string/ep_display">
+        <Preference android:title="@string/ep_follow_theme" android:selectable="false" />
+        <ListPreference android:key="font_type" android:title="@string/ep_font_type"
+            android:entries="@array/font_styles" android:entryValues="@array/font_style_values"
+            android:defaultValue="normal" app:useSimpleSummaryProvider="true" />
+        <ListPreference android:key="font_size" android:title="@string/ep_font_size"
+            android:entries="@array/font_sizes" android:entryValues="@array/font_size_values"
+            android:defaultValue="14" app:useSimpleSummaryProvider="true" />
+        <SwitchPreferenceCompat android:key="show_line_numbers" android:title="@string/ep_line_numbers"
+            android:summary="@string/ep_line_numbers_summary" android:defaultValue="true" />
+        <SwitchPreferenceCompat android:key="wrap_text" android:title="@string/ep_word_wrap"
+            android:summary="@string/ep_word_wrap_summary" android:defaultValue="false" />
+        <SwitchPreferenceCompat android:key="pref_syntax_highlight" android:title="@string/ep_highlight"
+            android:summary="@string/ep_highlight_summary" android:defaultValue="true" />
     </PreferenceCategory>
-
-    <PreferenceCategory android:title="Editing Settings">
-        <EditTextPreference
-            android:key="pref_tab_size"
-            android:title="Tab Size"
-            android:summary="Number of spaces for a tab"
-            android:defaultValue="4"/>
-            
-        <SwitchPreferenceCompat
-            android:key="pref_use_spaces"
-            android:title="Use Spaces for Indentation"
-            android:summary="Insert spaces instead of tab characters"
-            android:defaultValue="true"/>
-
-        <SwitchPreferenceCompat
-            android:key="pref_auto_indent"
-            android:title="Auto Indent"
-            android:summary="Automatically indent new lines"
-            android:defaultValue="true"/>
+    <PreferenceCategory android:title="@string/ep_editing">
+        <ListPreference android:key="pref_tab_size" android:title="@string/ep_tab_size"
+            android:entries="@array/editor_tab_widths" android:entryValues="@array/editor_tab_widths"
+            android:defaultValue="4" app:useSimpleSummaryProvider="true" />
+        <SwitchPreferenceCompat android:key="pref_use_spaces" android:title="@string/ep_spaces"
+            android:summary="@string/ep_spaces_summary" android:defaultValue="true" />
+        <SwitchPreferenceCompat android:key="pref_auto_indent" android:title="@string/ep_auto_indent"
+            android:summary="@string/ep_auto_indent_summary" android:defaultValue="true" />
     </PreferenceCategory>
-
-    <PreferenceCategory android:title="Advanced Configuration">
-       <Preference
-            android:key="pref_import_syntax"
-            android:title="Import Syntax"
-            android:summary="Import custom syntax highlighting definitions"/>
-            
-      <Preference
-            android:key="pref_bottom_bar_buttons"
-            android:title="Manage Bottom Bar Buttons"
-            android:summary="Configure actions shown on the editor's bottom bar"/>
-
-      <Preference
-            android:key="edit_floating_menus"
-            android:title="Edit Floating Menus"
-            android:summary="Customize the floating text action menu items"/>
+    <PreferenceCategory android:title="@string/ep_tools">
+        <Preference android:key="pref_import_syntax" android:title="@string/ep_import_syntax"
+            android:summary="@string/ep_import_syntax_summary" />
+        <Preference android:key="pref_bottom_bar_buttons" android:title="@string/ep_toolbar"
+            android:summary="@string/ep_toolbar_summary" />
+        <Preference android:key="edit_floating_menus" android:title="@string/ep_floating"
+            android:summary="@string/ep_floating_summary" />
     </PreferenceCategory>
-
 </PreferenceScreen>

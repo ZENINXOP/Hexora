@@ -70,8 +70,9 @@ public class FileDeferredOutputStream extends DeferredOutputStream {
 
         // did we actually write something out to disk?
         if (count != writtenBytes) {
-            InputStream fis = new FileInputStream(backingFile);
-            ByteStreams.copy(fis, dest);
+            try (InputStream fis = new FileInputStream(backingFile)) {
+                ByteStreams.copy(fis, dest);
+            }
             backingFile.delete();
         }
 

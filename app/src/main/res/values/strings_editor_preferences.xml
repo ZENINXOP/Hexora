@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="ep_display">Display</string>
+    <string name="ep_editing">Typing and indentation</string>
+    <string name="ep_tools">Syntax and shortcuts</string>
+    <string name="ep_font_type">Font style</string>
+    <string name="ep_font_size">Font size</string>
+    <string name="ep_line_numbers">Line numbers</string>
+    <string name="ep_line_numbers_summary">Show the line number gutter</string>
+    <string name="ep_word_wrap">Wrap long lines</string>
+    <string name="ep_word_wrap_summary">Fit lines to the editor width; large files may use horizontal scrolling</string>
+    <string name="ep_highlight">Syntax highlighting</string>
+    <string name="ep_highlight_summary">Color code in text, Smali and Java views</string>
+    <string name="ep_tab_size">Tab width</string>
+    <string name="ep_spaces">Indent with spaces</string>
+    <string name="ep_spaces_summary">Use the tab width for spaces; turn off to insert tab characters</string>
+    <string name="ep_auto_indent">Automatic indentation</string>
+    <string name="ep_auto_indent_summary">Carry indentation onto new lines</string>
+    <string name="ep_import_syntax">Import syntax grammar</string>
+    <string name="ep_import_syntax_summary">Import a TextMate JSON grammar with fileTypes for automatic detection</string>
+    <string name="ep_imported_syntax">Installed: %1$s</string>
+    <string name="ep_syntax_imported">Syntax imported</string>
+    <string name="ep_importing">Importing syntax…</string>
+    <string name="ep_choose_grammar">Choose another grammar</string>
+    <string name="ep_remove_grammar">Remove imported grammar</string>
+    <string name="ep_toolbar">Toolbar shortcuts</string>
+    <string name="ep_toolbar_summary">Add or edit tap and long-press actions</string>
+    <string name="ep_floating">Selection menu</string>
+    <string name="ep_floating_summary">Reorder actions and choose which ones appear</string>
+    <string name="ep_follow_theme">Editor colors follow the app theme</string>
+    <string name="ep_empty_toolbar">No custom shortcuts. Add a button to get started.</string>
+    <string name="ep_button_label">Button label (optional)</string>
+    <string name="ep_no_action">No action</string>
+    <string name="ep_choose_action">Choose at least one action</string>
+    <string name="ep_insert_value">Text to insert</string>
+    <string name="ep_find_regex">Find pattern</string>
+    <string name="ep_replace_regex">Replacement (can be empty)</string>
+    <string name="ep_value_required">Enter text for this action</string>
+    <string name="ep_invalid_regex">Enter a valid regular expression</string>
+    <string name="ep_tap_action">Tap: %1$s</string>
+    <string name="ep_hold_action">Hold: %1$s</string>
+    <string name="ep_drag_actions">Drag the icon to reorder. Use the checkbox to show or hide an action.</string>
+    <string-array name="editor_tab_widths">
+        <item>1</item><item>2</item><item>3</item><item>4</item>
+        <item>5</item><item>6</item><item>7</item><item>8</item>
+        <item>9</item><item>10</item><item>11</item><item>12</item>
+        <item>13</item><item>14</item><item>15</item><item>16</item>
+    </string-array>
+</resources>

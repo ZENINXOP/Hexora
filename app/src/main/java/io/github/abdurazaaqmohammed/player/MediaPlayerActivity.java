@@ -102,8 +102,7 @@ public class MediaPlayerActivity extends BaseActivity implements
 
         String playPath = getIntent().getStringExtra("play_path");
         if (playPath != null && savedInstanceState == null) {
-            MediaItem item = PlayerManager.buildMediaItem(this, playPath);
-            playerManager.play(item, getIntent().getStringArrayListExtra("play_queue"));
+            playerManager.playFile(playPath, getIntent().getStringArrayListExtra("play_queue"));
         } else if (playerManager.getState() == PlayerManager.PlayState.IDLE && playerManager.getQueue().isEmpty()) {
             finish();
         }
@@ -546,15 +545,7 @@ public class MediaPlayerActivity extends BaseActivity implements
             trackArtist.setText(item.artist != null ? item.artist : getString(R.string.music_unknown_artist));
             trackAlbum.setText(item.album != null ? item.album : "");
 
-            if (item.path != null) try (MediaMetadataRetriever mmr = new MediaMetadataRetriever()) {
-                mmr.setDataSource(this, item.uri);
-                byte[] art = mmr.getEmbeddedPicture();
-                if (art != null) artworkView.setImageBitmap(BitmapFactory.decodeByteArray(art, 0, art.length));
-                else artworkView.setImageResource(android.R.drawable.ic_menu_gallery);
-                mmr.release();
-            } catch (Exception e) {
-                artworkView.setImageResource(android.R.drawable.ic_menu_gallery);
-            }
+            MediaArtwork.loadInto(this, item, artworkView);
         }
 
         updateKeepScreenOn();
@@ -650,8 +641,7 @@ public class MediaPlayerActivity extends BaseActivity implements
         super.onNewIntent(intent);
         String playPath = intent.getStringExtra("play_path");
         if (playPath != null) {
-            MediaItem item = PlayerManager.buildMediaItem(this, playPath);
-            playerManager.play(item, intent.getStringArrayListExtra("play_queue"));
+            playerManager.playFile(playPath, intent.getStringArrayListExtra("play_queue"));
         }
     }
 

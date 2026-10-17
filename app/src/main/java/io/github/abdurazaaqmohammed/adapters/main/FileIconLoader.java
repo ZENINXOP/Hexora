@@ -2,7 +2,6 @@ package io.github.abdurazaaqmohammed.adapters.main;
 
 import android.content.res.Resources;
 import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
 import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
 import android.media.ThumbnailUtils;
@@ -52,6 +51,7 @@ public class FileIconLoader {
             cachedMusicIcon, cachedArchiveIcon, cachedTextIcon, cachedFileIcon;
     private static int cachedIconTheme = -1;
     private static int cachedIconBucket = -1;
+    private static final android.os.Handler MAIN = new android.os.Handler(android.os.Looper.getMainLooper());
 
     private final MainActivity context;
     private final boolean isInZip;
@@ -70,13 +70,17 @@ public class FileIconLoader {
         return cachedApkIcon;
     }
 
+    public static void clearPreviewCache() {
+        iconCache.evictAll();
+    }
+
     public void setupZipEntryView(ZipEntryInfo zipEntry, ImageView fileIconView, TextView fileDateView) {
         if (zipEntry == null) return;
         fileIconView.setTag(null);
         if (zipEntry.isDirectory()) {
             fileIconView.setImageDrawable(copyIcon(cachedFolderIcon));
         } else {
-            setupNonFolderIconView(zipEntry.getFullPath(), fileIconView);
+            setupNonFolderIconView(zipEntry.getFullPath(), fileIconView, null);
         }
         bindDetails(fileDateView, zipEntry.isDirectory(), zipEntry.getLastModified(), zipEntry.getSize());
     }
@@ -85,8 +89,10 @@ public class FileIconLoader {
         // Invalidate thumbnail work from the row's previous file before rebinding.
         fileIconView.setTag(null);
         if (file.isFile()) {
-            setupNonFolderIconView(file.getPath(), fileIconView);
-            bindDetails(fileDateView, false, file.lastModified(), file.length());
+            long modified = file.lastModified(), size = file.length();
+            String key = isInZip ? null : file.getAbsolutePath() + ':' + modified + ':' + size;
+            setupNonFolderIconView(file.getPath(), fileIconView, key);
+            bindDetails(fileDateView, false, modified, size);
         } else {
             fileIconView.setImageDrawable(copyIcon(cachedFolderIcon));
             bindDetails(fileDateView, true, file.lastModified(), 0L);
@@ -97,7 +103,7 @@ public class FileIconLoader {
     private void bindDetails(TextView details, boolean directory, long modified, long size) {
         String date = modified > 0L ? dateFormat.format(new java.util.Date(modified)) : "";
         // Some virtual/archive folders have no recorded timestamp. Do not show 1970.
-        if (directory) details.setText(date.isEmpty() ? context.getString(R.string.file_date_unavailable) : date);
+        if (directory && !isInZip) details.setText(date.isEmpty() ? context.getString(R.string.file_date_unavailable) : date);
         else details.setText((date.isEmpty() ? "" : date + " ") + FileSize.getHumanReadableFileSize(size));
         details.setTextSize(dateSize);
         details.setVisibility(View.VISIBLE);
@@ -116,35 +122,42 @@ public class FileIconLoader {
     private void loadPackageFolderIconAsync(File folder, ImageView view) {
         String rowKey = "package-folder:" + folder.getAbsolutePath();
         view.setTag(rowKey);
+        java.lang.ref.WeakReference<ImageView> reference = new java.lang.ref.WeakReference<>(view);
+        android.content.pm.PackageManager manager = context.getApplicationContext().getPackageManager();
         iconLoaderService.execute(() -> {
-            if (!rowKey.equals(view.getTag())) return;
+            ImageView current = reference.get();
+            if (current == null || !rowKey.equals(current.getTag())) return;
             try {
-                android.content.pm.PackageManager manager = context.getPackageManager();
                 android.content.pm.PackageInfo info = manager.getPackageInfo(folder.getName(), 0);
                 if (info.applicationInfo == null) return;
                 String cacheKey = "installed-app:" + folder.getName() + ':' + info.lastUpdateTime
                         + ':' + info.applicationInfo.sourceDir;
                 Drawable icon = iconCache.get(cacheKey);
                 if (icon == null) {
-                    icon = manager.getApplicationIcon(info.applicationInfo);
+                    Drawable source = manager.getApplicationIcon(info.applicationInfo);
+                    Bitmap pixels = Bitmap.createBitmap(192, 192, Bitmap.Config.ARGB_8888);
+                    source.setBounds(0, 0, 192, 192);
+                    source.draw(new android.graphics.Canvas(pixels));
+                    icon = new BitmapDrawable(android.content.res.Resources.getSystem(), pixels);
                     iconCache.put(cacheKey, icon);
                 }
                 final Drawable loaded = icon;
-                context.runOnUiThread(() -> {
-                    if (rowKey.equals(view.getTag())) view.setImageDrawable(new FolderAppBadgeDrawable(
-                            copyIcon(cachedFolderIcon), copyIcon(loaded),
-                            com.google.android.material.color.MaterialColors.getColor(view,
+                MAIN.post(() -> {
+                    ImageView target = reference.get();
+                    if (target != null && rowKey.equals(target.getTag())) target.setImageDrawable(new FolderAppBadgeDrawable(
+                            copyIcon(cachedFolderIcon, target.getResources()), copyIcon(loaded, target.getResources()),
+                            com.google.android.material.color.MaterialColors.getColor(target,
                                     com.google.android.material.R.attr.colorSurface)));
                 });
-            } catch (android.content.pm.PackageManager.NameNotFoundException | SecurityException ignored) {
+            } catch (android.content.pm.PackageManager.NameNotFoundException | RuntimeException | OutOfMemoryError ignored) {
                 // An uninstalled or inaccessible app keeps the regular folder icon.
             }
         });
     }
 
-    private void setupNonFolderIconView(String path, ImageView fileIconView) {
-        if (!isInZip) {
-            Drawable cached = iconCache.get(ApkMetadata.key(new File(path)));
+    private void setupNonFolderIconView(String path, ImageView fileIconView, String cacheKey) {
+        if (cacheKey != null) {
+            Drawable cached = iconCache.get(cacheKey);
             if (cached != null) {
                 Drawable.ConstantState state = cached.getConstantState();
                 fileIconView.setImageDrawable(state == null ? cached : state.newDrawable(context.getResources()).mutate());
@@ -164,13 +177,13 @@ public class FileIconLoader {
         } else if (".apk".equals(ext) || ".apks".equals(ext) || ".xapk".equals(ext)
                 || ".apkm".equals(ext) || ".aspk".equals(ext)) {
             fileIconView.setImageDrawable(copyIcon(cachedApkIcon));
-            if (!isInZip) loadApkIconAsync(path, fileIconView);
+            if (cacheKey != null) loadApkIconAsync(path, fileIconView, cacheKey);
         } else if (FileUtils.matchExt(ext, FileUtils.IMAGE_EXTS)) {
             fileIconView.setImageDrawable(copyIcon(cachedImageIcon));
-            if (!isInZip) loadThumbnailAsync(path, fileIconView, false);
+            if (cacheKey != null) loadThumbnailAsync(path, fileIconView, false, cacheKey);
         } else if (FileUtils.matchExt(ext, FileUtils.VIDEO_EXTS)) {
             fileIconView.setImageDrawable(copyIcon(cachedVideoIcon));
-            if (!isInZip) loadThumbnailAsync(path, fileIconView, true);
+            if (cacheKey != null) loadThumbnailAsync(path, fileIconView, true, cacheKey);
         } else if (FileUtils.matchExt(ext, FileUtils.AUDIO_EXTS)) {
             fileIconView.setImageDrawable(copyIcon(cachedMusicIcon));
         } else if (FileUtils.matchExt(ext, FileUtils.ARCHIVE_EXTS)) {
@@ -186,34 +199,40 @@ public class FileIconLoader {
         }
     }
 
-    private void loadApkIconAsync(String path, ImageView fileIconView) {
-        String cacheKey = ApkMetadata.key(new File(path));
+    private void loadApkIconAsync(String path, ImageView fileIconView, String cacheKey) {
         fileIconView.setTag(cacheKey);
+        java.lang.ref.WeakReference<ImageView> reference = new java.lang.ref.WeakReference<>(fileIconView);
+        android.content.Context app = context.getApplicationContext();
         iconLoaderService.execute(() -> {
-            if (!cacheKey.equals(fileIconView.getTag())) return;
+            ImageView current = reference.get();
+            if (current == null || !cacheKey.equals(current.getTag())) return;
             try {
-                ApkMetadata metadata = ApkMetadata.load(context.getApplicationContext(), new File(path));
+                ApkMetadata metadata = ApkMetadata.load(app, new File(path));
                 if (metadata != null && metadata.icon != null) {
                     iconCache.put(cacheKey, metadata.icon);
-                    context.runOnUiThread(() -> {
-                        if (cacheKey.equals(fileIconView.getTag())) fileIconView.setImageDrawable(metadata.newIcon(context.getResources()));
+                    MAIN.post(() -> {
+                        ImageView target = reference.get();
+                        if (target != null && cacheKey.equals(target.getTag())) target.setImageDrawable(metadata.newIcon(target.getResources()));
                     });
                 }
-            } catch (Exception ignored) {}
+            } catch (Exception | OutOfMemoryError ignored) {}
         });
     }
 
-    private void loadThumbnailAsync(String path, ImageView fileIconView, boolean isVideo) {
-        String cacheKey = ApkMetadata.key(new File(path));
+    private void loadThumbnailAsync(String path, ImageView fileIconView, boolean isVideo, String cacheKey) {
         fileIconView.setTag(cacheKey);
+        java.lang.ref.WeakReference<ImageView> reference = new java.lang.ref.WeakReference<>(fileIconView);
+        Resources resources = context.getApplicationContext().getResources();
         iconLoaderService.execute(() -> {
-            if (!cacheKey.equals(fileIconView.getTag())) return;
+            ImageView current = reference.get();
+            if (current == null || !cacheKey.equals(current.getTag())) return;
             Bitmap bitmap = isVideo ? loadVideoThumbnail(path) : loadImageThumbnail(path);
-            if (bitmap == null || !cacheKey.equals(fileIconView.getTag())) return;
-            Drawable icon = new BitmapDrawable(context.getResources(), bitmap);
+            if (bitmap == null) return;
+            Drawable icon = new BitmapDrawable(resources, bitmap);
             iconCache.put(cacheKey, icon);
-            context.runOnUiThread(() -> {
-                if (cacheKey.equals(fileIconView.getTag())) fileIconView.setImageDrawable(icon);
+            MAIN.post(() -> {
+                ImageView target = reference.get();
+                if (target != null && cacheKey.equals(target.getTag())) target.setImageDrawable(copyIcon(icon, target.getResources()));
             });
         });
     }
@@ -244,31 +263,16 @@ public class FileIconLoader {
     }
 
     private Drawable copyIcon(Drawable icon) {
+        return copyIcon(icon, context.getResources());
+    }
+
+    private static Drawable copyIcon(Drawable icon, Resources resources) {
         Drawable.ConstantState state = icon == null ? null : icon.getConstantState();
-        return state == null ? icon : state.newDrawable(context.getResources()).mutate();
+        return state == null ? icon : state.newDrawable(resources).mutate();
     }
 
     private static Bitmap loadImageThumbnail(String path) {
-        try {
-            BitmapFactory.Options options = new BitmapFactory.Options();
-            options.inJustDecodeBounds = true;
-            BitmapFactory.decodeFile(path, options);
-
-            int width = options.outWidth;
-            int height = options.outHeight;
-            int scale = 1;
-            while (Math.max(width, height) / 2 >= 192) {
-                width /= 2;
-                height /= 2;
-                scale *= 2;
-            }
-
-            options.inSampleSize = scale;
-            options.inJustDecodeBounds = false;
-            return BitmapFactory.decodeFile(path, options);
-        } catch (Throwable t) {
-            return null;
-        }
+        return io.github.abdurazaaqmohammed.utils.BitmapPreview.decode(path, 192, false);
     }
 
     private static Bitmap loadVideoThumbnail(String path) {

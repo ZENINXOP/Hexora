@@ -21,13 +21,17 @@
                 android:layout_width="match_parent"
                 android:layout_height="?attr/actionBarSize"
                 android:background="?attr/colorSurface"
+                app:titleTextColor="?attr/colorOnSurface"
+                app:subtitleTextColor="?attr/colorOnSurfaceVariant"
                 app:subtitleTextAppearance="@style/ToolbarSmallSubtitle"
-                app:popupTheme="@style/AppTheme.PopupOverlay">
+                app:popupTheme="@style/ThemeOverlay.Hexora.EditorPopup">
 
                 <LinearLayout
+                    android:id="@+id/dex_editor_actions"
                     android:layout_width="wrap_content"
                     android:layout_height="match_parent"
                     android:layout_gravity="end"
+                    android:visibility="gone"
                     android:orientation="horizontal">
 
                     <ImageButton
@@ -37,6 +41,7 @@
                         android:layout_height="match_parent"
                         android:background="?attr/selectableItemBackgroundBorderless"
                         android:src="@drawable/undo_24px"
+                        app:tint="?attr/colorOnSurface"
                         android:contentDescription="@string/undo"/>
 
                     <ImageButton
@@ -47,6 +52,7 @@
                         android:background="?attr/selectableItemBackgroundBorderless"
                         android:src="@drawable/undo_24px"
                         android:scaleX="-1"
+                        app:tint="?attr/colorOnSurface"
                         android:contentDescription="@string/redo"/>
 
                     <ImageButton
@@ -57,6 +63,7 @@
                         android:layout_height="match_parent"
                         android:background="?attr/selectableItemBackgroundBorderless"
                         android:src="@drawable/save_24px"
+                        app:tint="?attr/colorOnSurface"
                         android:contentDescription="@string/save"/>
 
                     <ImageButton
@@ -65,6 +72,7 @@
                         android:layout_height="match_parent"
                         android:background="?attr/selectableItemBackgroundBorderless"
                         android:src="@drawable/editor_text_select_start"
+                        app:tint="?attr/colorOnSurface"
                         android:contentDescription="@string/edit"/>
 
                     <ImageButton
@@ -73,47 +81,12 @@
                         android:layout_height="match_parent"
                         android:background="?attr/selectableItemBackgroundBorderless"
                         android:src="@drawable/baseline_more_vert_24"
+                        app:tint="?attr/colorOnSurface"
                         android:contentDescription="@string/file_options"/>
 
                 </LinearLayout>
             </androidx.appcompat.widget.Toolbar>
 
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="48dp"
-                android:background="?attr/colorSurface"
-                android:orientation="horizontal">
-
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/dex_classes"
-                    style="@style/Widget.Material3.Button.TextButton"
-                    android:layout_width="0dp"
-                    android:layout_height="match_parent"
-                    android:layout_weight="1"
-                    android:insetTop="0dp"
-                    android:insetBottom="0dp"
-                    android:text="@string/dex_classes" />
-
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/dex_navigation"
-                    style="@style/Widget.Material3.Button.TextButton"
-                    android:layout_width="0dp"
-                    android:layout_height="match_parent"
-                    android:layout_weight="1"
-                    android:insetTop="0dp"
-                    android:insetBottom="0dp"
-                    android:text="@string/navigation" />
-
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/dex_code_theme"
-                    style="@style/Widget.Material3.Button.TextButton"
-                    android:layout_width="0dp"
-                    android:layout_height="match_parent"
-                    android:layout_weight="1"
-                    android:insetTop="0dp"
-                    android:insetBottom="0dp"
-                    android:text="@string/dex_code_theme" />
-            </LinearLayout>
         </com.google.android.material.appbar.AppBarLayout>
 
         <FrameLayout
@@ -177,12 +150,20 @@
             android:id="@+id/drawer_toolbar"
             android:layout_width="match_parent"
             android:layout_height="?attr/actionBarSize"
+            android:background="?attr/colorSurface"
+            app:titleTextColor="?attr/colorOnSurface"
+            app:subtitleTextColor="?attr/colorOnSurfaceVariant"
+            app:popupTheme="@style/ThemeOverlay.Hexora.EditorPopup"
             app:title="@string/opened_classes" />
 
         <modder.hub.dexeditor.views.FastScrollerRecyclerView
             android:id="@+id/tabs_recycler_view"
             android:layout_width="match_parent"
             android:layout_height="0dp"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp"
+            android:paddingBottom="8dp"
+            android:clipToPadding="false"
             android:layout_weight="1" />
 
         <View

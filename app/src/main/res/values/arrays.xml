@@ -17,22 +17,6 @@
         <item>35</item>
     </integer-array>
 
-    <string-array name="theme_entries">
-        <item>Dracula</item>
-        <item>Eclipse</item>
-        <item>VS2019</item>
-        <item>GitHub</item>
-        <item>NotepadXX</item>
-    </string-array>
-
-    <string-array name="theme_values">
-        <item>drac</item>
-        <item>ecl</item>
-        <item>vs</item>
-        <item>gh</item>
-        <item>np</item>
-    </string-array>
-
     <string-array name="install_locations">
         <item>Auto</item>
         <item>Internal Only</item>

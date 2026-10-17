@@ -114,6 +114,7 @@ public class TextActionWindow extends EditorTextActionWindow implements View.OnL
 	
 	private final Map<String, ImageButton> buttonMap = new HashMap<>();
 	private final ArrayList<String> menuItems = new ArrayList<>();
+    private String appliedMenuConfig;
 	private static final Set<String> VALID_TLDS = new HashSet<>();
 	
 	static {
@@ -212,6 +213,12 @@ public class TextActionWindow extends EditorTextActionWindow implements View.OnL
 	@Override
 	public void show() {
 		if (rootView == null) return;
+        String config = codeEditor.getContext().getSharedPreferences("editor_prefs", Context.MODE_PRIVATE)
+                .getString("menu_order", null);
+        if (!java.util.Objects.equals(config, appliedMenuConfig)) {
+            loadMenuItemsFromJson();
+            initializeButtons((ViewGroup) rootView);
+        }
 		updateButtonStates();
 		applyColorScheme();
 		// Sora measures its original five-button panel. Measure our actual,
@@ -234,23 +241,7 @@ public class TextActionWindow extends EditorTextActionWindow implements View.OnL
 		
 		// 3. If not exists, save default config first
 		if (jsonConfig == null) {
-			jsonConfig = 
-			"[" +
-			"{\"id\":\"panel_btn_select_all\",\"title\":\"Select All\",\"disabled\":false}," +
-			"{\"id\":\"panel_btn_copy\",\"title\":\"Copy\",\"disabled\":false}," +
-			"{\"id\":\"panel_btn_paste\",\"title\":\"Paste\",\"disabled\":false}," +
-			"{\"id\":\"id_btn\",\"title\":\"ID\",\"disabled\":false}," +
-			"{\"id\":\"goto_id_btn\",\"title\":\"Goto ID\",\"disabled\":false}," +
-			"{\"id\":\"goto_btn\",\"title\":\"Go To\",\"disabled\":false}," +
-			"{\"id\":\"translate_btn\",\"title\":\"Translate\",\"disabled\":false}," +
-			"{\"id\":\"panel_btn_cut\",\"title\":\"Cut\",\"disabled\":false}," +
-			"{\"id\":\"comment_btn\",\"title\":\"Toggle comment\",\"disabled\":false}," +
-			"{\"id\":\"openLink_btn\",\"title\":\"Open link\",\"disabled\":false}," +
-			"{\"id\":\"share_btn\",\"title\":\"Share\",\"disabled\":false}," +
-			"{\"id\":\"panel_btn_long_select\",\"title\":\"Long Select\",\"disabled\":false}," +
-			"{\"id\":\"delete_btn\",\"title\":\"Delete\",\"disabled\":false}," +
-			"{\"id\":\"customize_btn\",\"title\":\"Customize\",\"disabled\":false}" +
-			"]";
+			jsonConfig = io.github.abdurazaaqmohammed.ui.editor.FloatingMenuDefaults.create().toString();
 			prefs.edit().putString("menu_order", jsonConfig).apply();
 		}
 		
@@ -285,22 +276,10 @@ public class TextActionWindow extends EditorTextActionWindow implements View.OnL
 		} catch (Exception e) {
 			// Fallback to default order (without titles)
 			menuItems.clear();
-			menuItems.add("panel_btn_select_all");
-			menuItems.add("panel_btn_copy");
-			menuItems.add("panel_btn_paste");
-			menuItems.add("id_btn");
-			menuItems.add("goto_id_btn");
-			menuItems.add("goto_btn");
-			menuItems.add("translate_btn");
-			menuItems.add("panel_btn_cut");
-			menuItems.add("comment_btn");
-			menuItems.add("openLink_btn");
-			menuItems.add("share_btn");
-			menuItems.add("panel_btn_long_select");
-			menuItems.add("delete_btn");
-			menuItems.add("id_btn");
-			menuItems.add("goto_id_btn");
+            JSONArray defaults = io.github.abdurazaaqmohammed.ui.editor.FloatingMenuDefaults.create();
+            for (int index = 0; index < defaults.length(); index++) menuItems.add(defaults.optJSONObject(index).optString("id"));
 		}
+        appliedMenuConfig = prefs.getString("menu_order", null);
 	}
 	
 		private boolean isMenuIdDisabled(JSONArray jsonArray, String id) {
@@ -372,6 +351,10 @@ public class TextActionWindow extends EditorTextActionWindow implements View.OnL
 	
 	private void initializeButtons(ViewGroup parent) {
 		parent.removeAllViews();
+        buttonMap.clear();
+        copyButton = cutButton = pasteButton = selectAllButton = gotoButton = longSelectButton = null;
+        translateButton = commentButton = shareButton = openLinkButton = customizeButton = deleteButton = null;
+        arscIdButton = arscGotoIdButton = null;
 		Context context = codeEditor.getContext();
 		
 		HorizontalScrollView scrollView = new HorizontalScrollView(context);
