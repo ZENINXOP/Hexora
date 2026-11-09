@@ -102,6 +102,9 @@ public class MediaPlayerActivity extends BaseActivity implements
 
         String playPath = getIntent().getStringExtra("play_path");
         if (playPath != null && savedInstanceState == null) {
+            // 新播放界面接管视频 Surface 所有权：清掉上一界面可能残留（已失效）的 Surface，
+            // 避免复用旧 Surface 或旧界面延迟 onDestroy 误清新 Surface 导致黑屏。
+            playerManager.resetSurface(this);
             playerManager.playFile(playPath, getIntent().getStringArrayListExtra("play_queue"));
         } else if (playerManager.getState() == PlayerManager.PlayState.IDLE && playerManager.getQueue().isEmpty()) {
             finish();
@@ -435,7 +438,7 @@ public class MediaPlayerActivity extends BaseActivity implements
 
     @Override
     public void surfaceCreated(SurfaceHolder holder) {
-        playerManager.setSurface(holder.getSurface());
+        playerManager.setSurface(holder.getSurface(), this);
         if (playerManager.getState() == PlayerManager.PlayState.ERROR || playerManager.getState() == PlayerManager.PlayState.STOPPED) {
             playerManager.play();
         }
@@ -446,7 +449,7 @@ public class MediaPlayerActivity extends BaseActivity implements
         fitVideo();
     }
     @Override public void surfaceDestroyed(@NonNull SurfaceHolder holder) {
-        playerManager.setSurface(null);
+        playerManager.setSurface(null, this);
     }
 
     private void setupQueueList() {
@@ -678,7 +681,7 @@ public class MediaPlayerActivity extends BaseActivity implements
         playerManager.unregisterCallback(this);
         playerManager.setVideoSizeChangedListener(null);
         autoHideHandler.removeCallbacks(autoHideRunnable);
-        playerManager.setSurface(null);
+        playerManager.setSurface(null, this);
         super.onDestroy();
     }
 

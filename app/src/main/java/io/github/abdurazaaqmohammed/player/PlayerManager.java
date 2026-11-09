@@ -45,7 +45,13 @@ public class PlayerManager {
     private boolean isMuted;
     private int skipDuration = 10000;
     private Surface videoSurface;
+    /** 当前拥有视频 Surface 的界面（Activity），用于识别并忽略旧界面延迟回调，避免误清新 Surface。 */
+    private Object videoSurfaceOwner;
     private boolean isVideo;
+    /** 视频尚未取得可用 Surface 时挂起的待准备项，待 setSurface() 到达后补发 prepare。 */
+    private MediaItem pendingPrepareItem;
+    /** MediaPlayer 是否已完成 onPrepared；未完成前禁止查询时长/进度，否则 native 会报 INVALID_OPERATION(-38)。 */
+    private boolean prepared;
     private int lastVideoWidth;
     private int lastVideoHeight;
     private int resumePosition;
@@ -378,8 +384,10 @@ public class PlayerManager {
             try { mediaPlayer.release(); } catch (Exception ignored) {}
             mediaPlayer = null;
         }
+        prepared = false;
         abandonAudioFocus();
         isVideo = false;
+        pendingPrepareItem = null;
         notifyState(PlayState.STOPPED);
     }
 
@@ -394,12 +402,14 @@ public class PlayerManager {
     public void skipBackward() { seekTo(getCurrentPosition() - skipDuration); }
 
     public int getCurrentPosition() {
-        if (mediaPlayer != null) try { return mediaPlayer.getCurrentPosition(); } catch (Exception ignored) {}
+        // 仅在 prepared 之后查询，避免 IDLE 状态下触发 native INVALID_OPERATION(-38)。
+        if (prepared && mediaPlayer != null) try { return mediaPlayer.getCurrentPosition(); } catch (Exception ignored) {}
         return 0;
     }
 
     public int getDuration() {
-        if (mediaPlayer != null) try { return mediaPlayer.getDuration(); } catch (Exception ignored) {}
+        // 仅在 prepared 之后查询，避免 IDLE 状态下触发 native INVALID_OPERATION(-38)。
+        if (prepared && mediaPlayer != null) try { return mediaPlayer.getDuration(); } catch (Exception ignored) {}
         return 0;
     }
 
@@ -424,12 +434,48 @@ public class PlayerManager {
         }
     }
 
-    public void setSurface(Surface surface) {
-        this.videoSurface = surface;
+    /**
+     * 新的播放界面接管视频 Surface 所有权：清空上一界面遗留（可能已失效）的 Surface，
+     * 使随后的 playCurrent() 因无可用 Surface 而挂起，等待本界面 surfaceCreated() 后补发 prepare。
+     * 旧界面此后再调用 setSurface(null, oldOwner) 将被忽略，不会误清本界面的 Surface。
+     */
+    public void resetSurface(Object owner) {
+        this.videoSurfaceOwner = owner;
+        this.videoSurface = null;
         if (mediaPlayer != null) {
-            try {
-                mediaPlayer.setSurface(surface);
-            } catch (Exception ignored) {}
+            try { mediaPlayer.setSurface(null); } catch (Exception ignored) {}
+        }
+    }
+
+    /**
+     * 设置视频 Surface，并绑定所有者 owner（通常是 MediaPlayerActivity 实例）。
+     * 过滤已失效的 Surface（Activity 重建期间旧 Surface isValid()==false，直接用于 prepare 会触发
+     * native INVALID_OPERATION(-38)）；并忽略“非当前所有者”传入的 null，防止旧界面延迟执行的
+     * onDestroy/surfaceDestroyed 把新界面的 Surface 清空造成黑屏（有声音无画面）。
+     */
+    public void setSurface(Surface surface, Object owner) {
+        boolean usable = surface != null && surface.isValid();
+        if (!usable) {
+            // 仅允许当前所有者清除；旧界面的延迟回调（owner 不一致）一律忽略。
+            if (owner != null && videoSurfaceOwner != null && owner != videoSurfaceOwner) return;
+            this.videoSurface = null;
+            this.videoSurfaceOwner = null;
+            if (mediaPlayer != null) {
+                try { mediaPlayer.setSurface(null); } catch (Exception ignored) {}
+            }
+            return;
+        }
+        // 有效 Surface：提供者即成为当前所有者。
+        this.videoSurface = surface;
+        this.videoSurfaceOwner = owner;
+        if (mediaPlayer != null) {
+            try { mediaPlayer.setSurface(surface); } catch (Exception ignored) {}
+        }
+        // 之前因缺少可用 Surface 而挂起的视频，现在 Surface 就绪，补发 prepare。
+        if (pendingPrepareItem != null && mediaPlayer != null) {
+            MediaItem pending = pendingPrepareItem;
+            pendingPrepareItem = null;
+            prepareCurrentItem(pending);
         }
     }
 
@@ -447,6 +493,8 @@ public class PlayerManager {
         if (currentIndex < 0 || currentIndex >= queue.size()) return;
         MediaItem item = queue.get(currentIndex);
         isVideo = item.isVideo;
+        pendingPrepareItem = null;
+        prepared = false;
 
         stopProgressUpdater();
         abandonAudioFocus();
@@ -475,10 +523,11 @@ public class PlayerManager {
                 .setContentType(item.isVideo ? AudioAttributes.CONTENT_TYPE_MOVIE : AudioAttributes.CONTENT_TYPE_MUSIC)
                 .build());
 
-        if (videoSurface != null && isVideo) newPlayer.setSurface(videoSurface);
+        if (isVideo && videoSurface != null && videoSurface.isValid()) newPlayer.setSurface(videoSurface);
 
         newPlayer.setOnPreparedListener(mp -> {
             if (mp != mediaPlayer) return;
+            prepared = true;
             try {
             if (resumePosition > 0 && resumePosition < mp.getDuration()) mp.seekTo(resumePosition);
             resumePosition = 0;
@@ -526,13 +575,31 @@ public class PlayerManager {
             if (videoSizeChangedListener != null) videoSizeChangedListener.onVideoSizeChanged(w, h);
         });
 
+            if (isVideo && (videoSurface == null || !videoSurface.isValid())) {
+                // 视频必须有可用 Surface 才能 prepare，否则 native 会抛 INVALID_OPERATION(-38)。
+                // 此处挂起，等 setSurface() 收到 Surface 后再补发真正的 prepare。
+                pendingPrepareItem = item;
+                notifyState(PlayState.PREPARING);
+                notifyMediaItem(item);
+                return;
+            }
+            prepareCurrentItem(item);
+        } catch (RuntimeException e) {
+            // 真正的 setDataSource/prepare 异常已在 prepareCurrentItem 内部处理，这里只兜底播放器构建期的运行期异常。
+            failPlayback(newPlayer, e);
+        }
+    }
+
+    /** 统一的准备入口：setDataSource + prepareAsync，必须在 Surface 就绪时调用。 */
+    private void prepareCurrentItem(MediaItem item) {
+        try {
             notifyState(PlayState.PREPARING);
             notifyMediaItem(item);
-            if (newPlayer != mediaPlayer) return;
-            newPlayer.setDataSource(appContext, item.uri);
-            newPlayer.prepareAsync();
+            if (mediaPlayer == null) return;
+            mediaPlayer.setDataSource(appContext, item.uri);
+            mediaPlayer.prepareAsync();
         } catch (IOException | RuntimeException e) {
-            failPlayback(newPlayer, e);
+            failPlayback(mediaPlayer, e);
         }
     }
 
@@ -541,6 +608,7 @@ public class PlayerManager {
         stopProgressUpdater();
         try { player.release(); } catch (Exception ignored) {}
         mediaPlayer = null;
+        prepared = false;
         abandonAudioFocus();
         notifyState(PlayState.ERROR);
         notifyError("Cannot play file: " + error.getMessage());
